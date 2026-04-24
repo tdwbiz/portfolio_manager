@@ -68,7 +68,7 @@ WSGI_APPLICATION = 'portfolio_manager.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
-        'NAME': os.environ.get('DB_NAME', 'PortfolioDB'),
+        'NAME': os.environ.get('DB_NAME', 'PortfolioDev'),
         'USER': os.environ.get('DB_USER', ''),
         'PASSWORD': os.environ.get('DB_PASSWORD', ''),
         'HOST': os.environ.get('DB_HOST', 'localhost'),

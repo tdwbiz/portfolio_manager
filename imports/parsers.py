@@ -10,128 +10,227 @@ logger = logging.getLogger(__name__)
 
 
 def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
-    """Parse Interactive Brokers Activity Statement CSV.
-    
-    Detects and imports only the "Trades" section, skipping other sections.
-    
+    """Parse Interactive Brokers CSV — supports two formats:
+
+    1. Activity Statement (multi-section): first column is the section name
+       e.g. "Trades", "Dividends", with a header row then data rows.
+    2. Transaction History (flat export): columns are
+       Section, Row-type, Date, Account, Description, Type, Symbol,
+       Quantity, Price, Currency, Gross Amount, Commission, Net Amount.
+
+    Only Buy and Sell rows are imported; all other rows are skipped.
+
     Args:
         file_path: Path to the IB CSV file.
-        
+
     Returns:
         List of dictionaries with parsed trade data.
     """
     trades: List[Dict[str, Any]] = []
-    in_trades_section: bool = False
-    header: List[str] = []
-    
+
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
             reader = csv.reader(csvfile)
-            
-            for row_num, row in enumerate(reader, start=1):
-                # Skip empty rows
-                if not row or all(cell.strip() == '' for cell in row):
-                    continue
-                
-                row_text = row[0].strip().lower()
-                
-                # Detect section headers
-                if row_text == 'trades':
-                    in_trades_section = True
-                    # Next row should be the header for trades
-                    continue
-                
-                if in_trades_section:
-                    # Check if we've hit a new section (non-empty first column that's not data)
-                    if len(row) > 0 and row[0].strip():
-                        first_cell = row[0].strip().lower()
-                        # If first cell is a known section header and we already have data, stop
-                        if first_cell in ['dividends', 'fx', 'interest', 'journal', 
-                                         'funds', 'misc', 'closed positions', 
-                                         'activity summary', 'account']:
-                            break
-                        # If this looks like a header row (contains typical column names)
-                        if any(col in first_cell.lower() for col in ['date/time', 'symbol', 
-                                                                       'buy/sell', 'quantity', 
-                                                                       't. price']):
-                            header = [cell.strip().lower().replace('/', '_') 
-                                     for cell in row]
-                            continue
-                    
-                    # Parse trade data row
-                    if header and len(row) >= len(header):
-                        try:
-                            trade_data: Dict[str, Any] = {}
-                            
-                            # Map IB columns to Transaction fields
-                            # IB CSV format: Date/Time, Symbol, Buy/Sell, Quantity, T. Price, Comm/Fee, Proceeds, Currency
-                            if len(row) >= 8:
-                                # Parse date/time (format: 2024-01-15 10:30:00)
-                                date_str = row[0].strip()
-                                try:
-                                    dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-                                    trade_data['date'] = dt.date()
-                                except ValueError:
-                                    try:
-                                        dt = datetime.strptime(date_str, '%m/%d/%Y %H:%M:%S')
-                                        trade_data['date'] = dt.date()
-                                    except ValueError:
-                                        logger.warning(f"Row {row_num}: Could not parse date '{date_str}'")
-                                        continue
-                                
-                                # Symbol
-                                trade_data['symbol'] = row[1].strip()
-                                
-                                # Buy/Sell
-                                buy_sell = row[2].strip().upper()
-                                if buy_sell in ('BUY', 'SELL'):
-                                    trade_data['type'] = buy_sell
-                                else:
-                                    logger.warning(f"Row {row_num}: Unknown type '{buy_sell}', skipping")
-                                    continue
-                                
-                                # Quantity
-                                try:
-                                    trade_data['quantity'] = Decimal(row[3].strip())
-                                except Exception:
-                                    logger.warning(f"Row {row_num}: Could not parse quantity '{row[3].strip()}'")
-                                    continue
-                                
-                                # T. Price
-                                try:
-                                    trade_data['price'] = Decimal(row[4].strip())
-                                except Exception:
-                                    logger.warning(f"Row {row_num}: Could not parse price '{row[4].strip()}'")
-                                    continue
-                                
-                                # Comm/Fee
-                                try:
-                                    trade_data['commission'] = Decimal(row[5].strip())
-                                except Exception:
-                                    trade_data['commission'] = Decimal('0.00')
-                                
-                                # Proceeds
-                                try:
-                                    trade_data['amount'] = Decimal(row[6].strip())
-                                except Exception:
-                                    logger.warning(f"Row {row_num}: Could not parse proceeds '{row[6].strip()}'")
-                                    continue
-                                
-                                # Currency
-                                trade_data['currency'] = row[7].strip() if len(row) > 7 else 'USD'
-                                
-                                trades.append(trade_data)
-                                
-                        except Exception as e:
-                            logger.error(f"Row {row_num}: Error parsing trade data: {e}")
-                            continue
-    
+            rows = list(reader)
+
+        if not rows:
+            logger.info("Parsed 0 trades from IB CSV")
+            return trades
+
+        # --- Detect format ---
+        # Transaction History format: first cell of first non-empty row is a
+        # section label (e.g. "Statement") and second cell is "Header" or "Data".
+        first_row = next((r for r in rows if r and any(c.strip() for c in r)), None)
+        is_transaction_history = (
+            first_row is not None
+            and len(first_row) >= 2
+            and first_row[1].strip().lower() in ('header', 'data')
+        )
+
+        if is_transaction_history:
+            trades = _parse_ib_transaction_history(rows)
+        else:
+            trades = _parse_ib_activity_statement(rows)
+
     except FileNotFoundError:
         raise FileNotFoundError(f"File not found: {file_path}")
     except PermissionError:
         raise PermissionError(f"Permission denied: {file_path}")
-    
+
     logger.info(f"Parsed {len(trades)} trades from IB CSV")
+    return trades
+
+
+def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]:
+    """Parse IB Transaction History CSV format.
+
+    Columns (0-based):
+      0  Section ("Transaction History")
+      1  Row type ("Header" / "Data")
+      2  Date (YYYY-MM-DD)
+      3  Account
+      4  Description
+      5  Transaction Type (Buy / Sell / Dividend / …)
+      6  Symbol
+      7  Quantity
+      8  Price
+      9  Price Currency
+      10 Gross Amount
+      11 Commission
+      12 Net Amount
+    """
+    trades: List[Dict[str, Any]] = []
+
+    for row_num, row in enumerate(rows, start=1):
+        if len(row) < 13:
+            continue
+        if row[0].strip() != 'Transaction History' or row[1].strip() != 'Data':
+            continue
+
+        tx_type = row[5].strip()
+        if tx_type not in ('Buy', 'Sell'):
+            continue
+
+        try:
+            date_str = row[2].strip()
+            trade_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            logger.warning(f"Row {row_num}: Could not parse date '{row[2].strip()}'")
+            continue
+
+        symbol = row[6].strip()
+        if not symbol or symbol == '-':
+            logger.warning(f"Row {row_num}: Missing symbol, skipping")
+            continue
+
+        try:
+            quantity = abs(Decimal(row[7].strip()))
+        except Exception:
+            logger.warning(f"Row {row_num}: Could not parse quantity '{row[7].strip()}'")
+            continue
+
+        try:
+            price = Decimal(row[8].strip())
+        except Exception:
+            logger.warning(f"Row {row_num}: Could not parse price '{row[8].strip()}'")
+            continue
+
+        currency = row[9].strip() if row[9].strip() not in ('', '-') else 'USD'
+
+        try:
+            amount = abs(Decimal(row[10].strip()))
+        except Exception:
+            logger.warning(f"Row {row_num}: Could not parse gross amount '{row[10].strip()}'")
+            continue
+
+        try:
+            commission = abs(Decimal(row[11].strip()))
+        except Exception:
+            commission = Decimal('0.00')
+
+        trades.append({
+            'date': trade_date,
+            'symbol': symbol,
+            'type': tx_type.upper(),
+            'quantity': quantity,
+            'price': price,
+            'commission': commission,
+            'amount': amount,
+            'currency': currency,
+        })
+
+    return trades
+
+
+def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
+    """Parse IB Activity Statement CSV format (multi-section with "Trades" header)."""
+    trades: List[Dict[str, Any]] = []
+    in_trades_section: bool = False
+    header: List[str] = []
+
+    for row_num, row in enumerate(rows, start=1):
+        if not row or all(cell.strip() == '' for cell in row):
+            continue
+
+        row_text = row[0].strip().lower()
+
+        if row_text == 'trades':
+            in_trades_section = True
+            continue
+
+        if in_trades_section:
+            if len(row) > 0 and row[0].strip():
+                first_cell = row[0].strip().lower()
+                if first_cell in ['dividends', 'fx', 'interest', 'journal',
+                                   'funds', 'misc', 'closed positions',
+                                   'activity summary', 'account']:
+                    break
+                if any(col in first_cell for col in ['date/time', 'symbol',
+                                                      'buy/sell', 'quantity',
+                                                      't. price']):
+                    header = [cell.strip().lower().replace('/', '_') for cell in row]
+                    continue
+
+            if header and len(row) >= len(header):
+                try:
+                    if len(row) >= 8:
+                        date_str = row[0].strip()
+                        try:
+                            dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                            trade_date = dt.date()
+                        except ValueError:
+                            try:
+                                dt = datetime.strptime(date_str, '%m/%d/%Y %H:%M:%S')
+                                trade_date = dt.date()
+                            except ValueError:
+                                logger.warning(f"Row {row_num}: Could not parse date '{date_str}'")
+                                continue
+
+                        symbol = row[1].strip()
+                        buy_sell = row[2].strip().upper()
+                        if buy_sell not in ('BUY', 'SELL'):
+                            logger.warning(f"Row {row_num}: Unknown type '{buy_sell}', skipping")
+                            continue
+
+                        try:
+                            quantity = Decimal(row[3].strip())
+                        except Exception:
+                            logger.warning(f"Row {row_num}: Could not parse quantity")
+                            continue
+
+                        try:
+                            price = Decimal(row[4].strip())
+                        except Exception:
+                            logger.warning(f"Row {row_num}: Could not parse price")
+                            continue
+
+                        try:
+                            commission = Decimal(row[5].strip())
+                        except Exception:
+                            commission = Decimal('0.00')
+
+                        try:
+                            amount = Decimal(row[6].strip())
+                        except Exception:
+                            logger.warning(f"Row {row_num}: Could not parse proceeds")
+                            continue
+
+                        currency = row[7].strip() if len(row) > 7 else 'USD'
+
+                        trades.append({
+                            'date': trade_date,
+                            'symbol': symbol,
+                            'type': buy_sell,
+                            'quantity': quantity,
+                            'price': price,
+                            'commission': commission,
+                            'amount': amount,
+                            'currency': currency,
+                        })
+                except Exception as e:
+                    logger.error(f"Row {row_num}: Error parsing trade data: {e}")
+                    continue
+
     return trades
 
 

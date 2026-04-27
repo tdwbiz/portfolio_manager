@@ -30,7 +30,7 @@ class Transaction(models.Model):
         related_name='transactions'
     )
     date = models.DateField()
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     type = models.CharField(max_length=10, choices=TYPE_CHOICES)
     quantity = models.DecimalField(max_digits=12, decimal_places=4)
     price = models.DecimalField(max_digits=12, decimal_places=4)

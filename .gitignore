@@ -45,6 +45,8 @@ staticfiles/
 # Broker import files (may contain sensitive financial data)
 files_in/
 files_done/
+inbox/
+processed/
 
 # IDE
 .idea/

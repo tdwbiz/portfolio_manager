@@ -30,13 +30,25 @@ class ImportStatementsCommandTest(TestCase):
             "2024-01-19 10:00:00,TSLA,BUY,15,250.00,2.99,3750.00,USD\n"
         )
         
+        # Real RBC Activity Export format — quoted CSV, exchange rate header,
+        # "Month DD, YYYY" dates, commission hidden in price×qty vs value diff
         self.rbc_csv_content: str = (
-            "Date,Symbol,Description,Type,Quantity,Price,Commission,Total,Currency\n"
-            "2024-01-15,AAPL,Apple Inc,BUY,10,150.50,2.99,1505.00,USD\n"
-            "2024-01-16,GOOGL,Alphabet Inc,SELL,5,2800.00,2.99,14000.00,USD\n"
-            "2024-01-17,MSFT,Microsoft Corp,BUY,20,300.25,2.99,6005.00,USD\n"
-            "2024-01-18,AMZN,Amazon.com Inc,SELL,8,3300.00,2.99,26400.00,USD\n"
-            "2024-01-19,TSLA,Tesla Inc,BUY,15,250.00,2.99,3750.00,USD\n"
+            '"Activity Export as of January 15, 2024"\n'
+            '\n'
+            '"Exchange Rate: 1 USD = 1.3500 CAD"\n'
+            '\n'
+            '"Date","Activity","Symbol","Symbol Description","Quantity","Price",'
+            '"Settlement Date","Account","Value","Currency","Description"\n'
+            '"January 15, 2024","Buy","AAPL","Apple Inc.","10","150.50",'
+            '"January 17, 2024","123456","1495.05","USD","Buy AAPL"\n'
+            '"January 16, 2024","Sell","GOOGL","Alphabet Inc.","5","2800.00",'
+            '"January 18, 2024","123456","13990.05","USD","Sell GOOGL"\n'
+            '"January 17, 2024","Buy","MSFT","Microsoft Corp.","20","300.25",'
+            '"January 19, 2024","123456","5995.05","USD","Buy MSFT"\n'
+            '"January 18, 2024","Sell","AMZN","Amazon.com Inc.","8","3300.00",'
+            '"January 20, 2024","123456","26390.05","USD","Sell AMZN"\n'
+            '"January 19, 2024","Buy","TSLA","Tesla Inc.","15","250.00",'
+            '"January 21, 2024","123456","3740.05","USD","Buy TSLA"\n'
         )
 
     def _create_temp_csv(self, content: str) -> str:
@@ -63,7 +75,7 @@ class ImportStatementsCommandTest(TestCase):
             transactions: Transaction = Transaction.objects.filter(statement=statements.first())
             self.assertEqual(transactions.count(), 5)
             
-            # Verify first transaction
+            # Verify first transaction (AAPL)
             first_transaction: Transaction = transactions.first()
             self.assertEqual(first_transaction.symbol, 'AAPL')
             self.assertEqual(first_transaction.type, 'BUY')
@@ -72,6 +84,8 @@ class ImportStatementsCommandTest(TestCase):
             self.assertEqual(first_transaction.commission, Decimal('2.9900'))
             self.assertEqual(first_transaction.amount, Decimal('1505.00'))
             self.assertEqual(first_transaction.currency, 'USD')
+            self.assertEqual(first_transaction.exchange_rate_cad, Decimal('1.000000'))
+            self.assertEqual(first_transaction.amount_cad, Decimal('1505.00'))
         finally:
             os.unlink(file_path)
 
@@ -90,15 +104,19 @@ class ImportStatementsCommandTest(TestCase):
             transactions: Transaction = Transaction.objects.filter(statement=statements.first())
             self.assertEqual(transactions.count(), 5)
             
-            # Verify first transaction
+            # Verify first transaction (AAPL)
+            # commission = abs(10 * 150.50 - 1495.05) = 9.95
+            # amount_cad = 1495.05 * 1.35 = 2018.3175 → 2018.32
             first_transaction: Transaction = transactions.first()
             self.assertEqual(first_transaction.symbol, 'AAPL')
             self.assertEqual(first_transaction.type, 'BUY')
             self.assertEqual(first_transaction.quantity, Decimal('10.0000'))
             self.assertEqual(first_transaction.price, Decimal('150.5000'))
-            self.assertEqual(first_transaction.commission, Decimal('2.9900'))
-            self.assertEqual(first_transaction.amount, Decimal('1505.00'))
+            self.assertEqual(first_transaction.commission, Decimal('9.95'))
+            self.assertEqual(first_transaction.amount, Decimal('1495.05'))
             self.assertEqual(first_transaction.currency, 'USD')
+            self.assertEqual(first_transaction.exchange_rate_cad, Decimal('1.350000'))
+            self.assertEqual(first_transaction.amount_cad, Decimal('2018.32'))
         finally:
             os.unlink(file_path)
 

@@ -1,4 +1,5 @@
 from django.db import models
+from decimal import Decimal
 
 
 class BrokerStatement(models.Model):
@@ -37,6 +38,21 @@ class Transaction(models.Model):
     commission = models.DecimalField(max_digits=12, decimal_places=4)
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     currency = models.CharField(max_length=3, default='USD')
+    exchange_rate_cad = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))
+    amount_cad = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
 
     def __str__(self):
         return f"{self.type} {self.quantity} {self.symbol} on {self.date}"
+
+
+class FileImportLog(models.Model):
+    filename = models.CharField(max_length=255)
+    broker = models.CharField(max_length=3)  # IB or RBC
+    imported_at = models.DateTimeField(auto_now_add=True)
+    records_imported = models.IntegerField(default=0)
+    records_skipped = models.IntegerField(default=0)
+    status = models.CharField(max_length=20, default='success')  # success / partial / error
+    error_message = models.TextField(blank=True, default='')
+
+    def __str__(self):
+        return f"{self.filename} - {self.status}"

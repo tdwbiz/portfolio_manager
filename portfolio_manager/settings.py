@@ -119,6 +119,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
+# Auto-import inbox/processed directories
+IMPORT_INBOX_DIR = BASE_DIR / 'inbox'
+IMPORT_PROCESSED_DIR = BASE_DIR / 'processed'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

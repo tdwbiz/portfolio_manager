@@ -137,6 +137,7 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             'commission': commission,
             'amount': amount,
             'currency': currency,
+            'exchange_rate_cad': Decimal('1.000000'),
         })
 
     return trades
@@ -226,6 +227,7 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             'commission': commission,
                             'amount': amount,
                             'currency': currency,
+                            'exchange_rate_cad': Decimal('1.000000'),
                         })
                 except Exception as e:
                     logger.error(f"Row {row_num}: Error parsing trade data: {e}")
@@ -234,122 +236,114 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
     return trades
 
 
-def parse_rbc_csv(file_path: str) -> List[Dict[str, Any]]:
-    """Parse RBC Direct Investing trade confirmation CSV.
-    
-    Maps RBC-specific columns to Transaction fields.
-    
+def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
+    """Parse RBC Activity Export CSV.
+
+    Handles the real RBC format: quoted CSV with a metadata header block,
+    an exchange rate line ("Exchange Rate: 1 USD = X.XXXX CAD"), a data
+    header row, then trade data rows.
+
     Args:
         file_path: Path to the RBC CSV file.
-        
+
     Returns:
-        List of dictionaries with parsed trade data.
+        Tuple of (trades_list, usd_to_cad_rate).
+        Rate is Decimal('1.0') if not found in file.
     """
+    import re as _re
+
     trades: List[Dict[str, Any]] = []
-    header: List[str] = []
-    
+    usd_to_cad_rate: Decimal = Decimal('1.0')
+    found_header: bool = False
+
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
             reader = csv.reader(csvfile)
-            
+
             for row_num, row in enumerate(reader, start=1):
-                # Skip empty rows
                 if not row or all(cell.strip() == '' for cell in row):
                     continue
-                
-                # First non-empty row is the header
-                if not header:
-                    header = [cell.strip().lower().replace(' ', '_') for cell in row]
+
+                # Extract exchange rate before anything else
+                exchange_rate_match = _re.search(
+                    r'Exchange Rate:\s*1\s*USD\s*=\s*([\d.]+)\s*CAD',
+                    ' '.join(row),
+                )
+                if exchange_rate_match:
+                    usd_to_cad_rate = Decimal(exchange_rate_match.group(1))
                     continue
-                
-                # Parse data row
-                if header and len(row) >= len(header):
-                    try:
-                        trade_data: Dict[str, Any] = {}
-                        
-                        # Create a mapping from header to values
-                        row_dict: Dict[str, str] = {}
-                        for i, col_name in enumerate(header):
-                            if i < len(row):
-                                row_dict[col_name] = row[i].strip()
-                        
-                        # Map RBC columns to Transaction fields
-                        # RBC typical columns: Date, Symbol, Description, Type, Quantity, Price, Commission, Total, Currency
-                        
-                        # Date
-                        date_str = row_dict.get('date', '')
-                        if date_str:
-                            try:
-                                dt = datetime.strptime(date_str, '%Y-%m-%d')
-                                trade_data['date'] = dt.date()
-                            except ValueError:
-                                try:
-                                    dt = datetime.strptime(date_str, '%m/%d/%Y')
-                                    trade_data['date'] = dt.date()
-                                except ValueError:
-                                    try:
-                                        dt = datetime.strptime(date_str, '%d/%m/%Y')
-                                        trade_data['date'] = dt.date()
-                                    except ValueError:
-                                        logger.warning(f"Row {row_num}: Could not parse date '{date_str}'")
-                                        continue
-                        else:
-                            logger.warning(f"Row {row_num}: Missing date")
-                            continue
-                        
-                        # Symbol
-                        trade_data['symbol'] = row_dict.get('symbol', '')
-                        
-                        # Type (Buy/Sell)
-                        trade_type = row_dict.get('type', '').upper()
-                        if 'BUY' in trade_type or 'PURCHASE' in trade_type:
-                            trade_data['type'] = 'BUY'
-                        elif 'SELL' in trade_type or 'SALE' in trade_type:
-                            trade_data['type'] = 'SELL'
-                        else:
-                            logger.warning(f"Row {row_num}: Unknown type '{trade_type}', skipping")
-                            continue
-                        
-                        # Quantity
-                        try:
-                            trade_data['quantity'] = Decimal(row_dict.get('quantity', '0'))
-                        except Exception:
-                            logger.warning(f"Row {row_num}: Could not parse quantity '{row_dict.get('quantity')}'")
-                            continue
-                        
-                        # Price
-                        try:
-                            trade_data['price'] = Decimal(row_dict.get('price', '0'))
-                        except Exception:
-                            logger.warning(f"Row {row_num}: Could not parse price '{row_dict.get('price')}'")
-                            continue
-                        
-                        # Commission
-                        try:
-                            trade_data['commission'] = Decimal(row_dict.get('commission', '0'))
-                        except Exception:
-                            trade_data['commission'] = Decimal('0.00')
-                        
-                        # Amount (Total)
-                        try:
-                            trade_data['amount'] = Decimal(row_dict.get('total', '0'))
-                        except Exception:
-                            logger.warning(f"Row {row_num}: Could not parse total '{row_dict.get('total')}'")
-                            continue
-                        
-                        # Currency
-                        trade_data['currency'] = row_dict.get('currency', 'USD')
-                        
-                        trades.append(trade_data)
-                        
-                    except Exception as e:
-                        logger.error(f"Row {row_num}: Error parsing RBC trade data: {e}")
-                        continue
-    
+
+                if not found_header:
+                    # Detect data header row by first column value
+                    if row[0].strip().strip('"') == 'Date':
+                        found_header = True
+                    continue
+
+                # Parse data rows — require at least 11 columns
+                if len(row) < 11:
+                    continue
+
+                cleaned = [cell.strip().strip('"') for cell in row]
+
+                activity = cleaned[1]
+                if activity == 'Buy':
+                    tx_type = 'BUY'
+                elif activity == 'Sell':
+                    tx_type = 'SELL'
+                elif activity == 'Dividends':
+                    tx_type = 'DIV'
+                else:
+                    continue  # skip Others
+
+                try:
+                    trade_date = datetime.strptime(cleaned[0], '%B %d, %Y').date()
+                except ValueError:
+                    logger.warning(f"Row {row_num}: Could not parse date '{cleaned[0]}'")
+                    continue
+
+                def _to_decimal(val: str) -> Decimal:
+                    """Strip commas and treat dash/empty as zero."""
+                    v = val.replace(',', '').strip()
+                    if v in ('', '-', '--', 'N/A'):
+                        return Decimal('0')
+                    return Decimal(v)
+
+                try:
+                    quantity = abs(_to_decimal(cleaned[4]))
+                    price = _to_decimal(cleaned[5])
+                    amount = abs(_to_decimal(cleaned[8]))
+                except Exception:
+                    logger.warning(
+                        f"Row {row_num}: Could not parse numeric fields "
+                        f"(qty={cleaned[4]!r}, price={cleaned[5]!r}, value={cleaned[8]!r}), skipping"
+                    )
+                    continue
+
+                # Commission = difference between gross and net value
+                gross = quantity * price
+                commission = abs(gross - amount).quantize(Decimal('0.01'))
+                if commission < 0 or commission > 50:
+                    commission = Decimal('0.00')
+
+                currency = cleaned[9] if len(cleaned) > 9 else 'USD'
+                symbol = cleaned[2]
+
+                trades.append({
+                    'date': trade_date,
+                    'symbol': symbol,
+                    'type': tx_type,
+                    'quantity': quantity,
+                    'price': price,
+                    'commission': commission,
+                    'amount': amount,
+                    'currency': currency,
+                    'exchange_rate_cad': usd_to_cad_rate,
+                })
+
     except FileNotFoundError:
         raise FileNotFoundError(f"File not found: {file_path}")
     except PermissionError:
         raise PermissionError(f"Permission denied: {file_path}")
-    
+
     logger.info(f"Parsed {len(trades)} trades from RBC CSV")
-    return trades
+    return trades, usd_to_cad_rate

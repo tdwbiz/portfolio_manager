@@ -49,10 +49,11 @@ class Command(BaseCommand):
 
         # Parse CSV
         self.stdout.write(f"Parsing {broker} CSV file: {file_path}")
+        exchange_rate_cad: Decimal = Decimal('1.000000')
         if broker == 'IB':
             trades: List[Dict[str, Any]] = parse_ib_csv(file_path)
         elif broker == 'RBC':
-            trades: List[Dict[str, Any]] = parse_rbc_csv(file_path)
+            trades, exchange_rate_cad = parse_rbc_csv(file_path)
         else:
             raise CommandError(f"Unsupported broker type: {broker}")
 
@@ -102,6 +103,11 @@ class Command(BaseCommand):
 
                     # Create transaction
                     try:
+                        rate = trade.get('exchange_rate_cad', exchange_rate_cad)
+                        if trade.get('currency', 'USD') == 'CAD':
+                            amount_cad = trade['amount']
+                        else:
+                            amount_cad = (trade['amount'] * rate).quantize(Decimal('0.01'))
                         Transaction.objects.create(
                             statement=statement,
                             date=trade['date'],
@@ -112,6 +118,8 @@ class Command(BaseCommand):
                             commission=trade.get('commission', Decimal('0.00')),
                             amount=trade['amount'],
                             currency=trade.get('currency', 'USD'),
+                            exchange_rate_cad=rate,
+                            amount_cad=amount_cad,
                         )
                         imported_count += 1
                     except Exception as e:

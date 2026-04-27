@@ -42,6 +42,10 @@ db.sqlite3-journal
 media/
 staticfiles/
 
+# Broker import files (may contain sensitive financial data)
+files_in/
+files_done/
+
 # IDE
 .idea/
 .vscode/

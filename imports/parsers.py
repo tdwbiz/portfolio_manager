@@ -301,12 +301,22 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                     logger.warning(f"Row {row_num}: Could not parse date '{cleaned[0]}'")
                     continue
 
+                def _to_decimal(val: str) -> Decimal:
+                    """Strip commas and treat dash/empty as zero."""
+                    v = val.replace(',', '').strip()
+                    if v in ('', '-', '--', 'N/A'):
+                        return Decimal('0')
+                    return Decimal(v)
+
                 try:
-                    quantity = abs(Decimal(cleaned[4]))
-                    price = Decimal(cleaned[5])
-                    amount = abs(Decimal(cleaned[8]))
+                    quantity = abs(_to_decimal(cleaned[4]))
+                    price = _to_decimal(cleaned[5])
+                    amount = abs(_to_decimal(cleaned[8]))
                 except Exception:
-                    logger.warning(f"Row {row_num}: Could not parse numeric fields, skipping")
+                    logger.warning(
+                        f"Row {row_num}: Could not parse numeric fields "
+                        f"(qty={cleaned[4]!r}, price={cleaned[5]!r}, value={cleaned[8]!r}), skipping"
+                    )
                     continue
 
                 # Commission = difference between gross and net value

@@ -7,7 +7,7 @@ class BrokerStatement(models.Model):
         ('RBC', 'RBC Brokerage'),
     ]
 
-    source = models.CharField(max_length=2, choices=SOURCE_CHOICES)
+    source = models.CharField(max_length=3, choices=SOURCE_CHOICES)
     file_date = models.DateField()
     raw_filename = models.CharField(max_length=255)
 

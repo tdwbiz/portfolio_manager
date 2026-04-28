@@ -1,0 +1,55 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Transactions</h1>
+
+<form method="get" action="{% url 'transaction_list' %}">
+    <label>Broker: <input type="text" name="broker" value="{{ broker_filter }}"></label>
+    <label>Symbol: <input type="text" name="symbol" value="{{ symbol_filter }}"></label>
+    <label>Type: <input type="text" name="type" value="{{ type_filter }}"></label>
+    <button type="submit">Filter</button>
+</form>
+
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Symbol</th>
+            <th>Type</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Commission</th>
+            <th>Amount</th>
+            <th>Currency</th>
+            <th>Amount (CAD)</th>
+            <th>Broker</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tx in page_obj %}
+        <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.symbol }}</td>
+            <td>{{ tx.type }}</td>
+            <td>{{ tx.quantity }}</td>
+            <td>{{ tx.price }}</td>
+            <td>{{ tx.commission }}</td>
+            <td>{{ tx.amount }}</td>
+            <td>{{ tx.currency }}</td>
+            <td>{{ tx.amount_cad }}</td>
+            <td>{{ tx.statement.source }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div>
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.</span>
+    {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}">Previous</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}">Next</a>
+    {% endif %}
+</div>
+{% endblock %}

@@ -4,10 +4,26 @@
 <h1>Transactions</h1>
 
 <form method="get" action="{% url 'transaction_list' %}">
-    <label>Broker: <input type="text" name="broker" value="{{ broker_filter }}"></label>
-    <label>Symbol: <input type="text" name="symbol" value="{{ symbol_filter }}"></label>
-    <label>Type: <input type="text" name="type" value="{{ type_filter }}"></label>
+    <label>Broker:
+        <select name="broker">
+            <option value="">All</option>
+            <option value="IB" {% if broker_filter == "IB" %}selected{% endif %}>Interactive Brokers</option>
+            <option value="RBC" {% if broker_filter == "RBC" %}selected{% endif %}>RBC</option>
+        </select>
+    </label>
+    <label>Symbol: <input type="text" name="symbol" value="{{ symbol_filter|default:'' }}"></label>
+    <label>Type:
+        <select name="type">
+            <option value="">All</option>
+            <option value="BUY" {% if type_filter == "BUY" %}selected{% endif %}>Buy</option>
+            <option value="SELL" {% if type_filter == "SELL" %}selected{% endif %}>Sell</option>
+            <option value="DIV" {% if type_filter == "DIV" %}selected{% endif %}>Dividend</option>
+            <option value="FEE" {% if type_filter == "FEE" %}selected{% endif %}>Fee</option>
+            <option value="TRANSFER" {% if type_filter == "TRANSFER" %}selected{% endif %}>Transfer</option>
+        </select>
+    </label>
     <button type="submit">Filter</button>
+    <a href="{% url 'transaction_list' %}">Clear</a>
 </form>
 
 <table>

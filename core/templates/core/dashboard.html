@@ -1,0 +1,58 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<h2>Total Portfolio Value: {{ total_value }} CAD</h2>
+
+<h3>Positions</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Symbol</th>
+            <th>Shares</th>
+            <th>Avg Cost (CAD)</th>
+            <th>Total Cost (CAD)</th>
+            <th>Currency</th>
+            <th>Broker</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pos in positions %}
+        <tr>
+            <td><a href="{% url 'transaction_list' %}?symbol={{ pos.symbol }}">{{ pos.symbol }}</a></td>
+            <td>{{ pos.total_shares }}</td>
+            <td>{{ pos.avg_cost_cad }}</td>
+            <td>{{ pos.total_cost_cad }}</td>
+            <td>{{ pos.currency }}</td>
+            <td>{{ pos.broker }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Recent Imports</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Filename</th>
+            <th>Broker</th>
+            <th>Imported At</th>
+            <th>Records Imported</th>
+            <th>Records Skipped</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in recent_imports %}
+        <tr>
+            <td>{{ log.filename }}</td>
+            <td>{{ log.broker }}</td>
+            <td>{{ log.imported_at }}</td>
+            <td>{{ log.records_imported }}</td>
+            <td>{{ log.records_skipped }}</td>
+            <td>{{ log.status }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

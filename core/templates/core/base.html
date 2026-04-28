@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Portfolio Manager</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        nav { margin-bottom: 20px; }
+        nav a { margin-right: 10px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        h2 { margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="{% url 'dashboard' %}">Dashboard</a>
+        <a href="{% url 'transaction_list' %}">Transactions</a>
+    </nav>
+    {% block content %}{% endblock %}
+</body>
+</html>

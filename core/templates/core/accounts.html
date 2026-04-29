@@ -3,6 +3,8 @@
 {% block content %}
 <h1>Accounts</h1>
 
+<a href="{% url 'account_create' %}">Add Account</a>
+
 <table>
     <thead>
         <tr>
@@ -14,6 +16,7 @@
             <th>Starting Date</th>
             <th>Transaction Count</th>
             <th>Total Invested (CAD)</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -27,6 +30,13 @@
             <td>{{ account.starting_balance_date|default:'' }}</td>
             <td>{{ account.transaction_count }}</td>
             <td>{{ account.total_invested_cad|default:0 }}</td>
+            <td>
+                <a href="{% url 'account_edit' account.account_id %}">Edit</a>
+                <form method="post" action="{% url 'account_delete' account.account_id %}" style="display:inline">
+                    {% csrf_token %}
+                    <button type="submit" onclick="return confirm('Delete account {{ account.account_id }}?')">Delete</button>
+                </form>
+            </td>
         </tr>
         {% endfor %}
     </tbody>

@@ -1,6 +1,8 @@
 # Spec: Account Management UI
+Project name: portfolio_manager
 **Branch:** `feature/account-management-ui`
 **Base branch:** `dev`
+**Project path:** `C:\AI-DevTeam\projects\portfolio_manager`
 **Test command:** `python manage.py test core --settings=portfolio_manager.settings_test`
 
 ---

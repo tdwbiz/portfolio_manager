@@ -48,6 +48,9 @@ files_done/
 inbox/
 processed/
 
+# Logs
+logs/
+
 # IDE
 .idea/
 .vscode/

@@ -12,7 +12,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType
+from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -147,22 +147,19 @@ class Command(BaseCommand):
                             defaults={'label': trade.get('type_label', trade['type'])},
                         )
 
-                        # Dedup check includes account + amount for non-trade rows
-                        dedup_qs = Transaction.objects.filter(
-                            statement__source=broker,
-                            date=trade['date'],
-                            symbol=trade['symbol'],
-                            type=trade['type'],
-                            quantity=trade['quantity'],
-                            price=trade['price'],
-                            amount=trade['amount'],
+                        # Dedup via content hash (broker+account+date+symbol+type+qty+price+amount+currency)
+                        tx_hash = compute_tx_hash(
+                            broker,
+                            account.account_id if account else '',
+                            trade['date'],
+                            trade['symbol'],
+                            trade['type'],
+                            trade['quantity'],
+                            trade['price'],
+                            trade['amount'],
+                            trade.get('currency', 'USD'),
                         )
-                        if account:
-                            dedup_qs = dedup_qs.filter(account=account)
-                        else:
-                            dedup_qs = dedup_qs.filter(account__isnull=True)
-
-                        if dedup_qs.exists():
+                        if Transaction.objects.filter(tx_hash=tx_hash).exists():
                             skipped_count += 1
                             continue
 
@@ -186,6 +183,7 @@ class Command(BaseCommand):
                             exchange_rate_cad=rate,
                             amount_cad=amount_cad,
                             notes=trade.get('notes', ''),
+                            tx_hash=tx_hash,
                         )
                         imported_count += 1
 

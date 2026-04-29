@@ -15,11 +15,9 @@
     <label>Type:
         <select name="type">
             <option value="">All</option>
-            <option value="BUY" {% if type_filter == "BUY" %}selected{% endif %}>Buy</option>
-            <option value="SELL" {% if type_filter == "SELL" %}selected{% endif %}>Sell</option>
-            <option value="DIV" {% if type_filter == "DIV" %}selected{% endif %}>Dividend</option>
-            <option value="FEE" {% if type_filter == "FEE" %}selected{% endif %}>Fee</option>
-            <option value="TRANSFER" {% if type_filter == "TRANSFER" %}selected{% endif %}>Transfer</option>
+            {% for tt in tx_types %}
+            <option value="{{ tt.code }}" {% if type_filter == tt.code %}selected{% endif %}>{{ tt.code }} — {{ tt.label }}</option>
+            {% endfor %}
         </select>
     </label>
     <label>Account:

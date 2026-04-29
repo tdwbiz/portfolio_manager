@@ -4,7 +4,7 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Sum, Q
 from django.shortcuts import get_object_or_404, render
 
-from core.models import Account, FileImportLog, Transaction
+from core.models import Account, FileImportLog, Transaction, TransactionType
 from core.utils import compute_positions
 
 def dashboard(request):
@@ -42,7 +42,8 @@ def transaction_list(request):
     page_obj = paginator.get_page(page_number)
     
     accounts = Account.objects.all().order_by('account_id')
-    
+    tx_types = TransactionType.objects.order_by('code')
+
     return render(request, 'core/transaction_list.html', {
         'page_obj': page_obj,
         'broker_filter': broker,
@@ -50,6 +51,7 @@ def transaction_list(request):
         'type_filter': tx_type,
         'account_filter': account_id,
         'accounts': accounts,
+        'tx_types': tx_types,
     })
 
 def accounts_list(request):

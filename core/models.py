@@ -1,5 +1,28 @@
 from django.db import models
 from decimal import Decimal
+import hashlib
+
+
+def compute_tx_hash(broker: str, account_id: str, date, symbol: str,
+                    tx_type: str, quantity, price, amount, currency: str) -> str:
+    """Return a SHA-256 hex digest that uniquely identifies a transaction.
+
+    All numeric fields are normalised to fixed decimal places so that the
+    same trade imported from two different overlapping export files always
+    produces the same hash.
+    """
+    key = "|".join([
+        broker or '',
+        account_id or '',
+        str(date),
+        symbol or '',
+        tx_type or '',
+        f"{Decimal(str(quantity)):.4f}",
+        f"{Decimal(str(price)):.4f}",
+        f"{Decimal(str(amount)):.2f}",
+        currency or '',
+    ])
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 class TransactionType(models.Model):
@@ -70,6 +93,7 @@ class Transaction(models.Model):
     exchange_rate_cad = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))
     amount_cad = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
     notes = models.TextField(blank=True, default='')
+    tx_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     def __str__(self):
         return f"{self.type} {self.quantity} {self.symbol} on {self.date}"

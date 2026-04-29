@@ -10,7 +10,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import BrokerStatement, Transaction, Account, FileImportLog, TransactionType
+from core.models import BrokerStatement, Transaction, Account, FileImportLog, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -116,21 +116,19 @@ class Command(BaseCommand):
                         defaults={'label': trade.get('type_label', trade['type'])},
                     )
 
-                    # Dedup check (account-aware, includes amount for non-trade rows)
-                    dedup_qs = Transaction.objects.filter(
-                        statement__source=broker,
-                        date=trade['date'],
-                        symbol=trade['symbol'],
-                        type=trade['type'],
-                        quantity=trade['quantity'],
-                        price=trade['price'],
-                        amount=trade['amount'],
+                    # Dedup via content hash
+                    tx_hash = compute_tx_hash(
+                        broker,
+                        account.account_id if account else '',
+                        trade['date'],
+                        trade['symbol'],
+                        trade['type'],
+                        trade['quantity'],
+                        trade['price'],
+                        trade['amount'],
+                        trade.get('currency', 'USD'),
                     )
-                    if account:
-                        dedup_qs = dedup_qs.filter(account=account)
-                    else:
-                        dedup_qs = dedup_qs.filter(account__isnull=True)
-                    if dedup_qs.exists():
+                    if Transaction.objects.filter(tx_hash=tx_hash).exists():
                         logger.debug(f"Duplicate transaction skipped: {trade}")
                         skipped_count += 1
                         continue
@@ -156,6 +154,7 @@ class Command(BaseCommand):
                             exchange_rate_cad=rate,
                             amount_cad=amount_cad,
                             notes=trade.get('notes', ''),
+                            tx_hash=tx_hash,
                         )
                         imported_count += 1
                     except Exception as e:

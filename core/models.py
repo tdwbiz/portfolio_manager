@@ -2,6 +2,19 @@ from django.db import models
 from decimal import Decimal
 
 
+class Account(models.Model):
+    BROKER_CHOICES = [('IB', 'Interactive Brokers'), ('RBC', 'RBC Brokerage')]
+    account_id    = models.CharField(max_length=50, unique=True)   # e.g. "TOM IB", "TS JOINT", "RBC-123456"
+    name          = models.CharField(max_length=100)               # human display name, editable
+    broker        = models.CharField(max_length=3, choices=BROKER_CHOICES)
+    currency      = models.CharField(max_length=3, default='USD')
+    starting_balance     = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    starting_balance_date = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.broker})"
+
+
 class BrokerStatement(models.Model):
     SOURCE_CHOICES = [
         ('IB', 'Interactive Brokers'),
@@ -30,6 +43,12 @@ class Transaction(models.Model):
         on_delete=models.CASCADE,
         related_name='transactions'
     )
+    account = models.ForeignKey(
+        'Account',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='transactions'
+    )
     date = models.DateField()
     symbol = models.CharField(max_length=50)
     type = models.CharField(max_length=10, choices=TYPE_CHOICES)
@@ -53,6 +72,7 @@ class FileImportLog(models.Model):
     records_skipped = models.IntegerField(default=0)
     status = models.CharField(max_length=20, default='success')  # success / partial / error
     error_message = models.TextField(blank=True, default='')
+    content_hash = models.CharField(max_length=64, blank=True, default='')
 
     def __str__(self):
         return f"{self.filename} - {self.status}"

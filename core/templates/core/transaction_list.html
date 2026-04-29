@@ -22,6 +22,14 @@
             <option value="TRANSFER" {% if type_filter == "TRANSFER" %}selected{% endif %}>Transfer</option>
         </select>
     </label>
+    <label>Account:
+        <select name="account">
+            <option value="">All</option>
+            {% for acc in accounts %}
+            <option value="{{ acc.account_id }}" {% if account_filter == acc.account_id %}selected{% endif %}>{{ acc.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
     <button type="submit">Filter</button>
     <a href="{% url 'transaction_list' %}">Clear</a>
 </form>
@@ -30,6 +38,8 @@
     <thead>
         <tr>
             <th>Date</th>
+            <th>Broker</th>
+            <th>Account</th>
             <th>Symbol</th>
             <th>Type</th>
             <th>Qty</th>
@@ -38,13 +48,14 @@
             <th>Amount</th>
             <th>Currency</th>
             <th>Amount (CAD)</th>
-            <th>Broker</th>
         </tr>
     </thead>
     <tbody>
         {% for tx in page_obj %}
         <tr>
             <td>{{ tx.date }}</td>
+            <td>{{ tx.statement.source }}</td>
+            <td>{{ tx.account.name|default:'' }}</td>
             <td>{{ tx.symbol }}</td>
             <td>{{ tx.type }}</td>
             <td>{{ tx.quantity }}</td>
@@ -53,7 +64,6 @@
             <td>{{ tx.amount }}</td>
             <td>{{ tx.currency }}</td>
             <td>{{ tx.amount_cad }}</td>
-            <td>{{ tx.statement.source }}</td>
         </tr>
         {% endfor %}
     </tbody>
@@ -62,10 +72,10 @@
 <div>
     <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.</span>
     {% if page_obj.has_previous %}
-        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}">Previous</a>
+        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}">Previous</a>
     {% endif %}
     {% if page_obj.has_next %}
-        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}">Next</a>
+        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}">Next</a>
     {% endif %}
 </div>
 {% endblock %}

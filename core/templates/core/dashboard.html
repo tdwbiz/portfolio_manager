@@ -2,29 +2,31 @@
 
 {% block content %}
 <h1>Dashboard</h1>
-<h2>Total Portfolio Value: {{ total_value }} CAD</h2>
+<h2>Total Invested (CAD): {{ total_value }}</h2>
 
 <h3>Positions</h3>
 <table>
     <thead>
         <tr>
+            <th>Broker</th>
+            <th>Account</th>
             <th>Symbol</th>
             <th>Shares</th>
             <th>Avg Cost (CAD)</th>
             <th>Total Cost (CAD)</th>
             <th>Currency</th>
-            <th>Broker</th>
         </tr>
     </thead>
     <tbody>
         {% for pos in positions %}
         <tr>
+            <td>{{ pos.broker }}</td>
+            <td>{{ pos.account_name }}</td>
             <td><a href="{% url 'transaction_list' %}?symbol={{ pos.symbol }}">{{ pos.symbol }}</a></td>
             <td>{{ pos.total_shares }}</td>
             <td>{{ pos.avg_cost_cad }}</td>
             <td>{{ pos.total_cost_cad }}</td>
             <td>{{ pos.currency }}</td>
-            <td>{{ pos.broker }}</td>
         </tr>
         {% endfor %}
     </tbody>

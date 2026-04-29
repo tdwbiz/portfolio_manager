@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
+from imports.rejection_log import rejection_from_trade, write_rejection_log
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,11 @@ class Command(BaseCommand):
         # Parse CSV
         self.stdout.write(f"Parsing {broker} CSV file: {file_path}")
         exchange_rate_cad: Decimal = Decimal('1.000000')
+        rejections: List[Dict[str, Any]] = []
         if broker == 'IB':
-            trades: List[Dict[str, Any]] = parse_ib_csv(file_path)
+            trades: List[Dict[str, Any]] = parse_ib_csv(file_path, rejections)
         elif broker == 'RBC':
-            trades, exchange_rate_cad = parse_rbc_csv(file_path)
+            trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
         else:
             raise CommandError(f"Unsupported broker type: {broker}")
 
@@ -131,6 +133,9 @@ class Command(BaseCommand):
                     if Transaction.objects.filter(tx_hash=tx_hash).exists():
                         logger.debug(f"Duplicate transaction skipped: {trade}")
                         skipped_count += 1
+                        rejections.append(rejection_from_trade(
+                            os.path.basename(file_path), 0, 'Duplicate (already imported)', trade,
+                        ))
                         continue
 
                     # Create transaction
@@ -175,6 +180,12 @@ class Command(BaseCommand):
                     f"Successfully imported {imported_count} transactions "
                     f"({skipped_count} duplicates skipped)."
                 ))
+
+                # Write rejection log next to the source file
+                log_dir = os.path.join(os.path.dirname(file_path), 'rejection_logs')
+                log_path = write_rejection_log(rejections, log_dir, os.path.basename(file_path))
+                if log_path:
+                    self.stdout.write(f"Rejection log written: {log_path}")
 
                 # Roll back the BrokerStatement if nothing was actually imported
                 if imported_count == 0:

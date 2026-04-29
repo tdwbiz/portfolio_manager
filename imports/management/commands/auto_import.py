@@ -14,6 +14,7 @@ from django.db import transaction
 
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
+from imports.rejection_log import rejection_from_trade, write_rejection_log
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +111,11 @@ class Command(BaseCommand):
 
                 # Parse
                 exchange_rate_cad: Decimal = Decimal('1.000000')
+                rejections: List[Dict[str, Any]] = []
                 if broker == 'RBC':
-                    trades, exchange_rate_cad = parse_rbc_csv(file_path)
+                    trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
                 else:
-                    trades = parse_ib_csv(file_path)
+                    trades = parse_ib_csv(file_path, rejections)
 
                 if dry_run:
                     self.stdout.write(
@@ -161,6 +163,9 @@ class Command(BaseCommand):
                         )
                         if Transaction.objects.filter(tx_hash=tx_hash).exists():
                             skipped_count += 1
+                            rejections.append(rejection_from_trade(
+                                filename, 0, 'Duplicate (already imported)', trade,
+                            ))
                             continue
 
                         rate = trade.get('exchange_rate_cad', exchange_rate_cad)
@@ -203,6 +208,12 @@ class Command(BaseCommand):
                 dest = self._move_file(file_path, processed_dir)
                 total_imported += imported_count
                 total_skipped += skipped_count
+
+                # Write rejection log if anything was skipped
+                rejection_log_dir = os.path.join(processed_dir, 'rejection_logs')
+                log_path = write_rejection_log(rejections, rejection_log_dir, filename)
+                if log_path:
+                    self.stdout.write(f"  Rejection log: {log_path}")
 
                 logger.info(
                     f"auto_import: {filename} ({broker}) - "

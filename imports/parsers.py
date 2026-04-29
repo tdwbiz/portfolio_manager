@@ -2,6 +2,7 @@
 
 import csv
 import logging
+import os
 import re
 from datetime import datetime
 from decimal import Decimal
@@ -52,7 +53,7 @@ def _normalize_type(raw: str, type_map: Dict[str, Tuple[str, str]]) -> Tuple[str
     return (code, raw)
 
 
-def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
+def parse_ib_csv(file_path: str, rejections: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Parse Interactive Brokers CSV — supports two formats:
 
     1. Activity Statement (multi-section): first column is the section name
@@ -64,11 +65,14 @@ def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
     All row types are imported (Buy, Sell, Dividend, Fee, Tax, Transfer, etc.).
 
     Args:
-        file_path: Path to the IB CSV file.
+        file_path:   Path to the IB CSV file.
+        rejections:  Optional list; skipped rows are appended as dicts.
 
     Returns:
         List of dictionaries with parsed trade data.
     """
+    if rejections is None:
+        rejections = []  # caller didn't ask for them — discard silently
     trades: List[Dict[str, Any]] = []
 
     try:
@@ -91,9 +95,9 @@ def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
         )
 
         if is_transaction_history:
-            trades = _parse_ib_transaction_history(rows)
+            trades = _parse_ib_transaction_history(rows, rejections, file_path)
         else:
-            trades = _parse_ib_activity_statement(rows)
+            trades = _parse_ib_activity_statement(rows, rejections, file_path)
 
     except FileNotFoundError:
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -104,7 +108,9 @@ def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
     return trades
 
 
-def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]:
+def _parse_ib_transaction_history(rows: List[List[str]],
+                                   rejections: List[Dict[str, Any]],
+                                   filename: str = '') -> List[Dict[str, Any]]:
     """Parse IB Transaction History CSV format.
 
     Columns (0-based):
@@ -134,6 +140,13 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
 
         tx_type_raw = row[5].strip()
         if not tx_type_raw:
+            rejections.append({
+                'Filename': filename, 'Row Number': row_num,
+                'Reason Rejected': 'Missing transaction type',
+                'Date': row[2].strip(), 'Type': '', 'Symbol': row[6].strip() if len(row) > 6 else '',
+                'Quantity': '', 'Price': '', 'Amount': '',
+                'Currency': row[9].strip() if len(row) > 9 else '', 'Account ID': row[3].strip(), 'Notes': row[4].strip() if len(row) > 4 else '',
+            })
             continue
 
         try:
@@ -141,11 +154,27 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             trade_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
             logger.warning(f"Row {row_num}: Could not parse date '{row[2].strip()}'")
+            rejections.append({
+                'Filename': filename, 'Row Number': row_num,
+                'Reason Rejected': f"Invalid date: {row[2].strip()!r}",
+                'Date': row[2].strip(), 'Type': row[5].strip(), 'Symbol': row[6].strip() if len(row) > 6 else '',
+                'Quantity': row[7].strip() if len(row) > 7 else '', 'Price': row[8].strip() if len(row) > 8 else '',
+                'Amount': row[10].strip() if len(row) > 10 else '',
+                'Currency': row[9].strip() if len(row) > 9 else '', 'Account ID': row[3].strip(), 'Notes': row[4].strip() if len(row) > 4 else '',
+            })
             continue
 
         account_id_raw = row[3].strip().upper()
         if account_id_raw.startswith('PRAC'):
             logger.debug(f"Row {row_num}: Skipping practice account '{account_id_raw}'")
+            rejections.append({
+                'Filename': filename, 'Row Number': row_num,
+                'Reason Rejected': f"Practice account: {account_id_raw}",
+                'Date': str(trade_date), 'Type': row[5].strip(), 'Symbol': row[6].strip() if len(row) > 6 else '',
+                'Quantity': row[7].strip() if len(row) > 7 else '', 'Price': row[8].strip() if len(row) > 8 else '',
+                'Amount': row[10].strip() if len(row) > 10 else '',
+                'Currency': row[9].strip() if len(row) > 9 else '', 'Account ID': account_id_raw, 'Notes': row[4].strip() if len(row) > 4 else '',
+            })
             continue
 
         type_code, type_label = _normalize_type(tx_type_raw, _IB_TYPE_MAP)
@@ -186,7 +215,9 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
     return trades
 
 
-def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
+def _parse_ib_activity_statement(rows: List[List[str]],
+                                  rejections: List[Dict[str, Any]],
+                                  filename: str = '') -> List[Dict[str, Any]]:
     """Parse IB Activity Statement CSV format (multi-section with "Trades" header)."""
     trades: List[Dict[str, Any]] = []
     in_trades_section: bool = False
@@ -232,6 +263,17 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                                 trade_date = dt.date()
                             except ValueError:
                                 logger.warning(f"Row {row_num}: Could not parse date '{date_str}'")
+                                rejections.append({
+                                    'Filename': filename, 'Row Number': row_num,
+                                    'Reason Rejected': f'Invalid date: {date_str!r}',
+                                    'Date': date_str, 'Type': row[2].strip() if len(row) > 2 else '',
+                                    'Symbol': row[1].strip() if len(row) > 1 else '',
+                                    'Quantity': row[3].strip() if len(row) > 3 else '',
+                                    'Price': row[4].strip() if len(row) > 4 else '',
+                                    'Amount': row[6].strip() if len(row) > 6 else '',
+                                    'Currency': row[7].strip() if len(row) > 7 else '',
+                                    'Account ID': '', 'Notes': '',
+                                })
                                 continue
 
                         symbol = row[1].strip()
@@ -242,12 +284,30 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             quantity = Decimal(row[3].strip())
                         except Exception:
                             logger.warning(f"Row {row_num}: Could not parse quantity")
+                            rejections.append({
+                                'Filename': filename, 'Row Number': row_num,
+                                'Reason Rejected': f'Invalid quantity: {row[3].strip()!r}',
+                                'Date': str(date_str), 'Type': buy_sell, 'Symbol': row[1].strip(),
+                                'Quantity': row[3].strip(), 'Price': row[4].strip() if len(row) > 4 else '',
+                                'Amount': row[6].strip() if len(row) > 6 else '',
+                                'Currency': row[7].strip() if len(row) > 7 else '',
+                                'Account ID': '', 'Notes': '',
+                            })
                             continue
 
                         try:
                             price = Decimal(row[4].strip())
                         except Exception:
                             logger.warning(f"Row {row_num}: Could not parse price")
+                            rejections.append({
+                                'Filename': filename, 'Row Number': row_num,
+                                'Reason Rejected': f'Invalid price: {row[4].strip()!r}',
+                                'Date': str(date_str), 'Type': buy_sell, 'Symbol': row[1].strip(),
+                                'Quantity': str(quantity), 'Price': row[4].strip(),
+                                'Amount': row[6].strip() if len(row) > 6 else '',
+                                'Currency': row[7].strip() if len(row) > 7 else '',
+                                'Account ID': '', 'Notes': '',
+                            })
                             continue
 
                         try:
@@ -259,6 +319,15 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             amount = Decimal(row[6].strip())
                         except Exception:
                             logger.warning(f"Row {row_num}: Could not parse proceeds")
+                            rejections.append({
+                                'Filename': filename, 'Row Number': row_num,
+                                'Reason Rejected': f'Invalid amount: {row[6].strip()!r}',
+                                'Date': str(date_str), 'Type': buy_sell, 'Symbol': row[1].strip(),
+                                'Quantity': str(quantity), 'Price': str(price),
+                                'Amount': row[6].strip(),
+                                'Currency': row[7].strip() if len(row) > 7 else '',
+                                'Account ID': '', 'Notes': '',
+                            })
                             continue
 
                         currency = row[7].strip() if len(row) > 7 else 'USD'
@@ -283,12 +352,20 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                         })
                 except Exception as e:
                     logger.error(f"Row {row_num}: Error parsing trade data: {e}")
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f'Parse error: {e}',
+                        'Date': row[0].strip() if row else '', 'Type': '', 'Symbol': '',
+                        'Quantity': '', 'Price': '', 'Amount': '', 'Currency': '',
+                        'Account ID': '', 'Notes': '',
+                    })
                     continue
 
     return trades
 
 
-def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
+def parse_rbc_csv(file_path: str,
+                  rejections: List[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Decimal]:
     """Parse RBC Activity Export CSV.
 
     Handles the real RBC format: quoted CSV with a metadata header block,
@@ -306,9 +383,12 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
         Rate is Decimal('1.0') if not found in file.
     """
 
+    if rejections is None:
+        rejections = []
     trades: List[Dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
+    filename = os.path.basename(file_path)
 
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
@@ -335,12 +415,26 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
 
                 # Parse data rows — require at least 9 columns (up to Value)
                 if len(row) < 9:
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f'Too few columns ({len(row)})',
+                        'Date': cleaned[0] if cleaned else '', 'Type': '', 'Symbol': '',
+                        'Quantity': '', 'Price': '', 'Amount': '', 'Currency': '',
+                        'Account ID': '', 'Notes': '',
+                    })
                     continue
 
                 cleaned = [cell.strip().strip('"') for cell in row]
 
                 activity = cleaned[1]
                 if not activity:
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': 'Missing activity type',
+                        'Date': cleaned[0], 'Type': '', 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
+                        'Quantity': '', 'Price': '', 'Amount': cleaned[8] if len(cleaned) > 8 else '',
+                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': '',
+                    })
                     continue
 
                 type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
@@ -349,6 +443,14 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                     trade_date = datetime.strptime(cleaned[0], '%B %d, %Y').date()
                 except ValueError:
                     logger.warning(f"Row {row_num}: Could not parse date '{cleaned[0]}'")
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f"Invalid date: {cleaned[0]!r}",
+                        'Date': cleaned[0], 'Type': activity, 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
+                        'Quantity': cleaned[4] if len(cleaned) > 4 else '', 'Price': cleaned[5] if len(cleaned) > 5 else '',
+                        'Amount': cleaned[8] if len(cleaned) > 8 else '',
+                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': '',
+                    })
                     continue
 
                 def _to_decimal(val: str) -> Decimal:
@@ -367,6 +469,13 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                         f"Row {row_num}: Could not parse numeric fields "
                         f"(qty={cleaned[4]!r}, price={cleaned[5]!r}, value={cleaned[8]!r}), skipping"
                     )
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f'Invalid numeric fields (qty={cleaned[4]!r}, price={cleaned[5]!r}, amount={cleaned[8]!r})',
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
+                        'Quantity': cleaned[4], 'Price': cleaned[5], 'Amount': cleaned[8],
+                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': cleaned[10] if len(cleaned) > 10 else '',
+                    })
                     continue
 
                 # Commission only meaningful for trade types
@@ -386,6 +495,13 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                 account_id = cleaned[7].strip().upper() if len(cleaned) > 7 else ''
                 if account_id.startswith('PRAC'):
                     logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f'Practice account: {account_id}',
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': symbol,
+                        'Quantity': str(quantity), 'Price': str(price), 'Amount': str(amount),
+                        'Currency': currency, 'Account ID': account_id, 'Notes': notes,
+                    })
                     continue
 
                 trades.append({

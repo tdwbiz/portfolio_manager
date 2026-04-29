@@ -131,5 +131,3 @@ def account_detail(request, account_id):
         'active_holdings': active_holdings,
         'page_obj': page_obj,
     })
-
-    })

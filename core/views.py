@@ -2,10 +2,12 @@ from decimal import Decimal
 
 from django.core.paginator import Paginator
 from django.db.models import Count, Sum, Q
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, render, redirect
+from django.http import HttpResponseNotAllowed
 
 from core.models import Account, FileImportLog, Transaction, TransactionType
 from core.utils import compute_positions
+from core.forms import AccountForm
 
 def dashboard(request):
     positions = compute_positions()
@@ -86,8 +88,7 @@ def account_detail(request, account_id):
         .order_by('-date', '-id')
     )
 
-    # ── Cash flow summary ────────────────────────────────────────────────────
-    # Sum all amount_cad (already signed: negative = outflow, positive = inflow)
+    # Cash flow summary
     total_cash_flow_cad = (
         transactions.aggregate(total=Sum('amount_cad'))['total'] or Decimal('0')
     )
@@ -101,7 +102,7 @@ def account_detail(request, account_id):
         .order_by('type')
     )
 
-    # ── Holdings (current positions) ─────────────────────────────────────────
+    # Holdings (current positions)
     holdings = {}
     for tx in transactions.filter(type__in=['BUY', 'SELL']):
         sym = tx.symbol or '(unknown)'
@@ -129,7 +130,7 @@ def account_detail(request, account_id):
             h['buy_cost_cad'] / h['buy_qty'] if h['buy_qty'] else Decimal('0')
         )
 
-    # ── Paginated transaction list ────────────────────────────────────────────
+    # Paginated transaction list
     paginator = Paginator(transactions, 50)
     page_obj = paginator.get_page(request.GET.get('page'))
 
@@ -141,3 +142,39 @@ def account_detail(request, account_id):
         'active_holdings': active_holdings,
         'page_obj': page_obj,
     })
+
+
+def account_create(request):
+    if request.method == 'POST':
+        form = AccountForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('accounts_list')
+    else:
+        form = AccountForm()
+    return render(request, 'core/account_form.html', {'form': form, 'title': 'Add Account'})
+
+
+def account_edit(request, account_id):
+    account = get_object_or_404(Account, account_id=account_id)
+    
+    if request.method == 'POST':
+        form = AccountForm(request.POST, instance=account)
+        form.fields['account_id'].disabled = True
+        if form.is_valid():
+            form.save()
+            return redirect('account_detail', account_id=account.account_id)
+    else:
+        form = AccountForm(instance=account)
+        form.fields['account_id'].disabled = True
+        
+    return render(request, 'core/account_form.html', {'form': form, 'title': 'Edit Account'})
+
+
+def account_delete(request, account_id):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    
+    account = get_object_or_404(Account, account_id=account_id)
+    account.delete()
+    return redirect('accounts_list')

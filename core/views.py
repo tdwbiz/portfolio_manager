@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, render, redirect
 from django.http import HttpResponseNotAllowed
 
 from core.models import Account, FileImportLog, Transaction, TransactionType
-from core.utils import compute_positions
+from core.utils import compute_positions, fetch_last_prices, enrich_positions_with_prices
 from core.forms import AccountForm
 
 def dashboard(request):
@@ -178,3 +178,26 @@ def account_delete(request, account_id):
     account = get_object_or_404(Account, account_id=account_id)
     account.delete()
     return redirect('accounts_list')
+
+
+def portfolio_summary(request):
+    positions = compute_positions()
+    symbols = [p['symbol'] for p in positions if p['symbol']]
+    prices = fetch_last_prices(symbols)
+    positions = enrich_positions_with_prices(positions, prices)
+    positions.sort(key=lambda p: (p['broker'], p['account_name'], p['symbol'] or ''))
+
+    total_cost_cad = sum(p['total_cost_cad'] for p in positions)
+    total_market_value_cad = sum(
+        p['market_value_cad'] for p in positions if p.get('market_value_cad') is not None
+    )
+    total_unrealised_pnl_cad = total_market_value_cad - sum(
+        p['total_cost_cad'] for p in positions if p.get('market_value_cad') is not None
+    )
+
+    return render(request, 'core/portfolio.html', {
+        'positions': positions,
+        'total_cost_cad': total_cost_cad,
+        'total_market_value_cad': total_market_value_cad,
+        'total_unrealised_pnl_cad': total_unrealised_pnl_cad,
+    })

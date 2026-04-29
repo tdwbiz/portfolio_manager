@@ -2,11 +2,54 @@
 
 import csv
 import logging
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Type normalisation helpers
+# ---------------------------------------------------------------------------
+
+# Maps raw broker type strings → (code, label)
+_IB_TYPE_MAP: Dict[str, Tuple[str, str]] = {
+    'Buy':                       ('BUY',      'Buy'),
+    'Sell':                      ('SELL',     'Sell'),
+    'Dividend':                  ('DIV',      'Dividend'),
+    'Dividends':                 ('DIV',      'Dividend'),
+    'Fee':                       ('FEE',      'Fee'),
+    'Transfer':                  ('TRANSFER', 'Transfer'),
+    'Sales Tax':                 ('TAX',      'Sales Tax'),
+    'Foreign Tax Withholding':   ('WITHTAX',  'Foreign Tax Withholding'),
+    'Other':                     ('OTHER',    'Other'),
+}
+
+_RBC_TYPE_MAP: Dict[str, Tuple[str, str]] = {
+    'Buy':                           ('BUY',      'Buy'),
+    'Sell':                          ('SELL',     'Sell'),
+    'Dividends':                     ('DIV',      'Dividend'),
+    'Distribution':                  ('DIST',     'Distribution'),
+    'Interest':                      ('INT',      'Interest'),
+    'Transfers':                     ('TRANSFER', 'Transfer'),
+    'Deposits & Contributions':      ('DEP',      'Deposit/Contribution'),
+    'Withdrawals & De-registrations':('WDRAW',    'Withdrawal/De-registration'),
+    'Taxes':                         ('TAX',      'Tax'),
+    'Others':                        ('OTHER',    'Other'),
+}
+
+
+def _normalize_type(raw: str, type_map: Dict[str, Tuple[str, str]]) -> Tuple[str, str]:
+    """Return (code, label) for a raw broker type string.
+
+    Falls back to a sanitised uppercase code for any unknown type so that
+    future broker inventions are stored without requiring a code change.
+    """
+    if raw in type_map:
+        return type_map[raw]
+    code = re.sub(r'[^A-Z0-9]', '_', raw.upper())[:20].strip('_') or 'OTHER'
+    return (code, raw)
 
 
 def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
@@ -18,7 +61,7 @@ def parse_ib_csv(file_path: str) -> List[Dict[str, Any]]:
        Section, Row-type, Date, Account, Description, Type, Symbol,
        Quantity, Price, Currency, Gross Amount, Commission, Net Amount.
 
-    Only Buy and Sell rows are imported; all other rows are skipped.
+    All row types are imported (Buy, Sell, Dividend, Fee, Tax, Transfer, etc.).
 
     Args:
         file_path: Path to the IB CSV file.
@@ -69,8 +112,8 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
       1  Row type ("Header" / "Data")
       2  Date (YYYY-MM-DD)
       3  Account
-      4  Description
-      5  Transaction Type (Buy / Sell / Dividend / …)
+      4  Description / notes
+      5  Transaction Type (Buy / Sell / Dividend / Fee / Tax / Transfer / …)
       6  Symbol
       7  Quantity
       8  Price
@@ -78,6 +121,8 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
       10 Gross Amount
       11 Commission
       12 Net Amount
+
+    All row types are imported.
     """
     trades: List[Dict[str, Any]] = []
 
@@ -87,8 +132,8 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
         if row[0].strip() != 'Transaction History' or row[1].strip() != 'Data':
             continue
 
-        tx_type = row[5].strip()
-        if tx_type not in ('Buy', 'Sell'):
+        tx_type_raw = row[5].strip()
+        if not tx_type_raw:
             continue
 
         try:
@@ -103,47 +148,39 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             logger.debug(f"Row {row_num}: Skipping practice account '{account_id_raw}'")
             continue
 
+        type_code, type_label = _normalize_type(tx_type_raw, _IB_TYPE_MAP)
+
         symbol = row[6].strip()
-        if not symbol or symbol == '-':
-            logger.warning(f"Row {row_num}: Missing symbol, skipping")
-            continue
 
-        try:
-            quantity = abs(Decimal(row[7].strip()))
-        except Exception:
-            logger.warning(f"Row {row_num}: Could not parse quantity '{row[7].strip()}'")
-            continue
+        def _safe_decimal(val: str, default: Decimal = Decimal('0')) -> Decimal:
+            v = val.strip().replace(',', '')
+            if not v or v in ('-', '--', 'N/A'):
+                return default
+            try:
+                return Decimal(v)
+            except Exception:
+                return default
 
-        try:
-            price = Decimal(row[8].strip())
-        except Exception:
-            logger.warning(f"Row {row_num}: Could not parse price '{row[8].strip()}'")
-            continue
-
+        quantity = abs(_safe_decimal(row[7]))
+        price    = _safe_decimal(row[8])
         currency = row[9].strip() if row[9].strip() not in ('', '-') else 'USD'
-
-        try:
-            amount = abs(Decimal(row[10].strip()))
-        except Exception:
-            logger.warning(f"Row {row_num}: Could not parse gross amount '{row[10].strip()}'")
-            continue
-
-        try:
-            commission = abs(Decimal(row[11].strip()))
-        except Exception:
-            commission = Decimal('0.00')
+        amount   = abs(_safe_decimal(row[10]))
+        commission = abs(_safe_decimal(row[11]))
+        notes    = row[4].strip()
 
         trades.append({
-            'date': trade_date,
-            'symbol': symbol,
-            'type': tx_type.upper(),
-            'quantity': quantity,
-            'price': price,
-            'commission': commission,
-            'amount': amount,
-            'currency': currency,
+            'date':              trade_date,
+            'symbol':            symbol,
+            'type':              type_code,
+            'type_label':        type_label,
+            'quantity':          quantity,
+            'price':             price,
+            'commission':        commission,
+            'amount':            amount,
+            'currency':          currency,
             'exchange_rate_cad': Decimal('1.000000'),
-            'account_id': account_id_raw,
+            'account_id':        account_id_raw,
+            'notes':             notes,
         })
 
     return trades
@@ -199,9 +236,7 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
 
                         symbol = row[1].strip()
                         buy_sell = row[2].strip().upper()
-                        if buy_sell not in ('BUY', 'SELL'):
-                            logger.warning(f"Row {row_num}: Unknown type '{buy_sell}', skipping")
-                            continue
+                        type_code, type_label = _normalize_type(buy_sell, _IB_TYPE_MAP)
 
                         try:
                             quantity = Decimal(row[3].strip())
@@ -233,16 +268,18 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             account_id = row[account_idx].strip().upper()
 
                         trades.append({
-                            'date': trade_date,
-                            'symbol': symbol,
-                            'type': buy_sell,
-                            'quantity': quantity,
-                            'price': price,
-                            'commission': commission,
-                            'amount': amount,
-                            'currency': currency,
+                            'date':              trade_date,
+                            'symbol':            symbol,
+                            'type':              type_code,
+                            'type_label':        type_label,
+                            'quantity':          quantity,
+                            'price':             price,
+                            'commission':        commission,
+                            'amount':            amount,
+                            'currency':          currency,
                             'exchange_rate_cad': Decimal('1.000000'),
-                            'account_id': account_id,
+                            'account_id':        account_id,
+                            'notes':             '',
                         })
                 except Exception as e:
                     logger.error(f"Row {row_num}: Error parsing trade data: {e}")
@@ -258,6 +295,9 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
     an exchange rate line ("Exchange Rate: 1 USD = X.XXXX CAD"), a data
     header row, then trade data rows.
 
+    All activity types are imported (Buy, Sell, Dividends, Distribution,
+    Interest, Transfers, Deposits & Contributions, Taxes, etc.).
+
     Args:
         file_path: Path to the RBC CSV file.
 
@@ -265,7 +305,6 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
         Tuple of (trades_list, usd_to_cad_rate).
         Rate is Decimal('1.0') if not found in file.
     """
-    import re as _re
 
     trades: List[Dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
@@ -280,7 +319,7 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                     continue
 
                 # Extract exchange rate before anything else
-                exchange_rate_match = _re.search(
+                exchange_rate_match = re.search(
                     r'Exchange Rate:\s*1\s*USD\s*=\s*([\d.]+)\s*CAD',
                     ' '.join(row),
                 )
@@ -294,21 +333,17 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                         found_header = True
                     continue
 
-                # Parse data rows — require at least 11 columns
-                if len(row) < 11:
+                # Parse data rows — require at least 9 columns (up to Value)
+                if len(row) < 9:
                     continue
 
                 cleaned = [cell.strip().strip('"') for cell in row]
 
                 activity = cleaned[1]
-                if activity == 'Buy':
-                    tx_type = 'BUY'
-                elif activity == 'Sell':
-                    tx_type = 'SELL'
-                elif activity == 'Dividends':
-                    tx_type = 'DIV'
-                else:
-                    continue  # skip Others
+                if not activity:
+                    continue
+
+                type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
 
                 try:
                     trade_date = datetime.strptime(cleaned[0], '%B %d, %Y').date()
@@ -325,8 +360,8 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
 
                 try:
                     quantity = abs(_to_decimal(cleaned[4]))
-                    price = _to_decimal(cleaned[5])
-                    amount = abs(_to_decimal(cleaned[8]))
+                    price    = _to_decimal(cleaned[5])
+                    amount   = _to_decimal(cleaned[8])  # signed — negative = outflow
                 except Exception:
                     logger.warning(
                         f"Row {row_num}: Could not parse numeric fields "
@@ -334,34 +369,38 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                     )
                     continue
 
-                # Commission = difference between gross and net value
-                gross = quantity * price
-                commission = abs(gross - amount).quantize(Decimal('0.01'))
-                if commission < 0 or commission > 50:
+                # Commission only meaningful for trade types
+                if type_code in ('BUY', 'SELL') and quantity > 0 and price > 0:
+                    gross = quantity * price
+                    commission = abs(gross - abs(amount)).quantize(Decimal('0.01'))
+                    if commission > 50:   # sanity cap — avg price discrepancy can look large
+                        commission = Decimal('0.00')
+                else:
                     commission = Decimal('0.00')
 
-                currency = cleaned[9] if len(cleaned) > 9 else 'USD'
-                symbol = cleaned[2]
-                
+                currency   = cleaned[9] if len(cleaned) > 9 else 'USD'
+                symbol     = cleaned[2]
+                notes      = cleaned[10] if len(cleaned) > 10 else ''
+
                 # Capture Account column (index 7) — skip practice accounts
-                account_id = ''
-                if len(cleaned) > 7:
-                    account_id = cleaned[7].strip().upper()
+                account_id = cleaned[7].strip().upper() if len(cleaned) > 7 else ''
                 if account_id.startswith('PRAC'):
                     logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
                     continue
 
                 trades.append({
-                    'date': trade_date,
-                    'symbol': symbol,
-                    'type': tx_type,
-                    'quantity': quantity,
-                    'price': price,
-                    'commission': commission,
-                    'amount': amount,
-                    'currency': currency,
+                    'date':              trade_date,
+                    'symbol':            symbol,
+                    'type':              type_code,
+                    'type_label':        type_label,
+                    'quantity':          quantity,
+                    'price':             price,
+                    'commission':        commission,
+                    'amount':            amount,
+                    'currency':          currency,
                     'exchange_rate_cad': usd_to_cad_rate,
-                    'account_id': account_id,
+                    'account_id':        account_id,
+                    'notes':             notes,
                 })
 
     except FileNotFoundError:

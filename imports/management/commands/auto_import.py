@@ -12,7 +12,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import Account, BrokerStatement, FileImportLog, Transaction
+from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -141,7 +141,13 @@ class Command(BaseCommand):
                         else:
                             account = None
 
-                        # Dedup check includes account to avoid cross-account false positives
+                        # Ensure TransactionType record exists
+                        TransactionType.objects.get_or_create(
+                            code=trade['type'],
+                            defaults={'label': trade.get('type_label', trade['type'])},
+                        )
+
+                        # Dedup check includes account + amount for non-trade rows
                         dedup_qs = Transaction.objects.filter(
                             statement__source=broker,
                             date=trade['date'],
@@ -149,6 +155,7 @@ class Command(BaseCommand):
                             type=trade['type'],
                             quantity=trade['quantity'],
                             price=trade['price'],
+                            amount=trade['amount'],
                         )
                         if account:
                             dedup_qs = dedup_qs.filter(account=account)
@@ -178,6 +185,7 @@ class Command(BaseCommand):
                             currency=trade.get('currency', 'USD'),
                             exchange_rate_cad=rate,
                             amount_cad=amount_cad,
+                            notes=trade.get('notes', ''),
                         )
                         imported_count += 1
 

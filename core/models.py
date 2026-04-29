@@ -2,6 +2,24 @@ from django.db import models
 from decimal import Decimal
 
 
+class TransactionType(models.Model):
+    """Lookup table for transaction types.
+
+    New types are auto-created on import so no code change is required
+    when a broker introduces a new activity type.
+    """
+    code             = models.CharField(max_length=20, unique=True)
+    label            = models.CharField(max_length=100)
+    affects_position = models.BooleanField(default=False, help_text='True for BUY / SELL — changes share count')
+    affects_cash     = models.BooleanField(default=True,  help_text='True when the amount column represents a cash flow')
+
+    class Meta:
+        ordering = ['code']
+
+    def __str__(self):
+        return f"{self.code} — {self.label}"
+
+
 class Account(models.Model):
     BROKER_CHOICES = [('IB', 'Interactive Brokers'), ('RBC', 'RBC Brokerage')]
     account_id    = models.CharField(max_length=50, unique=True)   # e.g. "TOM IB", "TS JOINT", "RBC-123456"
@@ -30,14 +48,6 @@ class BrokerStatement(models.Model):
 
 
 class Transaction(models.Model):
-    TYPE_CHOICES = [
-        ('BUY', 'Buy'),
-        ('SELL', 'Sell'),
-        ('DIV', 'Dividend'),
-        ('FEE', 'Fee'),
-        ('TRANSFER', 'Transfer'),
-    ]
-
     statement = models.ForeignKey(
         BrokerStatement,
         on_delete=models.CASCADE,
@@ -50,8 +60,8 @@ class Transaction(models.Model):
         related_name='transactions'
     )
     date = models.DateField()
-    symbol = models.CharField(max_length=50)
-    type = models.CharField(max_length=10, choices=TYPE_CHOICES)
+    symbol = models.CharField(max_length=50, blank=True, default='')
+    type = models.CharField(max_length=20)
     quantity = models.DecimalField(max_digits=12, decimal_places=4)
     price = models.DecimalField(max_digits=12, decimal_places=4)
     commission = models.DecimalField(max_digits=12, decimal_places=4)
@@ -59,6 +69,7 @@ class Transaction(models.Model):
     currency = models.CharField(max_length=3, default='USD')
     exchange_rate_cad = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))
     amount_cad = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
+    notes = models.TextField(blank=True, default='')
 
     def __str__(self):
         return f"{self.type} {self.quantity} {self.symbol} on {self.date}"

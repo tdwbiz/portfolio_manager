@@ -1,8 +1,11 @@
-from django.shortcuts import render
+from decimal import Decimal
+
 from django.core.paginator import Paginator
-from core.models import Transaction, FileImportLog, Account
-from core.utils import compute_positions
 from django.db.models import Count, Sum, Q
+from django.shortcuts import get_object_or_404, render
+
+from core.models import Account, FileImportLog, Transaction
+from core.utils import compute_positions
 
 def dashboard(request):
     positions = compute_positions()
@@ -57,7 +60,76 @@ def accounts_list(request):
             filter=Q(transactions__type='BUY')
         )
     )
-    
+
     return render(request, 'core/accounts.html', {
         'accounts': accounts,
+    })
+
+
+def account_detail(request, account_id):
+    account = get_object_or_404(Account, account_id=account_id)
+
+    transactions = (
+        Transaction.objects
+        .filter(account=account)
+        .select_related('statement')
+        .order_by('-date', '-id')
+    )
+
+    # ── Cash flow summary ────────────────────────────────────────────────────
+    # Sum all amount_cad (already signed: negative = outflow, positive = inflow)
+    total_cash_flow_cad = (
+        transactions.aggregate(total=Sum('amount_cad'))['total'] or Decimal('0')
+    )
+    ending_balance_cad = account.starting_balance + total_cash_flow_cad
+
+    # Breakdown by transaction type
+    cash_by_type = (
+        transactions
+        .values('type')
+        .annotate(total_cad=Sum('amount_cad'), count=Count('id'))
+        .order_by('type')
+    )
+
+    # ── Holdings (current positions) ─────────────────────────────────────────
+    holdings = {}
+    for tx in transactions.filter(type__in=['BUY', 'SELL']):
+        sym = tx.symbol or '(unknown)'
+        if sym not in holdings:
+            holdings[sym] = {
+                'symbol': sym,
+                'shares': Decimal('0'),
+                'buy_qty': Decimal('0'),
+                'buy_cost_cad': Decimal('0'),
+            }
+        h = holdings[sym]
+        if tx.type == 'BUY':
+            h['shares'] += tx.quantity
+            h['buy_qty'] += tx.quantity
+            h['buy_cost_cad'] += abs(tx.amount_cad)
+        else:  # SELL
+            h['shares'] -= tx.quantity
+
+    active_holdings = sorted(
+        [h for h in holdings.values() if h['shares'] > Decimal('0.0001')],
+        key=lambda h: h['symbol'],
+    )
+    for h in active_holdings:
+        h['avg_cost'] = (
+            h['buy_cost_cad'] / h['buy_qty'] if h['buy_qty'] else Decimal('0')
+        )
+
+    # ── Paginated transaction list ────────────────────────────────────────────
+    paginator = Paginator(transactions, 50)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    return render(request, 'core/account_detail.html', {
+        'account': account,
+        'total_cash_flow_cad': total_cash_flow_cad,
+        'ending_balance_cad': ending_balance_cad,
+        'cash_by_type': cash_by_type,
+        'active_holdings': active_holdings,
+        'page_obj': page_obj,
+    })
+
     })

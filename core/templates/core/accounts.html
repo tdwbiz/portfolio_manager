@@ -19,7 +19,7 @@
     <tbody>
         {% for account in accounts %}
         <tr>
-            <td>{{ account.account_id }}</td>
+            <td><a href="{% url 'account_detail' account.account_id %}">{{ account.account_id }}</a></td>
             <td>{{ account.name }}</td>
             <td>{{ account.get_broker_display }}</td>
             <td>{{ account.currency }}</td>

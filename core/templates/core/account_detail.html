@@ -1,0 +1,131 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>{{ account.name }}</h1>
+<p>
+    <strong>Account ID:</strong> {{ account.account_id }} &nbsp;|&nbsp;
+    <strong>Broker:</strong> {{ account.get_broker_display }} &nbsp;|&nbsp;
+    <strong>Base Currency:</strong> {{ account.currency }}
+</p>
+
+<!-- ── Balance summary ─────────────────────────────────────────────────── -->
+<h2>Balance Summary (CAD)</h2>
+<table style="width:auto;">
+    <thead>
+        <tr><th>Item</th><th style="text-align:right;">Amount (CAD)</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Starting balance{% if account.starting_balance_date %} ({{ account.starting_balance_date }}){% endif %}</td>
+            <td style="text-align:right;">{{ account.starting_balance }}</td>
+        </tr>
+        <tr>
+            <td>Net activity</td>
+            <td style="text-align:right;">{{ total_cash_flow_cad }}</td>
+        </tr>
+        <tr style="font-weight:bold;">
+            <td>Ending balance</td>
+            <td style="text-align:right;">{{ ending_balance_cad }}</td>
+        </tr>
+    </tbody>
+</table>
+<p style="font-size:0.85em;color:#666;">
+    Note: ending balance reflects all transactions converted to CAD.
+    If exchange rates are not populated (rate = 1.0), USD amounts are counted at par.
+</p>
+
+<!-- ── Activity by type ────────────────────────────────────────────────── -->
+<h2>Activity by Type</h2>
+<table style="width:auto;">
+    <thead>
+        <tr>
+            <th>Type</th>
+            <th style="text-align:right;"># Transactions</th>
+            <th style="text-align:right;">Total (CAD)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in cash_by_type %}
+        <tr>
+            <td>{{ row.type }}</td>
+            <td style="text-align:right;">{{ row.count }}</td>
+            <td style="text-align:right;">{{ row.total_cad }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- ── Current holdings ────────────────────────────────────────────────── -->
+<h2>Current Holdings</h2>
+{% if active_holdings %}
+<table style="width:auto;">
+    <thead>
+        <tr>
+            <th>Symbol</th>
+            <th style="text-align:right;">Shares Held</th>
+            <th style="text-align:right;">Total Bought (CAD)</th>
+            <th style="text-align:right;">Avg Cost / Share (CAD)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for h in active_holdings %}
+        <tr>
+            <td>{{ h.symbol }}</td>
+            <td style="text-align:right;">{{ h.shares|floatformat:4 }}</td>
+            <td style="text-align:right;">{{ h.buy_cost_cad|floatformat:2 }}</td>
+            <td style="text-align:right;">{{ h.avg_cost|floatformat:4 }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No open positions.</p>
+{% endif %}
+
+<!-- ── Transaction history ─────────────────────────────────────────────── -->
+<h2>Transaction History</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Symbol</th>
+            <th style="text-align:right;">Qty</th>
+            <th style="text-align:right;">Price</th>
+            <th style="text-align:right;">Commission</th>
+            <th style="text-align:right;">Amount</th>
+            <th>Ccy</th>
+            <th style="text-align:right;">Amount (CAD)</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tx in page_obj %}
+        <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.type }}</td>
+            <td>{{ tx.symbol }}</td>
+            <td style="text-align:right;">{{ tx.quantity|floatformat:4 }}</td>
+            <td style="text-align:right;">{{ tx.price|floatformat:4 }}</td>
+            <td style="text-align:right;">{{ tx.commission|floatformat:4 }}</td>
+            <td style="text-align:right;">{{ tx.amount|floatformat:2 }}</td>
+            <td>{{ tx.currency }}</td>
+            <td style="text-align:right;">{{ tx.amount_cad|floatformat:2 }}</td>
+            <td style="font-size:0.85em;color:#555;">{{ tx.notes }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div>
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.</span>
+    {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}">Previous</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}">Next</a>
+    {% endif %}
+</div>
+
+<p><a href="{% url 'accounts_list' %}">&larr; Back to Accounts</a></p>
+{% endblock %}

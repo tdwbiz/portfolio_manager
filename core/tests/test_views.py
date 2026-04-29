@@ -1,6 +1,6 @@
 from django.test import TestCase
 from django.urls import reverse
-from core.models import Transaction, FileImportLog, BrokerStatement
+from core.models import Transaction, FileImportLog, BrokerStatement, Account
 from decimal import Decimal
 
 class DashboardTests(TestCase):
@@ -86,3 +86,51 @@ class TransactionListTests(TestCase):
         
         response = self.client.get(reverse('transaction_list'), {'page': 2})
         self.assertEqual(len(response.context['page_obj']), 5)
+
+class AccountsPageTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(
+            account_id='TOM IB',
+            name='Tom IB',
+            broker='IB',
+            currency='USD',
+            starting_balance=Decimal('1000.00')
+        )
+
+    def test_accounts_page_loads(self):
+        response = self.client.get(reverse('accounts_list'))
+        self.assertEqual(response.status_code, 200)
+
+    def test_accounts_page_shows_accounts(self):
+        response = self.client.get(reverse('accounts_list'))
+        self.assertContains(response, 'TOM IB')
+
+class TransactionListFilterByAccountTests(TestCase):
+    def setUp(self):
+        self.statement = BrokerStatement.objects.create(source='IB', file_date='2023-01-01', raw_filename='test.csv')
+        self.account = Account.objects.create(
+            account_id='TOM IB',
+            name='Tom IB',
+            broker='IB'
+        )
+        self.transaction = Transaction.objects.create(
+            statement=self.statement,
+            account=self.account,
+            date='2023-01-01',
+            symbol='AAPL',
+            type='BUY',
+            quantity=10,
+            price=Decimal('100.00'),
+            commission=Decimal('0'),
+            amount=Decimal('1000.00'),
+            currency='USD',
+            exchange_rate_cad=Decimal('1.3'),
+            amount_cad=Decimal('1300.00')
+        )
+
+    def test_transaction_list_filter_by_account(self):
+        response = self.client.get(reverse('transaction_list'), {'account': 'TOM IB'})
+        self.assertContains(response, 'AAPL')
+        
+        response = self.client.get(reverse('transaction_list'), {'account': 'OTHER'})
+        self.assertNotContains(response, 'AAPL')

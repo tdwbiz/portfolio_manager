@@ -138,6 +138,7 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             'amount': amount,
             'currency': currency,
             'exchange_rate_cad': Decimal('1.000000'),
+            'account_id': row[3].strip().upper(),
         })
 
     return trades
@@ -148,6 +149,7 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
     trades: List[Dict[str, Any]] = []
     in_trades_section: bool = False
     header: List[str] = []
+    account_idx: int = None
 
     for row_num, row in enumerate(rows, start=1):
         if not row or all(cell.strip() == '' for cell in row):
@@ -170,6 +172,9 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                                                       'buy/sell', 'quantity',
                                                       't. price']):
                     header = [cell.strip().lower().replace('/', '_') for cell in row]
+                    # Check for Account column
+                    if 'account' in header:
+                        account_idx = header.index('account')
                     continue
 
             if header and len(row) >= len(header):
@@ -217,6 +222,10 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             continue
 
                         currency = row[7].strip() if len(row) > 7 else 'USD'
+                        
+                        account_id = ''
+                        if account_idx is not None and len(row) > account_idx:
+                            account_id = row[account_idx].strip().upper()
 
                         trades.append({
                             'date': trade_date,
@@ -228,6 +237,7 @@ def _parse_ib_activity_statement(rows: List[List[str]]) -> List[Dict[str, Any]]:
                             'amount': amount,
                             'currency': currency,
                             'exchange_rate_cad': Decimal('1.000000'),
+                            'account_id': account_id,
                         })
                 except Exception as e:
                     logger.error(f"Row {row_num}: Error parsing trade data: {e}")
@@ -327,6 +337,11 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
 
                 currency = cleaned[9] if len(cleaned) > 9 else 'USD'
                 symbol = cleaned[2]
+                
+                # Capture Account column (index 7)
+                account_id = ''
+                if len(cleaned) > 7:
+                    account_id = cleaned[7].strip().upper()
 
                 trades.append({
                     'date': trade_date,
@@ -338,6 +353,7 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                     'amount': amount,
                     'currency': currency,
                     'exchange_rate_cad': usd_to_cad_rate,
+                    'account_id': account_id,
                 })
 
     except FileNotFoundError:

@@ -12,7 +12,7 @@ from django.core.management.base import CommandError
 from django.db import connection
 from django.test import TestCase, override_settings
 
-from core.models import BrokerStatement, Transaction
+from core.models import BrokerStatement, Transaction, Account
 
 
 class ImportStatementsCommandTest(TestCase):
@@ -176,3 +176,100 @@ class ImportStatementsCommandTest(TestCase):
             self.assertEqual(statements.count(), 0)
         finally:
             os.unlink(file_path)
+
+    def test_account_created_on_ib_import(self) -> None:
+        """Test that Account is created when importing IB CSV with account_id."""
+        ib_csv_with_account = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,TOM IB,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        file_path = self._create_temp_csv(ib_csv_with_account)
+        try:
+            call_command('import_statements', '--broker', 'IB', '--file', file_path)
+            self.assertEqual(Account.objects.count(), 1)
+            self.assertEqual(Account.objects.first().account_id, 'TOM IB')
+        finally:
+            os.unlink(file_path)
+
+    def test_account_created_on_rbc_import(self) -> None:
+        """Test that Account is created when importing RBC CSV with account_id."""
+        rbc_csv_with_account = (
+            '"Activity Export as of January 15, 2024"\n'
+            '"Exchange Rate: 1 USD = 1.3500 CAD"\n'
+            '"Date","Activity","Symbol","Symbol Description","Quantity","Price",'
+            '"Settlement Date","Account","Value","Currency","Description"\n'
+            '"January 15, 2024","Buy","AAPL","Apple Inc.","10","150.50",'
+            '"January 17, 2024","TOM IB","1495.05","USD","Buy AAPL"\n'
+        )
+        file_path = self._create_temp_csv(rbc_csv_with_account)
+        try:
+            call_command('import_statements', '--broker', 'RBC', '--file', file_path)
+            self.assertEqual(Account.objects.count(), 1)
+            self.assertEqual(Account.objects.first().account_id, 'TOM IB')
+        finally:
+            os.unlink(file_path)
+
+    def test_transaction_linked_to_account(self) -> None:
+        """Test that Transaction is linked to Account after import."""
+        ib_csv_with_account = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,SUSAN IB,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        file_path = self._create_temp_csv(ib_csv_with_account)
+        try:
+            call_command('import_statements', '--broker', 'IB', '--file', file_path)
+            tx = Transaction.objects.first()
+            self.assertIsNotNone(tx.account)
+            self.assertEqual(tx.account.account_id, 'SUSAN IB')
+        finally:
+            os.unlink(file_path)
+
+    def test_duplicate_tx_same_account_skipped(self) -> None:
+        """Test that duplicate transaction for same account is skipped."""
+        ib_csv = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,TOM IB,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        file_path = self._create_temp_csv(ib_csv)
+        try:
+            call_command('import_statements', '--broker', 'IB', '--file', file_path)
+            initial_count = Transaction.objects.count()
+            
+            call_command('import_statements', '--broker', 'IB', '--file', file_path)
+            final_count = Transaction.objects.count()
+            
+            self.assertEqual(initial_count, final_count)
+        finally:
+            os.unlink(file_path)
+
+    def test_same_trade_different_accounts_both_imported(self) -> None:
+        """Test that same trade values for different accounts are both imported."""
+        ib_csv_tom = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,TOM IB,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        ib_csv_susan = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,SUSAN IB,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        file_path_tom = self._create_temp_csv(ib_csv_tom)
+        file_path_susan = self._create_temp_csv(ib_csv_susan)
+        try:
+            call_command('import_statements', '--broker', 'IB', '--file', file_path_tom)
+            call_command('import_statements', '--broker', 'IB', '--file', file_path_susan)
+            
+            self.assertEqual(Transaction.objects.count(), 2)
+            self.assertEqual(Account.objects.count(), 2)
+        finally:
+            os.unlink(file_path_tom)
+            os.unlink(file_path_susan)

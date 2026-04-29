@@ -1,5 +1,6 @@
 """Django management command to import broker statements."""
 
+import hashlib
 import logging
 import os
 from typing import Any, Dict, List
@@ -9,7 +10,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.models import BrokerStatement, Transaction
+from core.models import BrokerStatement, Transaction, Account, FileImportLog
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,21 @@ class Command(BaseCommand):
         # Validate file exists
         if not os.path.exists(file_path):
             raise CommandError(f"File not found: {file_path}")
+
+        # Read file bytes for hashing
+        with open(file_path, 'rb') as f:
+            file_bytes = f.read()
+        
+        content_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        # Check for duplicate file content (skip if found, unless dry-run)
+        if not dry_run:
+            prior_log = FileImportLog.objects.filter(content_hash=content_hash).first()
+            if prior_log:
+                self.stdout.write(self.style.WARNING(
+                    f"Skipping {os.path.basename(file_path)}: identical content already imported as {prior_log.filename}"
+                ))
+                return
 
         # Parse CSV
         self.stdout.write(f"Parsing {broker} CSV file: {file_path}")
@@ -84,8 +100,17 @@ class Command(BaseCommand):
                 skipped_count: int = 0
 
                 for trade in trades:
-                    # Check for duplicates
-                    # Duplicate key: source, date, symbol, type, quantity, price
+                    # Get account_id from trade
+                    account_id = trade.get('account_id', '').strip().upper()
+                    if account_id:
+                        account, _ = Account.objects.get_or_create(
+                            account_id=account_id,
+                            defaults={'name': account_id, 'broker': broker}
+                        )
+                    else:
+                        account = None
+
+                    # Check for duplicates (including account)
                     try:
                         existing = Transaction.objects.get(
                             statement__source=broker,
@@ -94,6 +119,7 @@ class Command(BaseCommand):
                             type=trade['type'],
                             quantity=trade['quantity'],
                             price=trade['price'],
+                            account__account_id=account_id if account_id else '',
                         )
                         logger.debug(f"Duplicate transaction found: {existing}")
                         skipped_count += 1
@@ -110,6 +136,7 @@ class Command(BaseCommand):
                             amount_cad = (trade['amount'] * rate).quantize(Decimal('0.01'))
                         Transaction.objects.create(
                             statement=statement,
+                            account=account,
                             date=trade['date'],
                             symbol=trade['symbol'],
                             type=trade['type'],
@@ -125,6 +152,16 @@ class Command(BaseCommand):
                     except Exception as e:
                         logger.error(f"Error creating transaction for {trade}: {e}")
                         raise CommandError(f"Failed to import transaction: {e}")
+
+                # Save file import log
+                FileImportLog.objects.create(
+                    filename=os.path.basename(file_path),
+                    broker=broker,
+                    records_imported=imported_count,
+                    records_skipped=skipped_count,
+                    status='success' if imported_count > 0 else 'partial',
+                    content_hash=content_hash,
+                )
 
                 self.stdout.write(self.style.SUCCESS(
                     f"Successfully imported {imported_count} transactions "

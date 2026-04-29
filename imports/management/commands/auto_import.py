@@ -1,5 +1,6 @@
 """Django management command to auto-import broker CSVs from the inbox folder."""
 
+import hashlib
 import logging
 import os
 import shutil
@@ -88,6 +89,22 @@ class Command(BaseCommand):
             broker = broker_override or 'UNK'
 
             try:
+                # Hash check — skip if identical content was imported before
+                with open(file_path, 'rb') as _fh:
+                    content_hash = hashlib.sha256(_fh.read()).hexdigest()
+                prior = FileImportLog.objects.filter(content_hash=content_hash).first()
+                if prior and not dry_run:
+                    self.stdout.write(
+                        f"  Skipping {filename}: identical content already imported as {prior.filename}"
+                    )
+                    logger.info(
+                        f"auto_import: skipping {filename} — duplicate of {prior.filename}"
+                    )
+                    # Move the duplicate out of inbox without creating a new log
+                    self._move_file(file_path, processed_dir)
+                    total_files -= 1  # don't count it as processed
+                    continue
+
                 # Detect broker
                 broker = broker_override or self._detect_broker(file_path)
 
@@ -159,6 +176,7 @@ class Command(BaseCommand):
                     records_imported=imported_count,
                     records_skipped=skipped_count,
                     status=status,
+                    content_hash=content_hash,
                 )
 
                 dest = self._move_file(file_path, processed_dir)

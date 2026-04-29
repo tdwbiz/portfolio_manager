@@ -8,7 +8,7 @@ from decimal import Decimal
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
-from core.models import BrokerStatement, FileImportLog, Transaction
+from core.models import BrokerStatement, FileImportLog, Transaction, Account
 
 
 # ---------------------------------------------------------------------------
@@ -167,3 +167,27 @@ class AutoImportCommandTest(TestCase):
         self.assertIsNotNone(ib_tx)
         self.assertEqual(ib_tx.exchange_rate_cad, Decimal('1.000000'))
         self.assertEqual(ib_tx.amount_cad, ib_tx.amount)
+
+    def test_duplicate_file_skipped_by_hash(self) -> None:
+        """Importing the same file content twice skips the second import."""
+        # First import
+        self._run()
+        self.assertEqual(Transaction.objects.count(), 2)
+        self.assertEqual(FileImportLog.objects.filter(status='success').count(), 2)
+
+        # Write a duplicate file with identical content (original was moved to processed/)
+        duplicate_file = os.path.join(self.inbox_dir, 'ib_duplicate.csv')
+        with open(duplicate_file, 'w', newline='', encoding='utf-8') as f:
+            f.write(IB_CSV)
+        
+        # Second import
+        self._run()
+        
+        # Transaction count should not change
+        self.assertEqual(Transaction.objects.count(), 2)
+        
+        # Only 2 success logs (the duplicate was skipped)
+        self.assertEqual(FileImportLog.objects.filter(status='success').count(), 2)
+        
+        # The duplicate file should not have a log
+        self.assertFalse(FileImportLog.objects.filter(filename='ib_duplicate.csv').exists())

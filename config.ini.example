@@ -1,0 +1,10 @@
+# config.ini.example — copy to config.ini and edit for your environment.
+# This file IS committed to git as documentation.
+
+[import]
+# Absolute paths — leave blank for <project_root>/inbox and <project_root>/processed
+inbox_dir =
+processed_dir =
+
+# Watcher poll interval in seconds (0 = disabled)
+poll_interval = 300

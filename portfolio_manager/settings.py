@@ -3,15 +3,20 @@ Django settings for portfolio_manager project.
 """
 
 from pathlib import Path
+import configparser
 import logging.handlers
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load secrets from .env (never committed to git)
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load non-secret app config from config.ini (committed to git)
+_cfg = configparser.ConfigParser()
+_cfg.read(BASE_DIR / 'config.ini')
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-portfolio-manager-dev-key-change-in-production'
@@ -119,9 +124,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
-# Auto-import inbox/processed directories
-IMPORT_INBOX_DIR = BASE_DIR / 'inbox'
-IMPORT_PROCESSED_DIR = BASE_DIR / 'processed'
+# Auto-import settings — read from config.ini [import] section
+_inbox_raw = _cfg.get('import', 'inbox_dir', fallback='').strip()
+IMPORT_INBOX_DIR = Path(_inbox_raw) if _inbox_raw else BASE_DIR / 'inbox'
+
+_processed_raw = _cfg.get('import', 'processed_dir', fallback='').strip()
+IMPORT_PROCESSED_DIR = Path(_processed_raw) if _processed_raw else BASE_DIR / 'processed'
+
+IMPORT_INBOX_POLL_INTERVAL = _cfg.getint('import', 'poll_interval', fallback=300)
 
 LOGGING = {
     'version': 1,

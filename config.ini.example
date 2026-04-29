@@ -6,5 +6,9 @@
 inbox_dir =
 processed_dir =
 
+# Directory for rejection-log CSVs (one rotating file per month).
+# Leave blank for <project_root>/logs
+logs_dir =
+
 # Watcher poll interval in seconds (0 = disabled)
 poll_interval = 300

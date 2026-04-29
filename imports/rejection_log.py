@@ -69,23 +69,29 @@ def rejection_from_trade(filename: str, row_number: int, reason: str,
     )
 
 
-def write_rejection_log(rejections: List[Dict[str, Any]], dest_dir: str,
+def write_rejection_log(rejections: List[Dict[str, Any]], logs_dir: str,
                         source_filename: str) -> str | None:
-    """Write *rejections* to a timestamped CSV file in *dest_dir*.
+    """Append *rejections* to the monthly rejection-log CSV in *logs_dir*.
 
-    Returns the path to the written file, or None if rejections is empty.
+    The file is named ``rejected_YYYY_MM.csv`` so one file covers each
+    calendar month and files rotate automatically.  A header row is written
+    only when the file is created for the first time.
+
+    Returns the path to the log file, or None if rejections is empty.
     """
     if not rejections:
         return None
 
-    os.makedirs(dest_dir, exist_ok=True)
-    name = os.path.splitext(os.path.basename(source_filename))[0]
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path = os.path.join(dest_dir, f"{name}_{timestamp}_rejected.csv")
+    os.makedirs(logs_dir, exist_ok=True)
+    month_stamp = datetime.now().strftime('%Y_%m')
+    log_path = os.path.join(logs_dir, f"rejected_{month_stamp}.csv")
 
-    with open(log_path, 'w', newline='', encoding='utf-8') as fh:
+    is_new = not os.path.exists(log_path) or os.path.getsize(log_path) == 0
+
+    with open(log_path, 'a', newline='', encoding='utf-8') as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDNAMES, extrasaction='ignore')
-        writer.writeheader()
+        if is_new:
+            writer.writeheader()
         writer.writerows(rejections)
 
     return log_path

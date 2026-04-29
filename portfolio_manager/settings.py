@@ -131,6 +131,9 @@ IMPORT_INBOX_DIR = Path(_inbox_raw) if _inbox_raw else BASE_DIR / 'inbox'
 _processed_raw = _cfg.get('import', 'processed_dir', fallback='').strip()
 IMPORT_PROCESSED_DIR = Path(_processed_raw) if _processed_raw else BASE_DIR / 'processed'
 
+_logs_raw = _cfg.get('import', 'logs_dir', fallback='').strip()
+IMPORT_LOGS_DIR = Path(_logs_raw) if _logs_raw else BASE_DIR / 'logs'
+
 IMPORT_INBOX_POLL_INTERVAL = _cfg.getint('import', 'poll_interval', fallback=300)
 
 LOGGING = {

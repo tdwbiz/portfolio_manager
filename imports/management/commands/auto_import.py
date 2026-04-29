@@ -209,9 +209,8 @@ class Command(BaseCommand):
                 total_imported += imported_count
                 total_skipped += skipped_count
 
-                # Write rejection log if anything was skipped
-                rejection_log_dir = os.path.join(processed_dir, 'rejection_logs')
-                log_path = write_rejection_log(rejections, rejection_log_dir, filename)
+                # Write rejection log to the configured logs directory
+                log_path = write_rejection_log(rejections, str(settings.IMPORT_LOGS_DIR), filename)
                 if log_path:
                     self.stdout.write(f"  Rejection log: {log_path}")
 

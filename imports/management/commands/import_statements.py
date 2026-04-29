@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List
 
 from decimal import Decimal
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -181,9 +182,8 @@ class Command(BaseCommand):
                     f"({skipped_count} duplicates skipped)."
                 ))
 
-                # Write rejection log next to the source file
-                log_dir = os.path.join(os.path.dirname(file_path), 'rejection_logs')
-                log_path = write_rejection_log(rejections, log_dir, os.path.basename(file_path))
+                # Write rejection log to the configured logs directory
+                log_path = write_rejection_log(rejections, str(settings.IMPORT_LOGS_DIR), os.path.basename(file_path))
                 if log_path:
                     self.stdout.write(f"Rejection log written: {log_path}")
 

@@ -12,7 +12,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from core.models import BrokerStatement, FileImportLog, Transaction
+from core.models import Account, BrokerStatement, FileImportLog, Transaction
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -132,16 +132,30 @@ class Command(BaseCommand):
                     )
 
                     for trade in trades:
-                        exists = Transaction.objects.filter(
+                        account_id = trade.get('account_id', '').strip().upper()
+                        if account_id:
+                            account, _ = Account.objects.get_or_create(
+                                account_id=account_id,
+                                defaults={'name': account_id, 'broker': broker},
+                            )
+                        else:
+                            account = None
+
+                        # Dedup check includes account to avoid cross-account false positives
+                        dedup_qs = Transaction.objects.filter(
                             statement__source=broker,
                             date=trade['date'],
                             symbol=trade['symbol'],
                             type=trade['type'],
                             quantity=trade['quantity'],
                             price=trade['price'],
-                        ).exists()
+                        )
+                        if account:
+                            dedup_qs = dedup_qs.filter(account=account)
+                        else:
+                            dedup_qs = dedup_qs.filter(account__isnull=True)
 
-                        if exists:
+                        if dedup_qs.exists():
                             skipped_count += 1
                             continue
 
@@ -153,6 +167,7 @@ class Command(BaseCommand):
 
                         Transaction.objects.create(
                             statement=statement,
+                            account=account,
                             date=trade['date'],
                             symbol=trade['symbol'],
                             type=trade['type'],

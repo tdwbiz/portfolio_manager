@@ -98,6 +98,11 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             logger.warning(f"Row {row_num}: Could not parse date '{row[2].strip()}'")
             continue
 
+        account_id_raw = row[3].strip().upper()
+        if account_id_raw.startswith('PRAC'):
+            logger.debug(f"Row {row_num}: Skipping practice account '{account_id_raw}'")
+            continue
+
         symbol = row[6].strip()
         if not symbol or symbol == '-':
             logger.warning(f"Row {row_num}: Missing symbol, skipping")
@@ -138,7 +143,7 @@ def _parse_ib_transaction_history(rows: List[List[str]]) -> List[Dict[str, Any]]
             'amount': amount,
             'currency': currency,
             'exchange_rate_cad': Decimal('1.000000'),
-            'account_id': row[3].strip().upper(),
+            'account_id': account_id_raw,
         })
 
     return trades
@@ -338,10 +343,13 @@ def parse_rbc_csv(file_path: str) -> Tuple[List[Dict[str, Any]], Decimal]:
                 currency = cleaned[9] if len(cleaned) > 9 else 'USD'
                 symbol = cleaned[2]
                 
-                # Capture Account column (index 7)
+                # Capture Account column (index 7) — skip practice accounts
                 account_id = ''
                 if len(cleaned) > 7:
                     account_id = cleaned[7].strip().upper()
+                if account_id.startswith('PRAC'):
+                    logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
+                    continue
 
                 trades.append({
                     'date': trade_date,

@@ -28,6 +28,8 @@
             {% endfor %}
         </select>
     </label>
+    <label>From: <input type="date" name="date_from" value="{{ date_from }}"></label>
+    <label>To: <input type="date" name="date_to" value="{{ date_to }}"></label>
     <button type="submit">Filter</button>
     <a href="{% url 'transaction_list' %}">Clear</a>
 </form>
@@ -70,10 +72,10 @@
 <div>
     <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.</span>
     {% if page_obj.has_previous %}
-        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}">Previous</a>
+        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">Previous</a>
     {% endif %}
     {% if page_obj.has_next %}
-        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}">Next</a>
+        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">Next</a>
     {% endif %}
 </div>
 {% endblock %}

@@ -14,30 +14,66 @@ logger = logging.getLogger(__name__)
 # Type normalisation helpers
 # ---------------------------------------------------------------------------
 
-# Maps raw broker type strings → (code, label)
+# Canonical codes used across both brokers:
+#   BUY, SELL, DIV, DIST, INT, TRANSFER, DEP, WDRAW, TAX, WITHTAX, FEE, OTHER
+
+# Maps raw broker type strings → (canonical_code, display_label)
 _IB_TYPE_MAP: Dict[str, Tuple[str, str]] = {
-    'Buy':                       ('BUY',      'Buy'),
-    'Sell':                      ('SELL',     'Sell'),
-    'Dividend':                  ('DIV',      'Dividend'),
-    'Dividends':                 ('DIV',      'Dividend'),
-    'Fee':                       ('FEE',      'Fee'),
-    'Transfer':                  ('TRANSFER', 'Transfer'),
-    'Sales Tax':                 ('TAX',      'Sales Tax'),
-    'Foreign Tax Withholding':   ('WITHTAX',  'Foreign Tax Withholding'),
-    'Other':                     ('OTHER',    'Other'),
+    # Trades
+    'Buy':                              ('BUY',      'Buy'),
+    'Sell':                             ('SELL',     'Sell'),
+    # Income
+    'Dividend':                         ('DIV',      'Dividend'),
+    'Dividends':                        ('DIV',      'Dividend'),
+    'Distribution':                     ('DIST',     'Distribution'),
+    'Interest':                         ('INT',      'Interest'),
+    # Cash movements
+    'Deposit':                          ('DEP',      'Deposit'),
+    'Deposits':                         ('DEP',      'Deposit'),
+    'Deposits & Withdrawals':           ('DEP',      'Deposit'),
+    'Withdrawal':                       ('WDRAW',    'Withdrawal'),
+    'Withdrawals':                      ('WDRAW',    'Withdrawal'),
+    'Wire Transfer':                    ('WDRAW',    'Withdrawal'),
+    # Transfers
+    'Transfer':                         ('TRANSFER', 'Transfer'),
+    'Transfers':                        ('TRANSFER', 'Transfer'),
+    # Fees & tax
+    'Fee':                              ('FEE',      'Fee'),
+    'Commission':                       ('FEE',      'Fee'),
+    'Sales Tax':                        ('TAX',      'Tax'),
+    'Tax':                              ('TAX',      'Tax'),
+    'Foreign Tax Withholding':          ('WITHTAX',  'Foreign Tax Withholding'),
+    'W/H Tax':                          ('WITHTAX',  'Foreign Tax Withholding'),
+    'Withholding Tax':                  ('WITHTAX',  'Foreign Tax Withholding'),
+    # Catch-all
+    'Other':                            ('OTHER',    'Other'),
 }
 
 _RBC_TYPE_MAP: Dict[str, Tuple[str, str]] = {
-    'Buy':                           ('BUY',      'Buy'),
-    'Sell':                          ('SELL',     'Sell'),
-    'Dividends':                     ('DIV',      'Dividend'),
-    'Distribution':                  ('DIST',     'Distribution'),
-    'Interest':                      ('INT',      'Interest'),
-    'Transfers':                     ('TRANSFER', 'Transfer'),
-    'Deposits & Contributions':      ('DEP',      'Deposit/Contribution'),
-    'Withdrawals & De-registrations':('WDRAW',    'Withdrawal/De-registration'),
-    'Taxes':                         ('TAX',      'Tax'),
-    'Others':                        ('OTHER',    'Other'),
+    # Trades
+    'Buy':                              ('BUY',      'Buy'),
+    'Sell':                             ('SELL',     'Sell'),
+    # Income
+    'Dividends':                        ('DIV',      'Dividend'),
+    'Distribution':                     ('DIST',     'Distribution'),
+    'Interest':                         ('INT',      'Interest'),
+    # Cash movements
+    'Deposits & Contributions':         ('DEP',      'Deposit'),
+    'Withdrawals & De-registrations':   ('WDRAW',    'Withdrawal'),
+    'Withdrawal':                       ('WDRAW',    'Withdrawal'),
+    'WDRAW':                            ('WDRAW',    'Withdrawal'),
+    # Transfers
+    'Transfers':                        ('TRANSFER', 'Transfer'),
+    'Transfer':                         ('TRANSFER', 'Transfer'),
+    # Fees & tax
+    'Fees':                             ('FEE',      'Fee'),
+    'Commission':                       ('FEE',      'Fee'),
+    'Taxes':                            ('TAX',      'Tax'),
+    'Tax':                              ('TAX',      'Tax'),
+    'Foreign Tax Withholding':          ('WITHTAX',  'Foreign Tax Withholding'),
+    # Catch-all
+    'Others':                           ('OTHER',    'Other'),
+    'Other':                            ('OTHER',    'Other'),
 }
 
 

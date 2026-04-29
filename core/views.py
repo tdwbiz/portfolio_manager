@@ -25,15 +25,21 @@ def transaction_list(request):
     symbol = request.GET.get('symbol')
     tx_type = request.GET.get('type')
     account_id = request.GET.get('account')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
     
     if broker:
         qs = qs.filter(statement__source=broker)
     if symbol:
-        qs = qs.filter(symbol=symbol)
+        qs = qs.filter(symbol__icontains=symbol)
     if tx_type:
         qs = qs.filter(type=tx_type)
     if account_id:
         qs = qs.filter(account__account_id=account_id)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
         
     qs = qs.order_by('-date')
     
@@ -50,6 +56,8 @@ def transaction_list(request):
         'symbol_filter': symbol,
         'type_filter': tx_type,
         'account_filter': account_id,
+        'date_from': date_from or '',
+        'date_to': date_to or '',
         'accounts': accounts,
         'tx_types': tx_types,
     })

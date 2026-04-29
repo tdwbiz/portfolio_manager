@@ -23,7 +23,8 @@ class DashboardTests(TestCase):
             amount=Decimal('1000.00'),
             currency='USD',
             exchange_rate_cad=Decimal('1.3'),
-            amount_cad=Decimal('1300.00')
+            amount_cad=Decimal('1300.00'),
+            tx_hash='dashboard_test_hash_001',
         )
         response = self.client.get(reverse('dashboard'))
         self.assertContains(response, 'AAPL')
@@ -49,7 +50,8 @@ class TransactionListTests(TestCase):
                 amount=Decimal('100.00'),
                 currency='USD',
                 exchange_rate_cad=Decimal('1.3'),
-                amount_cad=Decimal('130.00')
+                amount_cad=Decimal('130.00'),
+                tx_hash=f'txlist_loop_{i:04d}',
             )
 
     def test_transaction_list_loads(self):
@@ -68,7 +70,8 @@ class TransactionListTests(TestCase):
             amount=Decimal('100.00'),
             currency='USD',
             exchange_rate_cad=Decimal('1.3'),
-            amount_cad=Decimal('130.00')
+            amount_cad=Decimal('130.00'),
+            tx_hash='broker_filter_rbc_goog',
         )
         response = self.client.get(reverse('transaction_list'), {'broker': 'IB'})
         self.assertContains(response, 'AAPL')
@@ -125,7 +128,8 @@ class TransactionListFilterByAccountTests(TestCase):
             amount=Decimal('1000.00'),
             currency='USD',
             exchange_rate_cad=Decimal('1.3'),
-            amount_cad=Decimal('1300.00')
+            amount_cad=Decimal('1300.00'),
+            tx_hash='acct_filter_test_hash_001',
         )
 
     def test_transaction_list_filter_by_account(self):

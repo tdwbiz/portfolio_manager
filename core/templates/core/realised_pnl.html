@@ -1,0 +1,61 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Realised P&L</h1>
+
+<p>
+  Total Realised P&L (FIFO):
+  <strong style="color:{% if total_pnl_fifo >= 0 %}green{% else %}red{% endif %}">{{ total_pnl_fifo|floatformat:2 }}</strong>
+  &nbsp;|&nbsp;
+  Total Realised P&L (Avg Cost):
+  <strong style="color:{% if total_pnl_avg >= 0 %}green{% else %}red{% endif %}">{{ total_pnl_avg|floatformat:2 }}</strong>
+</p>
+
+<form method="get">
+  <select name="account" onchange="this.form.submit()">
+    <option value="">All Accounts</option>
+    {% for account in accounts %}
+      <option value="{{ account.account_id }}" {% if account_filter == account.account_id %}selected{% endif %}>
+        {{ account.account_id }} - {{ account.name }}
+      </option>
+    {% endfor %}
+  </select>
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>Sell Date</th>
+      <th>Symbol</th>
+      <th>Account</th>
+      <th>Qty Sold</th>
+      <th>Sell Proceeds (CAD)</th>
+      <th>Cost Basis FIFO (CAD)</th>
+      <th>P&L FIFO (CAD)</th>
+      <th>Cost Basis Avg (CAD)</th>
+      <th>P&L Avg (CAD)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for trade in trades %}
+      <tr>
+        <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
+        <td>{{ trade.symbol }}</td>
+        <td>{{ trade.account_id }}</td>
+        <td>{{ trade.qty_sold|floatformat:2 }}</td>
+        <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
+        <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
+        <td style="text-align:right; color:{% if trade.realised_pnl_fifo >= 0 %}green{% else %}red{% endif %}">
+          {{ trade.realised_pnl_fifo|floatformat:2 }}
+        </td>
+        <td style="text-align:right">{{ trade.cost_basis_avg|floatformat:2 }}</td>
+        <td style="text-align:right; color:{% if trade.realised_pnl_avg >= 0 %}green{% else %}red{% endif %}">
+          {{ trade.realised_pnl_avg|floatformat:2 }}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9">No closed positions found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

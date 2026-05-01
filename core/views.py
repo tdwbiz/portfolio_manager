@@ -6,30 +6,32 @@ from django.shortcuts import get_object_or_404, render, redirect
 from django.http import HttpResponseNotAllowed
 
 from core.models import Account, FileImportLog, Transaction, TransactionType
-from core.utils import compute_positions, fetch_last_prices, enrich_positions_with_prices
+from core.utils import compute_positions, fetch_last_prices, enrich_positions_with_prices, compute_realised_pnl
 from core.forms import AccountForm
+
 
 def dashboard(request):
     positions = compute_positions()
     total_value = sum(p['total_cost_cad'] for p in positions)
     recent_imports = FileImportLog.objects.all().order_by('-imported_at')[:10]
-    
+
     return render(request, 'core/dashboard.html', {
         'positions': positions,
         'total_value': total_value,
         'recent_imports': recent_imports,
     })
 
+
 def transaction_list(request):
     qs = Transaction.objects.select_related('statement', 'account').all()
-    
+
     broker = request.GET.get('broker')
     symbol = request.GET.get('symbol')
     tx_type = request.GET.get('type')
     account_id = request.GET.get('account')
     date_from = request.GET.get('date_from')
     date_to = request.GET.get('date_to')
-    
+
     if broker:
         qs = qs.filter(statement__source=broker)
     if symbol:
@@ -42,13 +44,13 @@ def transaction_list(request):
         qs = qs.filter(date__gte=date_from)
     if date_to:
         qs = qs.filter(date__lte=date_to)
-        
+
     qs = qs.order_by('-date')
-    
+
     paginator = Paginator(qs, 50)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
-    
+
     accounts = Account.objects.all().order_by('account_id')
     tx_types = TransactionType.objects.order_by('code')
 
@@ -63,6 +65,7 @@ def transaction_list(request):
         'accounts': accounts,
         'tx_types': tx_types,
     })
+
 
 def accounts_list(request):
     accounts = Account.objects.all().order_by('broker', 'account_id').annotate(
@@ -157,7 +160,7 @@ def account_create(request):
 
 def account_edit(request, account_id):
     account = get_object_or_404(Account, account_id=account_id)
-    
+
     if request.method == 'POST':
         form = AccountForm(request.POST, instance=account)
         form.fields['account_id'].disabled = True
@@ -167,14 +170,14 @@ def account_edit(request, account_id):
     else:
         form = AccountForm(instance=account)
         form.fields['account_id'].disabled = True
-        
+
     return render(request, 'core/account_form.html', {'form': form, 'title': 'Edit Account'})
 
 
 def account_delete(request, account_id):
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
-    
+
     account = get_object_or_404(Account, account_id=account_id)
     account.delete()
     return redirect('accounts_list')
@@ -200,4 +203,22 @@ def portfolio_summary(request):
         'total_cost_cad': total_cost_cad,
         'total_market_value_cad': total_market_value_cad,
         'total_unrealised_pnl_cad': total_unrealised_pnl_cad,
+    })
+
+
+def realised_pnl(request):
+    account_filter = request.GET.get('account')
+    trades = compute_realised_pnl(account_id=account_filter)
+
+    total_pnl_fifo = sum(t['realised_pnl_fifo'] for t in trades)
+    total_pnl_avg = sum(t['realised_pnl_avg'] for t in trades)
+
+    accounts = Account.objects.all().order_by('account_id')
+
+    return render(request, 'core/realised_pnl.html', {
+        'trades': trades,
+        'total_pnl_fifo': total_pnl_fifo,
+        'total_pnl_avg': total_pnl_avg,
+        'accounts': accounts,
+        'account_filter': account_filter,
     })

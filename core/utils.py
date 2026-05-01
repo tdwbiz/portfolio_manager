@@ -1,7 +1,87 @@
+from collections import deque
 from decimal import Decimal
 import yfinance as yf
 from django.core.cache import cache
 from core.models import Transaction
+
+
+def compute_realised_pnl(account_id: str = None) -> list[dict]:
+    """
+    Compute realised P&L using FIFO and average-cost methods.
+    Processes transactions in chronological order.
+    Returns one dict per sell with both FIFO and avg-cost values populated.
+    """
+    qs = Transaction.objects.select_related('account')
+    if account_id:
+        qs = qs.filter(account__account_id=account_id)
+
+    transactions = qs.filter(type__in=['BUY', 'SELL']).order_by('date', 'id')
+
+    # Group by (symbol, account_id), preserving chronological order
+    groups: dict[tuple, list] = {}
+    for tx in transactions:
+        key = (tx.symbol, tx.account.account_id if tx.account else '')
+        groups.setdefault(key, []).append(tx)
+
+    result = []
+
+    for (symbol, acct_id), txs in groups.items():
+        fifo_deque: deque = deque()
+        total_shares = Decimal('0')
+        total_cost = Decimal('0')
+
+        for tx in txs:
+            cost = abs(tx.amount_cad)
+
+            if tx.type == 'BUY':
+                fifo_deque.append({'qty': tx.quantity, 'cost': cost})
+                total_shares += tx.quantity
+                total_cost += cost
+
+            elif tx.type == 'SELL':
+                sell_amount = abs(tx.amount_cad)
+                qty_to_sell = tx.quantity
+
+                # FIFO cost basis
+                qty_remaining = qty_to_sell
+                matched_cost_fifo = Decimal('0')
+                while qty_remaining > 0 and fifo_deque:
+                    lot = fifo_deque[0]
+                    if lot['qty'] <= qty_remaining:
+                        matched_cost_fifo += lot['cost']
+                        qty_remaining -= lot['qty']
+                        fifo_deque.popleft()
+                    else:
+                        fraction = qty_remaining / lot['qty']
+                        cost_taken = lot['cost'] * fraction
+                        matched_cost_fifo += cost_taken
+                        lot['cost'] -= cost_taken
+                        lot['qty'] -= qty_remaining
+                        qty_remaining = Decimal('0')
+
+                # Avg-cost basis
+                avg_cost_per_share = total_cost / total_shares if total_shares > 0 else Decimal('0')
+                cost_basis_avg = qty_to_sell * avg_cost_per_share
+
+                # Update running avg-cost state
+                total_shares -= qty_to_sell
+                total_cost -= cost_basis_avg
+
+                result.append({
+                    'symbol': symbol,
+                    'account_id': acct_id,
+                    'sell_date': tx.date,
+                    'qty_sold': qty_to_sell,
+                    'sell_amount_cad': sell_amount,
+                    'cost_basis_fifo': matched_cost_fifo,
+                    'cost_basis_avg': cost_basis_avg,
+                    'realised_pnl_fifo': sell_amount - matched_cost_fifo,
+                    'realised_pnl_avg': sell_amount - cost_basis_avg,
+                })
+
+    result.sort(key=lambda x: x['sell_date'], reverse=True)
+    return result
+
 
 def compute_positions(broker=None):
     """
@@ -40,7 +120,8 @@ def compute_positions(broker=None):
         elif tx.type == 'SELL':
             pos['total_shares'] -= tx.quantity
             pos['total_cost_cad'] -= tx.amount_cad
-            
+    
+    # Convert to list of dicts
     result = []
     for key, pos in positions.items():
         if pos['total_shares'] > 0:
@@ -54,7 +135,9 @@ def compute_positions(broker=None):
                 'avg_cost_cad': avg_cost,
                 'total_cost_cad': pos['total_cost_cad'],
             })
-            
+    
+    # Sort by broker, account name, symbol
+    result.sort(key=lambda x: (x['broker'], x['account_name'], x['symbol'] or ''))
     return result
 
 
@@ -66,17 +149,17 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str,
     to_fetch = list(symbols)
     if 'USDCAD=X' not in to_fetch:
         to_fetch.append('USDCAD=X')
-    
+
     cached_prices = {}
     uncached_symbols = []
-    
+
     for sym in to_fetch:
         price = cache.get(f'price_{sym}')
         if price is not None:
             cached_prices[sym] = price
         else:
             uncached_symbols.append(sym)
-    
+
     if uncached_symbols:
         try:
             tickers = yf.Tickers(' '.join(uncached_symbols))
@@ -92,7 +175,7 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str,
                     pass
         except Exception:
             pass
-    
+
     return cached_prices
 
 
@@ -101,25 +184,25 @@ def enrich_positions_with_prices(positions: list[dict], prices: dict) -> list[di
     Enrich positions with market prices and calculate P&L.
     """
     usdcad = prices.get('USDCAD=X', Decimal('1'))
-    
+
     enriched = []
     for pos in positions:
         last_price = prices.get(pos['symbol'])
-        
+
         fx = usdcad if pos['currency'] != 'CAD' else Decimal('1')
-        
+
         market_value_cad = None
         if last_price is not None:
             market_value_cad = last_price * pos['total_shares'] * fx
-        
+
         unrealised_pnl_cad = None
         if market_value_cad is not None:
             unrealised_pnl_cad = market_value_cad - pos['total_cost_cad']
-        
+
         unrealised_pnl_pct = None
         if unrealised_pnl_cad is not None and pos['total_cost_cad'] != 0:
             unrealised_pnl_pct = (unrealised_pnl_cad / pos['total_cost_cad'] * 100)
-        
+
         enriched.append({
             **pos,
             'last_price': last_price,
@@ -127,5 +210,5 @@ def enrich_positions_with_prices(positions: list[dict], prices: dict) -> list[di
             'unrealised_pnl_cad': unrealised_pnl_cad,
             'unrealised_pnl_pct': unrealised_pnl_pct,
         })
-    
+
     return enriched

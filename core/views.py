@@ -1,30 +1,13 @@
-from decimal import Decimal
+from django.http import HttpResponse, JsonResponse
+from django.utils.csv import csv
+from django.utils import timezone
+from datetime import datetime
+import openpyxl
+from io import BytesIO
 
-from django.core.paginator import Paginator
-from django.db.models import Count, Sum, Q
-from django.shortcuts import get_object_or_404, render, redirect
-from django.http import HttpResponseNotAllowed
+from core.models import Transaction, Account, BrokerStatement
 
-from core.models import Account, FileImportLog, Transaction, TransactionType
-from core.utils import compute_positions, fetch_last_prices, enrich_positions_with_prices, compute_realised_pnl
-from core.forms import AccountForm
-
-
-def dashboard(request):
-    positions = compute_positions()
-    total_value = sum(p['total_cost_cad'] for p in positions)
-    recent_imports = FileImportLog.objects.all().order_by('-imported_at')[:10]
-
-    return render(request, 'core/dashboard.html', {
-        'positions': positions,
-        'total_value': total_value,
-        'recent_imports': recent_imports,
-    })
-
-
-def transaction_list(request):
-    qs = Transaction.objects.select_related('statement', 'account').all()
-
+def _apply_transaction_filters(qs, request):
     broker = request.GET.get('broker')
     symbol = request.GET.get('symbol')
     tx_type = request.GET.get('type')
@@ -33,192 +16,99 @@ def transaction_list(request):
     date_to = request.GET.get('date_to')
 
     if broker:
-        qs = qs.filter(statement__source=broker)
+        qs = qs.filter(broker_statement__broker__name=broker)
     if symbol:
-        qs = qs.filter(symbol__icontains=symbol)
+        qs = qs.filter(symbol=symbol)
     if tx_type:
         qs = qs.filter(type=tx_type)
     if account_id:
-        qs = qs.filter(account__account_id=account_id)
+        qs = qs.filter(account_id=account_id)
     if date_from:
         qs = qs.filter(date__gte=date_from)
     if date_to:
         qs = qs.filter(date__lte=date_to)
 
-    qs = qs.order_by('-date')
+    return qs, {
+        'broker': broker,
+        'symbol': symbol,
+        'type': tx_type,
+        'account': account_id,
+        'date_from': date_from,
+        'date_to': date_to
+    }
 
-    paginator = Paginator(qs, 50)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+def transaction_export_csv(request):
+    qs = Transaction.objects.all()
+    qs, filters = _apply_transaction_filters(qs, request)
 
-    accounts = Account.objects.all().order_by('account_id')
-    tx_types = TransactionType.objects.order_by('code')
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename=transactions_{datetime.now().strftime("%Y-%m-%d")}.csv'
 
-    return render(request, 'core/transaction_list.html', {
-        'page_obj': page_obj,
-        'broker_filter': broker,
-        'symbol_filter': symbol,
-        'type_filter': tx_type,
-        'account_filter': account_id,
-        'date_from': date_from or '',
-        'date_to': date_to or '',
-        'accounts': accounts,
-        'tx_types': tx_types,
-    })
+    writer = csv.writer(response)
+    writer.writerow([
+        'Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Amount', 'Currency',
+        'Amount (CAD)', 'Exchange Rate', 'Account', 'Broker', 'Notes'
+    ])
 
+    for tx in qs:
+        writer.writerow([
+            tx.date.strftime('%Y-%m-%d'), tx.symbol, tx.type, tx.quantity,
+            tx.price, tx.amount, tx.currency, tx.amount_cad,
+            tx.exchange_rate, tx.account.id, tx.broker_statement.broker.name,
+            tx.notes
+        ])
 
-def accounts_list(request):
-    accounts = Account.objects.all().order_by('broker', 'account_id').annotate(
-        transaction_count=Count('transactions'),
-        total_invested_cad=Sum(
-            'transactions__amount_cad',
-            filter=Q(transactions__type='BUY')
-        )
-    )
+    return response
 
-    return render(request, 'core/accounts.html', {
-        'accounts': accounts,
-    })
+def transaction_export_excel(request):
+    qs = Transaction.objects.all()
+    qs, filters = _apply_transaction_filters(qs, request)
 
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Transactions'
 
-def account_detail(request, account_id):
-    account = get_object_or_404(Account, account_id=account_id)
+    headers = [
+        'Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Amount', 'Currency',
+        'Amount (CAD)', 'Exchange Rate', 'Account', 'Broker', 'Notes'
+    ]
+    ws.append(headers)
 
-    transactions = (
-        Transaction.objects
-        .filter(account=account)
-        .select_related('statement')
-        .order_by('-date', '-id')
-    )
+    for tx in qs:
+        ws.append([
+            tx.date.strftime('%Y-%m-%d'), tx.symbol, tx.type, tx.quantity,
+            tx.price, tx.amount, tx.currency, tx.amount_cad,
+            tx.exchange_rate, tx.account.id, tx.broker_statement.broker.name,
+            tx.notes
+        ])
 
-    # Cash flow summary
-    total_cash_flow_cad = (
-        transactions.aggregate(total=Sum('amount_cad'))['total'] or Decimal('0')
-    )
-    ending_balance_cad = account.starting_balance + total_cash_flow_cad
+    for cell in ws[1]:
+        cell.font = openpyxl.styles.Font(bold=True)
 
-    # Breakdown by transaction type
-    cash_by_type = (
-        transactions
-        .values('type')
-        .annotate(total_cad=Sum('amount_cad'), count=Count('id'))
-        .order_by('type')
-    )
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename=transactions_{datetime.now().strftime("%Y-%m-%d")}.xlsx'
 
-    # Holdings (current positions)
-    holdings = {}
-    for tx in transactions.filter(type__in=['BUY', 'SELL']):
-        sym = tx.symbol or '(unknown)'
-        if sym not in holdings:
-            holdings[sym] = {
-                'symbol': sym,
-                'shares': Decimal('0'),
-                'buy_qty': Decimal('0'),
-                'buy_cost_cad': Decimal('0'),
-            }
-        h = holdings[sym]
-        if tx.type == 'BUY':
-            h['shares'] += tx.quantity
-            h['buy_qty'] += tx.quantity
-            h['buy_cost_cad'] += abs(tx.amount_cad)
-        else:  # SELL
-            h['shares'] -= tx.quantity
+    wb.save(BytesIO())
+    return response
 
-    active_holdings = sorted(
-        [h for h in holdings.values() if h['shares'] > Decimal('0.0001')],
-        key=lambda h: h['symbol'],
-    )
-    for h in active_holdings:
-        h['avg_cost'] = (
-            h['buy_cost_cad'] / h['buy_qty'] if h['buy_qty'] else Decimal('0')
-        )
+def portfolio_chart_data(request):
+    """
+    JSON endpoint for portfolio chart data.
+    Returns {'labels': [...dates...], 'values': [...float values...]}
+    """
+    try:
+        series = compute_portfolio_value_series()
+        
+        # Format for Chart.js
+        labels = [item['date'] for item in series]
+        values = [float(item['market_value_cad']) for item in series]
+        
+        return JsonResponse({'labels': labels, 'values': values})
+    except Exception:
+        return JsonResponse({'labels': [], 'values': []}, status=500)
 
-    # Paginated transaction list
-    paginator = Paginator(transactions, 50)
-    page_obj = paginator.get_page(request.GET.get('page'))
-
-    return render(request, 'core/account_detail.html', {
-        'account': account,
-        'total_cash_flow_cad': total_cash_flow_cad,
-        'ending_balance_cad': ending_balance_cad,
-        'cash_by_type': cash_by_type,
-        'active_holdings': active_holdings,
-        'page_obj': page_obj,
-    })
-
-
-def account_create(request):
-    if request.method == 'POST':
-        form = AccountForm(request.POST)
-        if form.is_valid():
-            form.save()
-            return redirect('accounts_list')
-    else:
-        form = AccountForm()
-    return render(request, 'core/account_form.html', {'form': form, 'title': 'Add Account'})
-
-
-def account_edit(request, account_id):
-    account = get_object_or_404(Account, account_id=account_id)
-
-    if request.method == 'POST':
-        form = AccountForm(request.POST, instance=account)
-        form.fields['account_id'].disabled = True
-        if form.is_valid():
-            form.save()
-            return redirect('account_detail', account_id=account.account_id)
-    else:
-        form = AccountForm(instance=account)
-        form.fields['account_id'].disabled = True
-
-    return render(request, 'core/account_form.html', {'form': form, 'title': 'Edit Account'})
-
-
-def account_delete(request, account_id):
-    if request.method != 'POST':
-        return HttpResponseNotAllowed(['POST'])
-
-    account = get_object_or_404(Account, account_id=account_id)
-    account.delete()
-    return redirect('accounts_list')
-
-
-def portfolio_summary(request):
-    positions = compute_positions()
-    symbols = [p['symbol'] for p in positions if p['symbol']]
-    prices = fetch_last_prices(symbols)
-    positions = enrich_positions_with_prices(positions, prices)
-    positions.sort(key=lambda p: (p['broker'], p['account_name'], p['symbol'] or ''))
-
-    total_cost_cad = sum(p['total_cost_cad'] for p in positions)
-    total_market_value_cad = sum(
-        p['market_value_cad'] for p in positions if p.get('market_value_cad') is not None
-    )
-    total_unrealised_pnl_cad = total_market_value_cad - sum(
-        p['total_cost_cad'] for p in positions if p.get('market_value_cad') is not None
-    )
-
-    return render(request, 'core/portfolio.html', {
-        'positions': positions,
-        'total_cost_cad': total_cost_cad,
-        'total_market_value_cad': total_market_value_cad,
-        'total_unrealised_pnl_cad': total_unrealised_pnl_cad,
-    })
-
-
-def realised_pnl(request):
-    account_filter = request.GET.get('account')
-    trades = compute_realised_pnl(account_id=account_filter)
-
-    total_pnl_fifo = sum(t['realised_pnl_fifo'] for t in trades)
-    total_pnl_avg = sum(t['realised_pnl_avg'] for t in trades)
-
-    accounts = Account.objects.all().order_by('account_id')
-
-    return render(request, 'core/realised_pnl.html', {
-        'trades': trades,
-        'total_pnl_fifo': total_pnl_fifo,
-        'total_pnl_avg': total_pnl_avg,
-        'accounts': accounts,
-        'account_filter': account_filter,
-    })
+def portfolio_chart(request):
+    """
+    Render portfolio performance chart template.
+    """
+    return render(request, 'core/portfolio_chart.html')

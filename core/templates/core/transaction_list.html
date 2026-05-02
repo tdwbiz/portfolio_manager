@@ -3,79 +3,77 @@
 {% block content %}
 <h1>Transactions</h1>
 
-<form method="get" action="{% url 'transaction_list' %}">
+<form method="get" action="{%- url 'transaction_list' -%}">
     <label>Broker:
         <select name="broker">
             <option value="">All</option>
-            <option value="IB" {% if broker_filter == "IB" %}selected{% endif %}>Interactive Brokers</option>
-            <option value="RBC" {% if broker_filter == "RBC" %}selected{% endif %}>RBC</option>
+            <option value="Interactive Brokers">Interactive Brokers</option>
+            <option value="TD Ameritrade">TD Ameritrade</option>
         </select>
     </label>
-    <label>Symbol: <input type="text" name="symbol" value="{{ symbol_filter|default:'' }}"></label>
+    <label>Symbol:
+        <input type="text" name="symbol" value="{{ symbol|default:'' }}">
+    </label>
     <label>Type:
         <select name="type">
             <option value="">All</option>
-            {% for tt in tx_types %}
-            <option value="{{ tt.code }}" {% if type_filter == tt.code %}selected{% endif %}>{{ tt.code }} — {{ tt.label }}</option>
-            {% endfor %}
+            <option value="BUY">Buy</option>
+            <option value="SELL">Sell</option>
         </select>
     </label>
     <label>Account:
         <select name="account">
             <option value="">All</option>
-            {% for acc in accounts %}
-            <option value="{{ acc.account_id }}" {% if account_filter == acc.account_id %}selected{% endif %}>{{ acc.name }}</option>
+            {% for account in accounts %}
+                <option value="{{ account.id }}" {% if account.id == request.GET.account %}selected{% endif %}>{{ account.id }}</option>
             {% endfor %}
         </select>
     </label>
-    <label>From: <input type="date" name="date_from" value="{{ date_from }}"></label>
-    <label>To: <input type="date" name="date_to" value="{{ date_to }}"></label>
+    <label>Date Range:
+        <input type="date" name="date_from" value="{{ date_from|default:'' }}">
+        <input type="date" name="date_to" value="{{ date_to|default:'' }}">
+    </label>
     <button type="submit">Filter</button>
-    <a href="{% url 'transaction_list' %}">Clear</a>
 </form>
+
+<a href="{%- url 'transaction_export_csv' -%}?broker={{ broker|default:'' }}&symbol={{ symbol|default:'' }}&type={{ type|default:'' }}&account={{ account|default:'' }}&date_from={{ date_from|default:'' }}&date_to={{ date_to|default:'' }}">Download CSV</a>
+&nbsp;
+<a href="{%- url 'transaction_export_excel' -%}?broker={{ broker|default:'' }}&symbol={{ symbol|default:'' }}&type={{ type|default:'' }}&account={{ account|default:'' }}&date_from={{ date_from|default:'' }}&date_to={{ date_to|default:'' }}">Download Excel</a>
 
 <table>
     <thead>
         <tr>
             <th>Date</th>
-            <th>Broker</th>
-            <th>Account</th>
             <th>Symbol</th>
             <th>Type</th>
-            <th>Qty</th>
+            <th>Quantity</th>
             <th>Price</th>
-            <th>Commission</th>
             <th>Amount</th>
             <th>Currency</th>
             <th>Amount (CAD)</th>
+            <th>Exchange Rate</th>
+            <th>Account</th>
+            <th>Broker</th>
+            <th>Notes</th>
         </tr>
     </thead>
     <tbody>
-        {% for tx in page_obj %}
-        <tr>
-            <td>{{ tx.date }}</td>
-            <td>{{ tx.statement.source }}</td>
-            <td>{{ tx.account.name|default:'' }}</td>
-            <td>{{ tx.symbol }}</td>
-            <td>{{ tx.type }}</td>
-            <td>{{ tx.quantity }}</td>
-            <td>{{ tx.price }}</td>
-            <td>{{ tx.commission }}</td>
-            <td>{{ tx.amount }}</td>
-            <td>{{ tx.currency }}</td>
-            <td>{{ tx.amount_cad }}</td>
-        </tr>
+        {% for tx in transactions %}
+            <tr>
+                <td>{{ tx.date|date:"Y-m-d" }}</td>
+                <td>{{ tx.symbol }}</td>
+                <td>{{ tx.type }}</td>
+                <td>{{ tx.quantity }}</td>
+                <td>{{ tx.price }}</td>
+                <td>{{ tx.amount }}</td>
+                <td>{{ tx.currency }}</td>
+                <td>{{ tx.amount_cad }}</td>
+                <td>{{ tx.exchange_rate }}</td>
+                <td>{{ tx.account.id }}</td>
+                <td>{{ tx.broker_statement.broker.name }}</td>
+                <td>{{ tx.notes }}</td>
+            </tr>
         {% endfor %}
     </tbody>
 </table>
-
-<div>
-    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}.</span>
-    {% if page_obj.has_previous %}
-        <a href="?page={{ page_obj.previous_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">Previous</a>
-    {% endif %}
-    {% if page_obj.has_next %}
-        <a href="?page={{ page_obj.next_page_number }}&broker={{ broker_filter }}&symbol={{ symbol_filter }}&type={{ type_filter }}&account={{ account_filter }}&date_from={{ date_from }}&date_to={{ date_to }}">Next</a>
-    {% endif %}
-</div>
 {% endblock %}

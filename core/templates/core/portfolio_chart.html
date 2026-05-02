@@ -1,0 +1,51 @@
+{% extends "core/base.html" %}
+
+{% block title %}Portfolio Performance Chart{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 2rem auto;">
+  <h2>Portfolio Performance</h2>
+  <p id="loading">Loading chart data…</p>
+  <canvas id="portfolioChart"></canvas>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    fetch("{% url 'portfolio_chart_data' %}")
+      .then(response => response.json())
+      .then(data => {
+        const ctx = document.getElementById('portfolioChart').getContext('2d');
+        
+        // Hide loading message
+        document.getElementById('loading').style.display = 'none';
+        
+        // Create chart
+        new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: 'Market Value (CAD)',
+              data: data.values,
+              borderColor: '#4e79a7',
+              fill: false,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                display: false
+              }
+            }
+          }
+        });
+      })
+      .catch(error => {
+        document.getElementById('loading').innerHTML = 'Failed to load chart data.';
+        console.error('Chart data error:', error);
+      });
+  });
+</script>
+{% endblock %}

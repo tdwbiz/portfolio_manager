@@ -1,29 +1,44 @@
-import pytest
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
-from core.utils import compute_portfolio_value_series
-from core.models import Transaction, Account
+from django.contrib.auth.models import User
+from core.models import Transaction, Account, BrokerStatement
 from unittest.mock import patch
+from decimal import Decimal
+import datetime
 
-@override_settings(USE_SQLITE_IN_TESTS=True)
+
 class PerformanceChartTests(TestCase):
-    @classmethod
-def setUpTestData(cls):
+    def setUp(self):
+        # Create test user
+        self.user = User.objects.create_user(username='testuser', password='testpass123')
+        self.client.login(username='testuser', password='testpass123')
         # Create test account
-        cls.account = Account.objects.create(name='Test Account', account_id='test123')
+        self.account = Account.objects.create(
+            account_id='PERF001',
+            name='Test Account',
+            broker='IB'
+        )
+        
+        # Create broker statement
+        self.statement = BrokerStatement.objects.create(
+            source='IB',
+            file_date=datetime.date(2024, 1, 15),
+            raw_filename='test.csv'
+        )
         
         # Create test transaction
-        cls.transaction = Transaction.objects.create(
-            account=cls.account,
+        self.transaction = Transaction.objects.create(
+            account=self.account,
+            statement=self.statement,
             symbol='AAPL',
             type='BUY',
-            quantity=100,
+            quantity=Decimal('100'),
             price=Decimal('150.00'),
-            amount=Decimal('15000.00'),
+            amount=Decimal('-15000.00'),
             currency='USD',
-            exchange_rate=Decimal('1.35'),
-            amount_cad=Decimal('20250.00'),
-            date='2024-01-15',
+            exchange_rate_cad=Decimal('1.35'),
+            amount_cad=Decimal('-20250.00'),
+            date=datetime.date(2024, 1, 15),
             tx_hash='perf_buy1',
             commission=Decimal('0')
         )
@@ -38,7 +53,7 @@ def setUpTestData(cls):
         mock_compute.return_value = [
             {'date': '2024-01-31', 'market_value_cad': Decimal('2500.00')}
         ]
-
+        
         response = self.client.get(reverse('portfolio_chart_data'))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/json')

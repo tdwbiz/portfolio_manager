@@ -1,9 +1,25 @@
-from django.urls import path, include
+from django.urls import path
+from django.contrib.auth import views as auth_views
 from . import views
 
 urlpatterns = [
+    path('', views.dashboard, name='dashboard'),
+    path('login/', auth_views.LoginView.as_view(template_name='core/login.html'), name='login'),
+    path('logout/', auth_views.LogoutView.as_view(), name='logout'),
+    path('dashboard/', views.dashboard, name='dashboard'),
+    path('realised-pnl/', views.realised_pnl, name='realised_pnl'),
+    path('income/', views.income_summary, name='income_summary'),
+    path('imports/', views.import_history, name='import_history'),
+    path('imports/rejection-log/<str:month>/', views.download_rejection_log, name='download_rejection_log'),
+    path('transactions/', views.transaction_list, name='transaction_list'),
     path('transactions/export/csv/', views.transaction_export_csv, name='transaction_export_csv'),
     path('transactions/export/excel/', views.transaction_export_excel, name='transaction_export_excel'),
+    path('portfolio/', views.portfolio_summary, name='portfolio_summary'),
     path('portfolio/chart/', views.portfolio_chart, name='portfolio_chart'),
     path('portfolio/chart/data/', views.portfolio_chart_data, name='portfolio_chart_data'),
+    path('accounts/', views.accounts_list, name='accounts_list'),
+    path('accounts/create/', views.account_create, name='account_create'),
+    path('accounts/<str:pk>/', views.account_detail, name='account_detail'),
+    path('accounts/<str:pk>/edit/', views.account_edit, name='account_edit'),
+    path('accounts/<str:pk>/delete/', views.account_delete, name='account_delete'),
 ]

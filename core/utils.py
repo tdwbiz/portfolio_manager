@@ -5,10 +5,7 @@ from django.core.cache import cache
 from core.models import Transaction
 
 def compute_portfolio_value_series(freq='monthly'):
-    """
-    Compute portfolio market value over time with historical prices.
-    Returns list of {'date': 'YYYY-MM-DD', 'market_value_cad': Decimal}.
-    """
+    """Compute portfolio market value over time with historical prices."""
     try:
         # Get all transactions ordered by date
         transactions = Transaction.objects.filter(type__in=['BUY', 'SELL']).order_by('date', 'id')
@@ -92,11 +89,7 @@ def compute_portfolio_value_series(freq='monthly'):
 
 
 def compute_realised_pnl(account_id: str = None) -> list[dict]:
-    """
-    Compute realised P&L using FIFO and average-cost methods.
-    Processes transactions in chronological order.
-    Returns one dict per sell with both FIFO and avg-cost values populated.
-    """
+    """Compute realised P&L using FIFO and average-cost methods."""
     qs = Transaction.objects.select_related('account')
     if account_id:
         qs = qs.filter(account__account_id=account_id)
@@ -170,10 +163,7 @@ def compute_realised_pnl(account_id: str = None) -> list[dict]:
 
 
 def compute_positions(broker=None):
-    """
-    Compute positions from Transaction queryset.
-    Returns a list of dicts with keys: symbol, broker, account_name, currency, total_shares, avg_cost_cad, total_cost_cad.
-    """
+    """Compute positions from Transaction queryset."""
     qs = Transaction.objects.select_related('statement', 'account').all()
     if broker:
         qs = qs.filter(statement__source=broker)
@@ -228,10 +218,7 @@ def compute_positions(broker=None):
 
 
 def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str, Decimal]:
-    """
-    Fetch latest prices for given symbols using yfinance.
-    Returns a dict {symbol: Decimal(price)}.
-    """
+    """Fetch latest prices for given symbols using yfinance."""
     to_fetch = list(symbols)
     if 'USDCAD=X' not in to_fetch:
         to_fetch.append('USDCAD=X')
@@ -266,9 +253,7 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str,
 
 
 def enrich_positions_with_prices(positions: list[dict], prices: dict) -> list[dict]:
-    """
-    Enrich positions with market prices and calculate P&L.
-    """
+    """Enrich positions with market prices and calculate P&L."""
     usdcad = prices.get('USDCAD=X', Decimal('1'))
 
     enriched = []

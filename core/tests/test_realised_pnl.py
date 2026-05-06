@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.contrib.auth.models import User
 from decimal import Decimal
 from core.models import Account, BrokerStatement, Transaction
 from core.utils import compute_realised_pnl
@@ -7,6 +8,8 @@ from core.utils import compute_realised_pnl
 class RealisedPnlTests(TestCase):
     @classmethod
     def setUpTestData(cls):
+        # Create test user
+        cls.user = User.objects.create_user(username='testuser', password='testpass123')
         # Create test account
         cls.account = Account.objects.create(
             account_id='RPNL001',
@@ -88,14 +91,17 @@ class RealisedPnlTests(TestCase):
         self.assertEqual(trades[0]['cost_basis_avg'], Decimal('3150.00'))
 
     def test_realised_pnl_page_loads(self):
+        self.client.login(username='testuser', password='testpass123')
         response = self.client.get('/realised-pnl/')
         self.assertEqual(response.status_code, 200)
 
     def test_realised_pnl_shows_symbol(self):
+        self.client.login(username='testuser', password='testpass123')
         response = self.client.get('/realised-pnl/')
         self.assertIn(b'AAPL', response.content)
 
     def test_realised_pnl_account_filter(self):
+        self.client.login(username='testuser', password='testpass123')
         # Create a transaction for account2 without SELL
         Transaction.objects.create(
             account=self.account2,

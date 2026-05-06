@@ -18,9 +18,18 @@
     <nav>
         <a href="{% url 'dashboard' %}">Dashboard</a>
         <a href="{% url 'portfolio_summary' %}">Portfolio</a>
+        <a href="{% url 'portfolio_chart' %}">Performance</a>
         <a href="{% url 'realised_pnl' %}">Realised P&L</a>
+        <a href="{% url 'income_summary' %}">Income</a>
         <a href="{% url 'transaction_list' %}">Transactions</a>
         <a href="{% url 'accounts_list' %}">Accounts</a>
+        <a href="{% url 'import_history' %}">Import History</a>
+        {% if user.is_authenticated %}
+        <span style="float:right">
+            {{ user.username }} &nbsp;|&nbsp;
+            <a href="{% url 'logout' %}">Sign Out</a>
+        </span>
+        {% endif %}
     </nav>
     {% block content %}{% endblock %}
 </body>

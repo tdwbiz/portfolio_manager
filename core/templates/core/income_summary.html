@@ -1,0 +1,55 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Dividend & Income Summary</h1>
+
+<p>
+  Gross Income (CAD): <strong>{{ total_income_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;
+  Tax Withheld (CAD): <strong style="color:red">{{ total_tax_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;
+  Net Income (CAD): <strong>{{ net_income_cad|floatformat:2 }}</strong>
+</p>
+
+<form method="get">
+  <select name="year" onchange="this.form.submit()">
+    <option value="">All Years</option>
+    {% for y in years %}
+      <option value="{{ y }}" {% if year_filter == y|stringformat:"s" %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
+  <select name="type" onchange="this.form.submit()">
+    <option value="">All Types</option>
+    {% for t in income_types %}
+      <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+</form>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th>Year</th>
+      <th>Symbol</th>
+      <th>Type</th>
+      <th>Count</th>
+      <th>Total (CAD)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row.year }}</td>
+        <td>{{ row.symbol }}</td>
+        <td>{{ row.type }}</td>
+        <td>{{ row.count }}</td>
+        <td style="text-align:right">{{ row.total_amount_cad|floatformat:2 }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No income transactions found.</p>
+{% endif %}
+
+{% endblock %}

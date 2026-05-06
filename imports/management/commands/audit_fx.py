@@ -16,17 +16,16 @@ class Command(BaseCommand):
         account_id = options['account']
 
         # Query transactions
-        filters = {}
+        qs = Transaction.objects.all()
         if account_id:
-            filters['account__account__account_id'] = account_id
-        transactions = Transaction.objects.filter(**filters)
+            qs = qs.filter(account__account_id=account_id)
 
         suspicious = 0
         repairable = 0
         repaired = 0
         tx_details = []
 
-        for tx in transactions:
+        for tx in qs:
             if tx.amount != 0 and tx.amount_cad == 0:
                 suspicious += 1
                 if tx.exchange_rate_cad != 0:
@@ -35,12 +34,12 @@ class Command(BaseCommand):
                         tx.amount_cad = Decimal(round(tx.amount * tx.exchange_rate_cad, 2))
                         tx.save()
                         repaired += 1
-                        tx_details.append(f"[REPAIRED] id={tx.id} account={tx.account_id} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → set amount_cad={tx.amount_cad}")
+                        tx_details.append(f"[REPAIRED] id={tx.id} account={tx.account.account_id if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → set amount_cad={tx.amount_cad}")
                     else:
-                        tx_details.append(f"[SUSPICIOUS] id={tx.id} account={tx.account_id} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → would set amount_cad={round(tx.amount * tx.exchange_rate_cad, 2)}")
+                        tx_details.append(f"[SUSPICIOUS] id={tx.id} account={tx.account.account_id if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → would set amount_cad={round(tx.amount * tx.exchange_rate_cad, 2)}")
 
         # Output summary
-        self.stdout.write(f"Total transactions scanned: {len(transactions)}")
+        self.stdout.write(f"Total transactions scanned: {qs.count()}")
         self.stdout.write(f"Suspicious (amount_cad = 0, amount ≠ 0): {suspicious}")
         self.stdout.write(f"Repairable (have valid exchange_rate_cad): {repairable}")
         if fix:

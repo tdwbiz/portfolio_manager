@@ -1,0 +1,51 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Import History</h1>
+
+{% if entries %}
+<table>
+  <thead>
+    <tr>
+      <th>Imported At</th>
+      <th>Filename</th>
+      <th>Broker</th>
+      <th>Records Imported</th>
+      <th>Records Skipped</th>
+      <th>Status</th>
+      <th>Error</th>
+      <th>Rejection Log</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+      <tr>
+        <td>{{ entry.log.imported_at|date:"Y-m-d H:i:s" }}</td>
+        <td>{{ entry.log.filename }}</td>
+        <td>{{ entry.log.broker }}</td>
+        <td>{{ entry.log.records_imported }}</td>
+        <td>{{ entry.log.records_skipped }}</td>
+        <td>{{ entry.log.status }}</td>
+        <td>
+          {% if entry.log.error_message %}
+            {{ entry.log.error_message|truncatechars:80 }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if entry.has_rejection_log %}
+            <a href="{% url 'download_rejection_log' entry.rejection_month %}">Download CSV</a>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No import history found.</p>
+{% endif %}
+
+{% endblock %}

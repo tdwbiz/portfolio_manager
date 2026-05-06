@@ -1,6 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import HttpResponse, JsonResponse, FileResponse
+from django.http import HttpResponse, JsonResponse, FileResponse, HttpResponseNotAllowed
 from django.conf import settings
 import csv
 import re
@@ -13,6 +13,7 @@ from io import BytesIO
 
 from core.models import Transaction, Account, BrokerStatement, FileImportLog
 from core.utils import compute_portfolio_value_series, compute_realised_pnl
+from core.forms import AccountForm
 
 @login_required
 def dashboard(request):
@@ -26,8 +27,8 @@ def transaction_list(request):
 
 @login_required
 def accounts_list(request):
-    # Accounts list logic here
-    return render(request, 'core/accounts_list.html')
+    accounts = Account.objects.all()
+    return render(request, 'core/accounts.html', {'accounts': accounts})
 
 @login_required
 def account_detail(request, account_id):
@@ -36,18 +37,46 @@ def account_detail(request, account_id):
 
 @login_required
 def account_create(request):
-    # Account create logic here
-    return render(request, 'core/account_create.html')
+    if request.method == 'POST':
+        form = AccountForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('accounts_list')
+    else:
+        form = AccountForm()
+    
+    return render(request, 'core/account_form.html', {
+        'form': form,
+        'title': 'Add Account',
+    })
 
 @login_required
 def account_edit(request, account_id):
-    # Account edit logic here
-    return render(request, 'core/account_edit.html')
+    account = get_object_or_404(Account, account_id=account_id)
+    
+    if request.method == 'POST':
+        form = AccountForm(request.POST, instance=account)
+        form.fields['account_id'].disabled = True
+        if form.is_valid():
+            form.save()
+            return redirect('account_detail', account_id=account.account_id)
+    else:
+        form = AccountForm(instance=account)
+        form.fields['account_id'].disabled = True
+    
+    return render(request, 'core/account_form.html', {
+        'form': form,
+        'title': 'Edit Account',
+    })
 
 @login_required
 def account_delete(request, account_id):
-    # Account delete logic here
-    return render(request, 'core/account_delete.html')
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    
+    account = get_object_or_404(Account, account_id=account_id)
+    account.delete()
+    return redirect('accounts_list')
 
 @login_required
 def portfolio_summary(request):

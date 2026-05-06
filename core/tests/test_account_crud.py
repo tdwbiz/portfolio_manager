@@ -1,10 +1,14 @@
 from decimal import Decimal
 from django.test import TestCase
 from django.urls import reverse
+from django.contrib.auth.models import User
 from core.models import Account
 
 class AccountCRUDTests(TestCase):
     def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpass123')
+        self.client.login(username='testuser', password='testpass123')
+        
         self.account = Account.objects.create(
             account_id='TEST001',
             name='Test Account',

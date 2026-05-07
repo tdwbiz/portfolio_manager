@@ -3,6 +3,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 from core.models import Account, BrokerStatement, Transaction
+from django.contrib.auth.models import User
+
 
 class PortfolioSummaryTests(TestCase):
     def setUp(self):
@@ -31,6 +33,8 @@ class PortfolioSummaryTests(TestCase):
             amount_cad=Decimal('-500.00'), exchange_rate_cad=Decimal('1.0'),
             tx_hash='port_test_vfv_buy',
         )
+        self.user = User.objects.create_user(username='testuser', password='testpass123')
+        self.client.login(username='testuser', password='testpass123')
 
     def test_portfolio_page_loads(self):
         with patch('core.views.fetch_last_prices', return_value={}):

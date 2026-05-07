@@ -3,42 +3,50 @@
 {% block content %}
 <h1>Transactions</h1>
 
-<form method="get" action="{%- url 'transaction_list' -%}">
+<form method="get" action="{% url 'transaction_list' %}">
     <label>Broker:
         <select name="broker">
             <option value="">All</option>
-            <option value="Interactive Brokers">Interactive Brokers</option>
-            <option value="TD Ameritrade">TD Ameritrade</option>
+            {% for b in brokers %}
+                <option value="{{ b }}" {% if filters.broker == b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
         </select>
     </label>
     <label>Symbol:
-        <input type="text" name="symbol" value="{{ symbol|default:'' }}">
+        <input type="text" name="symbol" value="{{ filters.symbol|default:'' }}">
     </label>
     <label>Type:
         <select name="type">
             <option value="">All</option>
-            <option value="BUY">Buy</option>
-            <option value="SELL">Sell</option>
+            <option value="BUY" {% if filters.type == 'BUY' %}selected{% endif %}>Buy</option>
+            <option value="SELL" {% if filters.type == 'SELL' %}selected{% endif %}>Sell</option>
+            <option value="DIV" {% if filters.type == 'DIV' %}selected{% endif %}>Dividend</option>
+            <option value="DIST" {% if filters.type == 'DIST' %}selected{% endif %}>Distribution</option>
+            <option value="INT" {% if filters.type == 'INT' %}selected{% endif %}>Interest</option>
+            <option value="WITHTAX" {% if filters.type == 'WITHTAX' %}selected{% endif %}>Withholding Tax</option>
+            <option value="TAX" {% if filters.type == 'TAX' %}selected{% endif %}>Tax</option>
         </select>
     </label>
     <label>Account:
         <select name="account">
             <option value="">All</option>
             {% for account in accounts %}
-                <option value="{{ account.id }}" {% if account.id == request.GET.account %}selected{% endif %}>{{ account.id }}</option>
+                <option value="{{ account.account_id }}" {% if filters.account == account.account_id %}selected{% endif %}>{{ account.account_id }}</option>
             {% endfor %}
         </select>
     </label>
     <label>Date Range:
-        <input type="date" name="date_from" value="{{ date_from|default:'' }}">
-        <input type="date" name="date_to" value="{{ date_to|default:'' }}">
+        <input type="date" name="date_from" value="{{ filters.date_from|default:'' }}">
+        <input type="date" name="date_to" value="{{ filters.date_to|default:'' }}">
     </label>
     <button type="submit">Filter</button>
 </form>
 
-<a href="{%- url 'transaction_export_csv' -%}?broker={{ broker|default:'' }}&symbol={{ symbol|default:'' }}&type={{ type|default:'' }}&account={{ account|default:'' }}&date_from={{ date_from|default:'' }}&date_to={{ date_to|default:'' }}">Download CSV</a>
-&nbsp;
-<a href="{%- url 'transaction_export_excel' -%}?broker={{ broker|default:'' }}&symbol={{ symbol|default:'' }}&type={{ type|default:'' }}&account={{ account|default:'' }}&date_from={{ date_from|default:'' }}&date_to={{ date_to|default:'' }}">Download Excel</a>
+<div style="margin: 10px 0;">
+    <a href="{% url 'transaction_export_csv' %}?{{ request.GET.urlencode }}">Download CSV</a>
+    &nbsp;|&nbsp;
+    <a href="{% url 'transaction_export_excel' %}?{{ request.GET.urlencode }}">Download Excel</a>
+</div>
 
 <table>
     <thead>
@@ -68,12 +76,26 @@
                 <td>{{ tx.amount }}</td>
                 <td>{{ tx.currency }}</td>
                 <td>{{ tx.amount_cad }}</td>
-                <td>{{ tx.exchange_rate }}</td>
-                <td>{{ tx.account.id }}</td>
-                <td>{{ tx.broker_statement.broker.name }}</td>
-                <td>{{ tx.notes }}</td>
+                <td>{{ tx.exchange_rate_cad }}</td>
+                <td>{{ tx.account.account_id|default:'' }}</td>
+                <td>{{ tx.statement.source|default:'' }}</td>
+                <td>{{ tx.notes|default:'' }}</td>
             </tr>
+        {% empty %}
+            <tr><td colspan="12">No transactions found.</td></tr>
         {% endfor %}
     </tbody>
 </table>
+
+{% if transactions.has_previous or transactions.has_next %}
+<div style="margin: 10px 0;">
+    {% if transactions.has_previous %}
+        <a href="?page={{ transactions.previous_page_number }}&{{ request.GET.urlencode }}">Previous</a>
+    {% endif %}
+    <span>Page {{ transactions.number }} of {{ transactions.paginator.num_pages }}</span>
+    {% if transactions.has_next %}
+        <a href="?page={{ transactions.next_page_number }}&{{ request.GET.urlencode }}">Next</a>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock %}

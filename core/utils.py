@@ -1,8 +1,11 @@
-from collections import deque
+from collections import deque, defaultdict
 from decimal import Decimal
 import yfinance as yf
 from django.core.cache import cache
+from django.utils import timezone
+from datetime import datetime, timedelta
 from core.models import Transaction
+
 
 def compute_portfolio_value_series(freq='monthly'):
     """Compute portfolio market value over time with historical prices."""
@@ -21,10 +24,38 @@ def compute_portfolio_value_series(freq='monthly'):
         dates = []
         current = start_date.replace(day=1)
         while current <= end_date:
-            current = current.replace(day=28) + timedelta(days=4)  # Move to next month
-            dates.append(current.replace(day=current.day-1))  # Last day of month
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1, day=1)
+            else:
+                current = current.replace(month=current.month + 1, day=1)
+            # Last day of the new month
+            dates.append(current.replace(day=current.day - 1))
         
-        # Compute holdings for each date point
+        # Collect all unique symbols ever held
+        all_symbols = list(set(tx.symbol for tx in transactions))
+        
+        # Fetch historical prices from cache or yfinance
+        cache_key = 'hist_prices'
+        prices_df = cache.get(cache_key)
+        
+        if not prices_df:
+            # Add USDCAD for currency conversion
+            symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
+            
+            try:
+                prices_df = yf.download(
+                    ' '.join(symbols_with_usdcad),
+                    start=start_date.strftime('%Y-%m-%d'),
+                    end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    auto_adjust=True,
+                    progress=False
+                )['Close']
+                cache.set(cache_key, prices_df, 3600)  # Cache for 1 hour
+            except Exception:
+                prices_df = None
+        
+        # Calculate market value for each date point
         results = []
         
         for date in dates:
@@ -33,55 +64,43 @@ def compute_portfolio_value_series(freq='monthly'):
             # Replay transactions up to this date
             for tx in transactions.filter(date__lte=date):
                 symbol = tx.symbol
-                
                 if tx.type == 'BUY':
                     holdings[symbol] = holdings.get(symbol, Decimal('0')) + tx.quantity
                 elif tx.type == 'SELL':
                     holdings[symbol] = holdings.get(symbol, Decimal('0')) - tx.quantity
             
-            # Get unique symbols with holdings
+            # Get unique symbols with positive holdings
             symbols = [s for s, qty in holdings.items() if qty > 0]
-            
-            # Fetch historical prices from cache or yfinance
-            cache_key = 'hist_prices'
-            prices_df = cache.get(cache_key)
-            
-            if not prices_df:
-                # Add USDCAD for currency conversion
-                symbols_with_usdcad = symbols + ['USDCAD=X']
-                
-                try:
-                    prices_df = yf.download(' '.join(symbols_with_usdcad),
-                                           start=start_date.strftime('%Y-%m-%d'),
-                                           end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
-                                           auto_adjust=True, progress=False)['Close']
-                    cache.set(cache_key, prices_df, 3600)  # Cache for 1 hour
-                except Exception:
-                    prices_df = pd.DataFrame()
             
             # Calculate market value for this date
             market_value = Decimal('0')
             
-            for symbol in symbols:
-                try:
-                    # Get price for this symbol on this date
-                    price_series = prices_df[symbol]
-                    if not price_series.empty:
-                        price = price_series.asof(date)
-                        
-                        # Handle currency conversion
-                        if symbol.endswith('CAD'):
-                            fx_rate = Decimal('1')
-                        else:
-                            fx_rate = prices_df['USDCAD=X'].asof(date)
-                            
-                        # Add to market value
-                        market_value += price * holdings[symbol] * fx_rate
-                except Exception:
-                    # Skip symbols with price errors
-                    pass
+            if prices_df is not None and not prices_df.empty:
+                for symbol in symbols:
+                    try:
+                        # Get price for this symbol on this date
+                        if symbol in prices_df.columns:
+                            price_series = prices_df[symbol]
+                            if not price_series.empty:
+                                price = price_series.asof(date)
+                                
+                                # Handle currency conversion
+                                if symbol.endswith('CAD'):
+                                    fx_rate = Decimal('1')
+                                else:
+                                    usdcad_series = prices_df['USDCAD=X']
+                                    fx_rate = usdcad_series.asof(date)
+                                
+                                # Add to market value
+                                market_value += Decimal(str(price)) * holdings[symbol] * Decimal(str(fx_rate))
+                    except Exception:
+                        # Skip symbols with price errors
+                        pass
             
-            results.append({'date': date.strftime('%Y-%m-%d'), 'market_value_cad': market_value})
+            results.append({
+                'date': date.strftime('%Y-%m-%d'),
+                'market_value_cad': market_value
+            })
         
         return results
     except Exception:

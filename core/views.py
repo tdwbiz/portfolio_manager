@@ -1,7 +1,11 @@
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import login as auth_login, logout as auth_logout
+from django.contrib.auth.models import User
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse, FileResponse, HttpResponseNotAllowed
 from django.conf import settings
+from django.urls import reverse
+from django.db.models import Sum, Count
 import csv
 import re
 from pathlib import Path
@@ -12,28 +16,182 @@ import openpyxl
 from io import BytesIO
 
 from core.models import Transaction, Account, BrokerStatement, FileImportLog
-from core.utils import compute_portfolio_value_series, compute_realised_pnl
+from core.utils import (
+    compute_portfolio_value_series,
+    compute_realised_pnl,
+    compute_positions,
+    fetch_last_prices,
+    enrich_positions_with_prices,
+)
 from core.forms import AccountForm
+
+
+def login(request):
+    """Login view - handles both GET and POST."""
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = User.objects.filter(username=username).first()
+        if user and user.check_password(password):
+            auth_login(request, user)
+            next_url = request.POST.get('next', '/')
+            return redirect(next_url)
+        else:
+            return render(request, 'core/login.html', {
+                'error': 'Invalid username or password.',
+            })
+    else:
+        return render(request, 'core/login.html')
+
+
+def logout(request):
+    """Logout view - handles POST redirect."""
+    auth_logout(request)
+    return redirect('login')
+
 
 @login_required
 def dashboard(request):
-    # Dashboard logic here
-    return render(request, 'core/dashboard.html')
+    """Dashboard view with summary stats."""
+    accounts = Account.objects.all()
+    total_accounts = accounts.count()
+    total_transactions = Transaction.objects.count()
+    total_brokers = BrokerStatement.objects.values_list('source', flat=True).distinct().count()
+
+    # Get recent transactions
+    recent_transactions = Transaction.objects.select_related('account', 'statement').order_by('-date')[:10]
+
+    # Get recent imports
+    recent_imports = FileImportLog.objects.order_by('-imported_at')[:10]
+
+    return render(request, 'core/dashboard.html', {
+        'accounts': accounts,
+        'total_accounts': total_accounts,
+        'total_transactions': total_transactions,
+        'total_brokers': total_brokers,
+        'recent_transactions': recent_transactions,
+        'recent_imports': recent_imports,
+    })
+
 
 @login_required
 def transaction_list(request):
-    # Transaction list logic here
-    return render(request, 'core/transaction_list.html')
+    """Transaction list with filters and pagination."""
+    qs = Transaction.objects.select_related('statement', 'account').all()
+
+    # Apply filters
+    broker = request.GET.get('broker', '')
+    symbol = request.GET.get('symbol', '')
+    tx_type = request.GET.get('type', '')
+    account_id = request.GET.get('account', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+
+    if broker:
+        qs = qs.filter(statement__source=broker)
+    if symbol:
+        qs = qs.filter(symbol=symbol)
+    if tx_type:
+        qs = qs.filter(type=tx_type)
+    if account_id:
+        qs = qs.filter(account__account_id=account_id)
+    if date_from:
+        qs = qs.filter(date__gte=date_from)
+    if date_to:
+        qs = qs.filter(date__lte=date_to)
+
+    # Get distinct values for filter dropdowns
+    brokers = BrokerStatement.objects.values_list('source', flat=True).distinct().order_by('source')
+    symbols = Transaction.objects.values_list('symbol', flat=True).distinct().order_by('symbol')
+    accounts = Account.objects.all().order_by('account_id')
+
+    # Pagination
+    page = request.GET.get('page', 1)
+    per_page = 50
+    from django.core.paginator import Paginator
+    paginator = Paginator(qs, per_page)
+    page_obj = paginator.get_page(page)
+
+    return render(request, 'core/transaction_list.html', {
+        'page_obj': page_obj,
+        'transactions': page_obj,
+        'brokers': brokers,
+        'symbols': symbols,
+        'accounts': accounts,
+        'filters': {
+            'broker': broker,
+            'symbol': symbol,
+            'type': tx_type,
+            'account': account_id,
+            'date_from': date_from,
+            'date_to': date_to,
+        },
+    })
+
 
 @login_required
 def accounts_list(request):
     accounts = Account.objects.all()
     return render(request, 'core/accounts.html', {'accounts': accounts})
 
+
 @login_required
 def account_detail(request, account_id):
-    # Account detail logic here
-    return render(request, 'core/account_detail.html')
+    account = get_object_or_404(Account, account_id=account_id)
+    transactions = Transaction.objects.filter(account=account).order_by('-date')
+
+    # Compute balance summary
+    total_cash_flow_cad = transactions.aggregate(
+        total=Sum('amount_cad')
+    )['total'] or Decimal('0')
+
+    ending_balance_cad = account.starting_balance + total_cash_flow_cad
+
+    # Cash flow by type
+    cash_by_type = transactions.filter(
+        type__in=['BUY', 'SELL', 'DIV', 'DIST', 'INT', 'WITHTAX', 'TAX']
+    ).values('type').annotate(
+        count=Count('id'),
+        total_cad=Sum('amount_cad')
+    ).order_by('type')
+
+    # Active holdings
+    active_holdings = []
+    buy_sell_txs = transactions.filter(type__in=['BUY', 'SELL']).order_by('date')
+    holdings = {}
+    for tx in buy_sell_txs:
+        if tx.symbol not in holdings:
+            holdings[tx.symbol] = {'shares': Decimal('0'), 'buy_cost_cad': Decimal('0')}
+        if tx.type == 'BUY':
+            holdings[tx.symbol]['shares'] += tx.quantity
+            holdings[tx.symbol]['buy_cost_cad'] += tx.amount_cad
+        elif tx.type == 'SELL':
+            holdings[tx.symbol]['shares'] -= tx.quantity
+
+    for symbol, data in holdings.items():
+        if data['shares'] > 0:
+            active_holdings.append({
+                'symbol': symbol,
+                'shares': data['shares'],
+                'buy_cost_cad': data['buy_cost_cad'],
+                'avg_cost': data['buy_cost_cad'] / data['shares'] if data['shares'] else Decimal('0'),
+            })
+
+    # Pagination for transactions
+    page = request.GET.get('page', 1)
+    per_page = 50
+    from django.core.paginator import Paginator
+    paginator = Paginator(transactions, per_page)
+    page_obj = paginator.get_page(page)
+
+    return render(request, 'core/account_detail.html', {
+        'account': account,
+        'total_cash_flow_cad': total_cash_flow_cad,
+        'ending_balance_cad': ending_balance_cad,
+        'cash_by_type': cash_by_type,
+        'active_holdings': active_holdings,
+        'page_obj': page_obj,
+    })
 
 @login_required
 def account_create(request):
@@ -80,8 +238,36 @@ def account_delete(request, account_id):
 
 @login_required
 def portfolio_summary(request):
-    # Portfolio summary logic here
-    return render(request, 'core/portfolio_summary.html')
+    """Portfolio summary with live prices and P&L."""
+    # Compute positions
+    positions = compute_positions()
+
+    # Get unique symbols
+    symbols = list(set(pos['symbol'] for pos in positions))
+
+    # Fetch last prices
+    prices = fetch_last_prices(symbols)
+
+    # Enrich positions with prices
+    enriched_positions = enrich_positions_with_prices(positions, prices)
+
+    # Compute totals
+    total_cost_cad = sum(pos['total_cost_cad'] for pos in enriched_positions)
+    total_market_value_cad = sum(
+        pos['market_value_cad'] for pos in enriched_positions
+        if pos['market_value_cad'] is not None
+    )
+    total_unrealised_pnl_cad = sum(
+        pos['unrealised_pnl_cad'] for pos in enriched_positions
+        if pos['unrealised_pnl_cad'] is not None
+    )
+
+    return render(request, 'core/portfolio_summary.html', {
+        'positions': enriched_positions,
+        'total_cost_cad': total_cost_cad,
+        'total_market_value_cad': total_market_value_cad,
+        'total_unrealised_pnl_cad': total_unrealised_pnl_cad,
+    })
 
 @login_required
 def realised_pnl(request):

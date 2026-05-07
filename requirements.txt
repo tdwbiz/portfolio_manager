@@ -1,3 +1,5 @@
+django>=5.1
+django-mssql-backend>=2.0
+python-dotenv>=1.0
 openpyxl>=3.1
-
-# Other dependencies...
+yfinance>=0.2

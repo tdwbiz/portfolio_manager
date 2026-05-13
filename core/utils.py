@@ -2,23 +2,33 @@ from collections import deque, defaultdict
 from decimal import Decimal
 import yfinance as yf
 from django.core.cache import cache
+from django.conf import settings
 from django.utils import timezone
 from datetime import datetime, timedelta
 from core.models import Transaction
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+POSITION_TRANSACTION_TYPES = ('BUY', 'SELL')
 
 
 def compute_portfolio_value_series(freq='monthly'):
     """Compute portfolio market value over time with historical prices."""
+    logger.info("compute_portfolio_value_series called")
     try:
         # Get all transactions ordered by date
-        transactions = Transaction.objects.filter(type__in=['BUY', 'SELL']).order_by('date', 'id')
+        transactions = Transaction.objects.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
         
         if not transactions.exists():
+            logger.info("No BUY/SELL transactions found, returning empty series")
             return []
 
         # Determine date range
         start_date = transactions.first().date
         end_date = timezone.now().date()
+        logger.info(f"Date range: {start_date} to {end_date}")
         
         # Generate monthly period-end dates
         dates = []
@@ -34,6 +44,7 @@ def compute_portfolio_value_series(freq='monthly'):
         
         # Collect all unique symbols ever held
         all_symbols = list(set(tx.symbol for tx in transactions))
+        logger.info(f"Found {len(all_symbols)} unique symbols: {all_symbols}")
         
         # Fetch historical prices from cache or yfinance
         cache_key = 'hist_prices'
@@ -42,6 +53,7 @@ def compute_portfolio_value_series(freq='monthly'):
         if not prices_df:
             # Add USDCAD for currency conversion
             symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
+            logger.info(f"Fetching historical data from yfinance for {len(symbols_with_usdcad)} symbols")
             
             try:
                 prices_df = yf.download(
@@ -51,9 +63,13 @@ def compute_portfolio_value_series(freq='monthly'):
                     auto_adjust=True,
                     progress=False
                 )['Close']
-                cache.set(cache_key, prices_df, 3600)  # Cache for 1 hour
-            except Exception:
+                cache.set(cache_key, prices_df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
+                logger.info(f"✓ Historical data fetched and cached")
+            except Exception as e:
+                logger.error(f"✗ Error fetching historical data: {type(e).__name__}: {e}")
                 prices_df = None
+        else:
+            logger.info("Using cached historical data")
         
         # Calculate market value for each date point
         results = []
@@ -113,7 +129,7 @@ def compute_realised_pnl(account_id: str = None) -> list[dict]:
     if account_id:
         qs = qs.filter(account__account_id=account_id)
 
-    transactions = qs.filter(type__in=['BUY', 'SELL']).order_by('date', 'id')
+    transactions = qs.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
 
     # Group by (symbol, account_id), preserving chronological order
     groups: dict[tuple, list] = {}
@@ -236,8 +252,11 @@ def compute_positions(broker=None):
     return result
 
 
-def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str, Decimal]:
+def fetch_last_prices(symbols: list[str], cache_timeout: int | None = None) -> dict[str, Decimal]:
     """Fetch latest prices for given symbols using yfinance."""
+    cache_timeout = cache_timeout or settings.PRICE_CACHE_TIMEOUT
+    logger.info(f"fetch_last_prices called with {len(symbols)} symbols: {symbols}")
+    
     to_fetch = list(symbols)
     if 'USDCAD=X' not in to_fetch:
         to_fetch.append('USDCAD=X')
@@ -248,13 +267,17 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str,
     for sym in to_fetch:
         price = cache.get(f'price_{sym}')
         if price is not None:
+            logger.debug(f"Using cached price for {sym}: {price}")
             cached_prices[sym] = price
         else:
             uncached_symbols.append(sym)
 
     if uncached_symbols:
+        logger.info(f"Fetching prices from yfinance for {len(uncached_symbols)} symbols: {uncached_symbols}")
         try:
             tickers = yf.Tickers(' '.join(uncached_symbols))
+            logger.debug(f"yfinance Tickers object created successfully")
+            
             for sym in uncached_symbols:
                 try:
                     ticker_obj = tickers.tickers[sym]
@@ -263,11 +286,17 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int = 900) -> dict[str,
                         price = Decimal(str(price))
                         cache.set(f'price_{sym}', price, cache_timeout)
                         cached_prices[sym] = price
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                        logger.info(f"✓ Fetched price for {sym}: {price}")
+                    else:
+                        logger.warning(f"✗ No price available for {sym} (fast_info.last_price is None)")
+                except Exception as e:
+                    logger.error(f"✗ Error fetching price for {sym}: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"✗ Error creating yfinance Tickers object: {type(e).__name__}: {e}")
+    else:
+        logger.info("All prices served from cache")
 
+    logger.info(f"Returning {len(cached_prices)} prices: {list(cached_prices.keys())}")
     return cached_prices
 
 

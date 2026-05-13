@@ -2,35 +2,329 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Portfolio Manager</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ branding.company_name }}{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <!-- Chart.js (for charts) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
     <style>
-        body { font-family: sans-serif; margin: 20px; }
-        nav { margin-bottom: 20px; }
-        nav a { margin-right: 10px; }
-        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        h2 { margin-top: 30px; }
+        :root {
+            --primary-color: {{ branding.primary_color }};
+            --secondary-color: {{ branding.secondary_color }};
+            --success-color: {{ branding.success_color }};
+            --danger-color: {{ branding.danger_color }};
+            --navbar-bg: {{ branding.navbar_bg_color }};
+            --navbar-text: {{ branding.navbar_text_color }};
+            --footer-bg: {{ branding.footer_bg_color }};
+        }
+        
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background-color: var(--navbar-bg) !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.3rem;
+            color: var(--navbar-text) !important;
+        }
+        
+        .navbar-brand img {
+            height: 40px;
+            margin-right: 10px;
+        }
+        
+        .nav-link {
+            color: rgba(255,255,255,0.85) !important;
+            transition: color 0.2s;
+            padding: 0.5rem 1rem !important;
+        }
+        
+        .nav-link:hover {
+            color: var(--navbar-text) !important;
+        }
+        
+        .nav-link.active {
+            color: var(--navbar-text) !important;
+            font-weight: 500;
+        }
+        
+        .main-content {
+            flex: 1;
+            padding: 2rem 0;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+        
+        .content-wrapper {
+            background: white;
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 0 20px rgba(0,0,0,0.08);
+        }
+        
+        .page-header {
+            border-bottom: 3px solid var(--primary-color);
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .page-header h1 {
+            color: #2c3e50;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .tagline {
+            color: #7f8c8d;
+            font-style: italic;
+            font-size: 0.95rem;
+            margin-top: 0.5rem;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            opacity: 0.9;
+        }
+        
+        .table {
+            box-shadow: 0 0 10px rgba(0,0,0,0.05);
+        }
+        
+        .table thead {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0,0,0,0.02);
+        }
+        
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            font-weight: 600;
+            border-radius: 10px 10px 0 0 !important;
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 1.5rem;
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .positive {
+            color: var(--success-color) !important;
+        }
+        
+        .negative {
+            color: var(--danger-color) !important;
+        }
+        
+        footer {
+            background-color: var(--footer-bg);
+            padding: 1.5rem 0;
+            margin-top: auto;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        footer p {
+            margin: 0;
+            color: #6c757d;
+        }
+        
+        .badge {
+            padding: 0.5em 0.75em;
+            font-weight: 500;
+        }
+        
+        .alert {
+            border-radius: 8px;
+            border: none;
+        }
+        
+        @media (max-width: 768px) {
+            .content-wrapper {
+                padding: 1rem;
+            }
+            
+            .stat-value {
+                font-size: 2rem;
+            }
+        }
     </style>
+    
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <nav>
-        <a href="{% url 'dashboard' %}">Dashboard</a>
-        <a href="{% url 'portfolio_summary' %}">Portfolio</a>
-        <a href="{% url 'portfolio_chart' %}">Performance</a>
-        <a href="{% url 'realised_pnl' %}">Realised P&L</a>
-        <a href="{% url 'income_summary' %}">Income</a>
-        <a href="{% url 'transaction_list' %}">Transactions</a>
-        <a href="{% url 'accounts_list' %}">Accounts</a>
-        <a href="{% url 'import_history' %}">Import History</a>
-        {% if user.is_authenticated %}
-        <span style="float:right">
-            {{ user.username }} &nbsp;|&nbsp;
-            <a href="{% url 'logout' %}">Sign Out</a>
-        </span>
-        {% endif %}
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{% url 'dashboard' %}">
+                {% if branding.show_logo and branding.company_logo_url %}
+                <img src="{{ branding.company_logo_url }}" alt="{{ branding.company_name }}">
+                {% endif %}
+                {{ branding.company_name }}
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'portfolio_summary' %}active{% endif %}" href="{% url 'portfolio_summary' %}">
+                            <i class="bi bi-briefcase"></i> Portfolio
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'portfolio_chart' %}active{% endif %}" href="{% url 'portfolio_chart' %}">
+                            <i class="bi bi-graph-up"></i> Performance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'realised_pnl' %}active{% endif %}" href="{% url 'realised_pnl' %}">
+                            <i class="bi bi-cash-coin"></i> Realised P&L
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'income_summary' %}active{% endif %}" href="{% url 'income_summary' %}">
+                            <i class="bi bi-piggy-bank"></i> Income
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'transaction_list' %}active{% endif %}" href="{% url 'transaction_list' %}">
+                            <i class="bi bi-list-check"></i> Transactions
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'accounts_list' %}active{% endif %}" href="{% url 'accounts_list' %}">
+                            <i class="bi bi-bank"></i> Accounts
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'import_history' %}active{% endif %}" href="{% url 'import_history' %}">
+                            <i class="bi bi-upload"></i> Import History
+                        </a>
+                    </li>
+                    {% if user.is_staff %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin/" target="_blank">
+                            <i class="bi bi-gear"></i> Admin
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+                {% if user.is_authenticated %}
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{% url 'logout' %}"><i class="bi bi-box-arrow-right"></i> Sign Out</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                {% endif %}
+            </div>
+        </div>
     </nav>
-    {% block content %}{% endblock %}
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="container-fluid">
+            {% if branding.show_tagline and branding.tagline %}
+            <div class="row mb-3">
+                <div class="col">
+                    <p class="tagline text-center">{{ branding.tagline }}</p>
+                </div>
+            </div>
+            {% endif %}
+            
+            <!-- Messages -->
+            {% if messages %}
+            <div class="row mb-3">
+                <div class="col">
+                    {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="content-wrapper">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col text-center">
+                    {% if branding.footer_text %}
+                    <p>{{ branding.footer_text|safe }}</p>
+                    {% else %}
+                    <p>&copy; {% now "Y" %} {{ branding.company_name }}. All rights reserved.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

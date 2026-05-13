@@ -18,13 +18,28 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 _cfg = configparser.ConfigParser()
 _cfg.read(BASE_DIR / 'config.ini')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-portfolio-manager-dev-key-change-in-production'
+# SECURITY: SECRET_KEY is REQUIRED and must not fall back to a generated key.
+# A generated key invalidates all sessions on every restart.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError(
+        'DJANGO_SECRET_KEY environment variable must be set. '
+        'Generate a secure key with: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# SECURITY: DEBUG must be explicitly enabled via environment variable.
+# Default to False for security.
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = []
+# SECURITY: ALLOWED_HOSTS must be explicitly set via environment variable.
+# Empty list is insecure and will raise an error if DEBUG is False.
+ALLOWED_HOSTS_STR = os.getenv('ALLOWED_HOSTS', '')
+if not ALLOWED_HOSTS_STR and not DEBUG:
+    raise ValueError(
+        'ALLOWED_HOSTS environment variable must be set for production. '
+        'Provide as comma-separated list (e.g., "example.com,www.example.com")'
+    )
+ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS_STR.split(',') if h.strip()] if ALLOWED_HOSTS_STR else ['localhost', '127.0.0.1']
 
 # Application definition
 INSTALLED_APPS = [
@@ -61,6 +76,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'core.context_processors.branding',
             ],
         },
     },
@@ -72,22 +88,31 @@ WSGI_APPLICATION = 'portfolio_manager.wsgi.application'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DB_NAME = os.getenv('DB_NAME', 'PortfolioDev')
-DB_USER = os.getenv('DB_USER', 'sa')
-DB_PASSWORD = os.getenv('DB_PASSWORD', '')
+DB_USER = os.getenv('DB_USER')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_HOST = os.getenv('DB_HOST', 'localhost')
 DB_PORT = os.getenv('DB_PORT', '1433')
+
+if not DB_USER and not DEBUG:
+    raise ValueError('DB_USER environment variable must be set for production.')
+if not DB_PASSWORD and not DEBUG:
+    raise ValueError('DB_PASSWORD environment variable must be set for production.')
+
+# SECURITY: TrustServerCertificate=yes disables certificate validation.
+# In production, use proper certificate validation.
+TRUST_SERVER_CERTIFICATE = os.getenv('TRUST_SERVER_CERTIFICATE', 'False').lower() in ('true', '1', 'yes')
 
 DATABASES = {
     'default': {
         'ENGINE': 'mssql',
         'NAME': DB_NAME,
-        'USER': DB_USER,
-        'PASSWORD': DB_PASSWORD,
+        'USER': DB_USER or 'sa',  # Use fallback only in development
+        'PASSWORD': DB_PASSWORD or '',  # Use fallback only in development
         'HOST': DB_HOST,
         'PORT': DB_PORT,
         'OPTIONS': {
             'driver': 'ODBC Driver 18 for SQL Server',
-            'extra_params': 'Encrypt=yes;TrustServerCertificate=yes;',
+            'extra_params': f'Encrypt=yes;TrustServerCertificate={"yes" if TRUST_SERVER_CERTIFICATE else "no"};',
         },
     }
 }
@@ -110,7 +135,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/New_York'  # Eastern Standard Time (EST/EDT)
 USE_I18N = True
 USE_TZ = True
 
@@ -125,21 +150,61 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 
+# SECURITY: Secure cookie settings for production
+# Set to True in production (enforce via environment variable)
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookie
+CSRF_COOKIE_HTTPONLY = True  # Prevent JavaScript access to CSRF cookie
+SESSION_COOKIE_SAMESITE = 'Strict'  # Prevent CSRF attacks
+
+# SECURITY: Enforce HTTPS redirects in production
+SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'False').lower() in ('true', '1', 'yes')
+SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False').lower() in ('true', '1', 'yes')
+SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'False').lower() in ('true', '1', 'yes')
+
 # Logging Configuration
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
-# Auto-import settings — read from config.ini [import] section
-_inbox_raw = _cfg.get('import', 'inbox_dir', fallback='').strip()
+# Auto-import settings — prefer environment variables, fall back to config.ini, then hardcoded defaults
+_inbox_raw = os.getenv('IMPORT_INBOX_DIR', '').strip() or _cfg.get('import', 'inbox_dir', fallback='').strip()
 IMPORT_INBOX_DIR = Path(_inbox_raw) if _inbox_raw else BASE_DIR / 'inbox'
 
-_processed_raw = _cfg.get('import', 'processed_dir', fallback='').strip()
+_processed_raw = os.getenv('IMPORT_PROCESSED_DIR', '').strip() or _cfg.get('import', 'processed_dir', fallback='').strip()
 IMPORT_PROCESSED_DIR = Path(_processed_raw) if _processed_raw else BASE_DIR / 'processed'
 
-_logs_raw = _cfg.get('import', 'logs_dir', fallback='').strip()
+_logs_raw = os.getenv('IMPORT_LOGS_DIR', '').strip() or _cfg.get('import', 'logs_dir', fallback='').strip()
 IMPORT_LOGS_DIR = Path(_logs_raw) if _logs_raw else BASE_DIR / 'logs'
 
-IMPORT_INBOX_POLL_INTERVAL = _cfg.getint('import', 'poll_interval', fallback=300)
+# UI configuration via environment variables
+IMPORT_INBOX_POLL_INTERVAL = int(os.getenv('IMPORT_INBOX_POLL_INTERVAL', _cfg.get('import', 'poll_interval', fallback='300')))
+TRANSACTIONS_PAGE_SIZE = int(os.getenv('TRANSACTIONS_PAGE_SIZE', _cfg.get('ui', 'transactions_page_size', fallback='50')))
+ACCOUNT_DETAIL_PAGE_SIZE = int(os.getenv('ACCOUNT_DETAIL_PAGE_SIZE', _cfg.get('ui', 'account_detail_page_size', fallback='50')))
+DASHBOARD_RECENT_LIMIT = int(os.getenv('DASHBOARD_RECENT_LIMIT', '10'))
+
+# Cache configuration via environment variables
+PRICE_CACHE_TIMEOUT = int(os.getenv('PRICE_CACHE_TIMEOUT_SECONDS', _cfg.get('cache', 'price_timeout_seconds', fallback='900')))
+HISTORICAL_PRICE_CACHE_TIMEOUT = int(os.getenv('HISTORICAL_PRICE_CACHE_TIMEOUT_SECONDS', _cfg.get('cache', 'historical_price_timeout_seconds', fallback='3600')))
+PRICE_CACHE_TIMEOUT_MINUTES = max(1, (PRICE_CACHE_TIMEOUT + 59) // 60)
+
+# Logging configuration via environment variables
+LOG_FILE_MAX_BYTES = int(os.getenv('LOG_FILE_MAX_BYTES', _cfg.get('logging', 'file_max_bytes', fallback=str(5 * 1024 * 1024))))
+LOG_FILE_BACKUP_COUNT = int(os.getenv('LOG_FILE_BACKUP_COUNT', _cfg.get('logging', 'file_backup_count', fallback='5')))
+
+# Login security configuration
+LOGIN_ATTEMPT_LIMIT = int(os.getenv('LOGIN_ATTEMPT_LIMIT', '5'))  # Max attempts before lockout
+LOGIN_ATTEMPT_WINDOW = int(os.getenv('LOGIN_ATTEMPT_WINDOW', '900'))  # Time window in seconds (15 minutes)
+
+# Caching configuration for rate limiting and session data
+# Uses in-memory cache by default; switch to Redis for production
+CACHES = {
+    'default': {
+        'BACKEND': os.getenv('CACHE_BACKEND', 'django.core.cache.backends.locmem.LocMemCache'),
+        'LOCATION': os.getenv('CACHE_LOCATION', 'unique-snowflake'),
+    }
+}
 
 LOGGING = {
     'version': 1,
@@ -158,8 +223,8 @@ LOGGING = {
         'file': {
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': BASE_DIR / 'logs' / 'portfolio_manager.log',
-            'maxBytes': 5 * 1024 * 1024,  # 5 MB
-            'backupCount': 5,
+            'maxBytes': LOG_FILE_MAX_BYTES,
+            'backupCount': LOG_FILE_BACKUP_COUNT,
             'formatter': 'verbose',
         },
     },

@@ -12,3 +12,20 @@ logs_dir =
 
 # Watcher poll interval in seconds (0 = disabled)
 poll_interval = 300
+
+[ui]
+# Pagination sizes
+transactions_page_size = 50
+account_detail_page_size = 50
+
+[cache]
+# Quote cache timeout used in the UI and API responses.
+price_timeout_seconds = 900
+
+# Historical chart cache timeout.
+historical_price_timeout_seconds = 3600
+
+[logging]
+# Rotating file log settings.
+file_max_bytes = 5242880
+file_backup_count = 5

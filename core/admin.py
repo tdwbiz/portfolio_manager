@@ -1,5 +1,29 @@
 from django.contrib import admin
-from .models import BrokerStatement, Transaction, Account, TransactionType, FileImportLog
+from .models import BrokerStatement, Transaction, Account, TransactionType, FileImportLog, BrandingConfig
+
+
+@admin.register(BrandingConfig)
+class BrandingConfigAdmin(admin.ModelAdmin):
+    fieldsets = [
+        ('Company Information', {
+            'fields': ['company_name', 'company_logo_url', 'tagline', 'show_logo', 'show_tagline']
+        }),
+        ('Color Scheme', {
+            'fields': ['primary_color', 'secondary_color', 'success_color', 'danger_color', 
+                      'navbar_bg_color', 'navbar_text_color', 'footer_bg_color']
+        }),
+        ('Footer', {
+            'fields': ['footer_text']
+        }),
+    ]
+    
+    def has_add_permission(self, request):
+        # Only allow one instance
+        return not BrandingConfig.objects.exists()
+    
+    def has_delete_permission(self, request, obj=None):
+        # Don't allow deletion of the singleton
+        return False
 
 
 @admin.register(BrokerStatement)

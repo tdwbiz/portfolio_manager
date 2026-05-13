@@ -5,10 +5,10 @@
 
 <p>
   Total Realised P&L (FIFO):
-  <strong style="color:{% if total_pnl_fifo >= 0 %}green{% else %}red{% endif %}">{{ total_pnl_fifo|floatformat:2 }}</strong>
+  <strong class="{% if total_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">{{ total_pnl_fifo|floatformat:2 }}</strong>
   &nbsp;|&nbsp;
   Total Realised P&L (Avg Cost):
-  <strong style="color:{% if total_pnl_avg >= 0 %}green{% else %}red{% endif %}">{{ total_pnl_avg|floatformat:2 }}</strong>
+  <strong class="{% if total_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">{{ total_pnl_avg|floatformat:2 }}</strong>
 </p>
 
 <form method="get">
@@ -45,12 +45,12 @@
         <td>{{ trade.qty_sold|floatformat:2 }}</td>
         <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
         <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
-        <td style="text-align:right; color:{% if trade.realised_pnl_fifo >= 0 %}green{% else %}red{% endif %}">
-          {{ trade.realised_pnl_fifo|floatformat:2 }}
+        <td style="text-align:right">
+          <span class="{% if trade.realised_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realised_pnl_fifo|floatformat:2 }}</span>
         </td>
         <td style="text-align:right">{{ trade.cost_basis_avg|floatformat:2 }}</td>
-        <td style="text-align:right; color:{% if trade.realised_pnl_avg >= 0 %}green{% else %}red{% endif %}">
-          {{ trade.realised_pnl_avg|floatformat:2 }}
+        <td style="text-align:right">
+          <span class="{% if trade.realised_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realised_pnl_avg|floatformat:2 }}</span>
         </td>
       </tr>
     {% empty %}

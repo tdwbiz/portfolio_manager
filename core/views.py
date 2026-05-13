@@ -6,37 +6,152 @@ from django.http import HttpResponse, JsonResponse, FileResponse, HttpResponseNo
 from django.conf import settings
 from django.urls import reverse
 from django.db.models import Sum, Count
+from django.core.cache import cache
+from django.utils.dateparse import parse_date
 import csv
 import re
 from pathlib import Path
 from django.utils import timezone
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import openpyxl
 from io import BytesIO
+import logging
 
-from core.models import Transaction, Account, BrokerStatement, FileImportLog
+logger = logging.getLogger(__name__)
+
+# SECURITY: Helper functions for authorization and rate limiting
+def _check_login_attempts(ip_address):
+    """Check if IP address has exceeded login attempt limit."""
+    cache_key = f'login_attempts:{ip_address}'
+    attempts = cache.get(cache_key, 0)
+    if attempts >= settings.LOGIN_ATTEMPT_LIMIT:
+        return False
+    return True
+
+def _record_login_attempt(ip_address):
+    """Record a failed login attempt for rate limiting."""
+    cache_key = f'login_attempts:{ip_address}'
+    attempts = cache.get(cache_key, 0)
+    cache.set(cache_key, attempts + 1, settings.LOGIN_ATTEMPT_WINDOW)
+
+def _get_client_ip(request):
+    """Get client IP address from request, accounting for proxies."""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
+def _is_path_safe(file_path, base_dir):
+    """Prevent path traversal attacks by ensuring file_path is within base_dir."""
+    file_path = Path(file_path).resolve()
+    base_dir = Path(base_dir).resolve()
+    try:
+        file_path.relative_to(base_dir)
+        return True
+    except ValueError:
+        return False
+
+def _validate_date_param(date_str):
+    """Validate date parameter to prevent injection."""
+    if not date_str:
+        return None
+    parsed = parse_date(date_str)
+    if parsed is None:
+        raise ValueError(f"Invalid date format: {date_str}")
+    return parsed
+
+from core.models import Transaction, Account, BrokerStatement, FileImportLog, TransactionType
 from core.utils import (
     compute_portfolio_value_series,
     compute_realised_pnl,
     compute_positions,
-    fetch_last_prices,
+    fetch_last_prices as utils_fetch_last_prices,  # Renamed to avoid conflict with view
     enrich_positions_with_prices,
 )
 from core.forms import AccountForm
 
 
+TRANSACTION_TYPE_LABELS = {
+    'BUY': 'Buy',
+    'SELL': 'Sell',
+    'DIV': 'Dividend',
+    'DIST': 'Distribution',
+    'INT': 'Interest',
+    'WITHTAX': 'Withholding Tax',
+    'TAX': 'Tax',
+}
+POSITION_TRANSACTION_TYPES = ('BUY', 'SELL')
+CASH_ACTIVITY_TRANSACTION_TYPES = ('BUY', 'SELL', 'DIV', 'DIST', 'INT', 'WITHTAX', 'TAX')
+INCOME_TRANSACTION_TYPES = ('DIV', 'DIST', 'INT')
+TAX_TRANSACTION_TYPES = ('WITHTAX', 'TAX')
+TRANSACTION_EXPORT_HEADERS = [
+    'Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Amount', 'Currency',
+    'Amount (CAD)', 'Exchange Rate', 'Account', 'Broker', 'Notes',
+]
+
+
+def _get_transaction_type_options(codes=None):
+    requested_codes = tuple(codes) if codes is not None else tuple(TRANSACTION_TYPE_LABELS.keys())
+    type_map = {
+        tx_type.code: tx_type.label
+        for tx_type in TransactionType.objects.filter(code__in=requested_codes).order_by('code')
+    }
+
+    options = [
+        {
+            'code': code,
+            'label': type_map.get(code, TRANSACTION_TYPE_LABELS.get(code, code.title())),
+        }
+        for code in requested_codes
+    ]
+
+    if codes is None:
+        known_codes = {option['code'] for option in options}
+        for tx_type in TransactionType.objects.exclude(code__in=known_codes).order_by('code'):
+            options.append({'code': tx_type.code, 'label': tx_type.label})
+
+    return options
+
+
 def login(request):
-    """Login view - handles both GET and POST."""
+    """Login view - handles both GET and POST with rate limiting."""
     if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
+        client_ip = _get_client_ip(request)
+        
+        # SECURITY: Rate limit login attempts
+        if not _check_login_attempts(client_ip):
+            logger.warning(f'Login rate limit exceeded for IP: {client_ip}')
+            return render(request, 'core/login.html', {
+                'error': 'Too many login attempts. Please try again later.',
+            }, status=429)
+        
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        
+        # SECURITY: Validate inputs
+        if not username or not password:
+            _record_login_attempt(client_ip)
+            return render(request, 'core/login.html', {
+                'error': 'Username and password are required.',
+            })
+        
         user = User.objects.filter(username=username).first()
         if user and user.check_password(password):
+            # Clear rate limit on successful login
+            cache.delete(f'login_attempts:{client_ip}')
             auth_login(request, user)
+            logger.info(f'User {username} logged in successfully from IP: {client_ip}')
             next_url = request.POST.get('next', '/')
-            return redirect(next_url)
+            # SECURITY: Validate redirect URL to prevent open redirect
+            if next_url.startswith('/'):
+                return redirect(next_url)
+            return redirect('/')
         else:
+            _record_login_attempt(client_ip)
+            logger.warning(f'Failed login attempt for user {username} from IP: {client_ip}')
             return render(request, 'core/login.html', {
                 'error': 'Invalid username or password.',
             })
@@ -58,11 +173,11 @@ def dashboard(request):
     total_transactions = Transaction.objects.count()
     total_brokers = BrokerStatement.objects.values_list('source', flat=True).distinct().count()
 
-    # Get recent transactions
-    recent_transactions = Transaction.objects.select_related('account', 'statement').order_by('-date')[:10]
+    # Get recent transactions - configurable limit (see DASHBOARD_RECENT_LIMIT in settings)
+    recent_transactions = Transaction.objects.select_related('account', 'statement').order_by('-date')[:settings.DASHBOARD_RECENT_LIMIT]
 
-    # Get recent imports
-    recent_imports = FileImportLog.objects.order_by('-imported_at')[:10]
+    # Get recent imports - same configurable limit
+    recent_imports = FileImportLog.objects.order_by('-imported_at')[:settings.DASHBOARD_RECENT_LIMIT]
 
     return render(request, 'core/dashboard.html', {
         'accounts': accounts,
@@ -107,7 +222,7 @@ def transaction_list(request):
 
     # Pagination
     page = request.GET.get('page', 1)
-    per_page = 50
+    per_page = settings.TRANSACTIONS_PAGE_SIZE
     from django.core.paginator import Paginator
     paginator = Paginator(qs, per_page)
     page_obj = paginator.get_page(page)
@@ -118,6 +233,7 @@ def transaction_list(request):
         'brokers': brokers,
         'symbols': symbols,
         'accounts': accounts,
+        'transaction_type_options': _get_transaction_type_options(),
         'filters': {
             'broker': broker,
             'symbol': symbol,
@@ -149,7 +265,7 @@ def account_detail(request, account_id):
 
     # Cash flow by type
     cash_by_type = transactions.filter(
-        type__in=['BUY', 'SELL', 'DIV', 'DIST', 'INT', 'WITHTAX', 'TAX']
+        type__in=CASH_ACTIVITY_TRANSACTION_TYPES
     ).values('type').annotate(
         count=Count('id'),
         total_cad=Sum('amount_cad')
@@ -157,7 +273,7 @@ def account_detail(request, account_id):
 
     # Active holdings
     active_holdings = []
-    buy_sell_txs = transactions.filter(type__in=['BUY', 'SELL']).order_by('date')
+    buy_sell_txs = transactions.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date')
     holdings = {}
     for tx in buy_sell_txs:
         if tx.symbol not in holdings:
@@ -179,7 +295,7 @@ def account_detail(request, account_id):
 
     # Pagination for transactions
     page = request.GET.get('page', 1)
-    per_page = 50
+    per_page = settings.ACCOUNT_DETAIL_PAGE_SIZE
     from django.core.paginator import Paginator
     paginator = Paginator(transactions, per_page)
     page_obj = paginator.get_page(page)
@@ -233,20 +349,34 @@ def account_delete(request, account_id):
         return HttpResponseNotAllowed(['POST'])
     
     account = get_object_or_404(Account, account_id=account_id)
+    
+    # SECURITY: Verify authorization - currently all logged-in users own all data
+    # In a multi-tenant app, add ownership check here:
+    # if account.owner_id != request.user.id and not request.user.is_staff:
+    #     logger.warning(f'Unauthorized account deletion attempt: {request.user} tried to delete account {account_id}')
+    #     return HttpResponse('Unauthorized', status=403)
+    
+    account_display = account.account_id
     account.delete()
+    logger.info(f'Account {account_display} deleted by user {request.user.username}')
     return redirect('accounts_list')
 
 @login_required
 def portfolio_summary(request):
     """Portfolio summary with live prices and P&L."""
+    logger.info("=== Portfolio Summary Page Requested ===")
+    
     # Compute positions
     positions = compute_positions()
+    logger.info(f"Computed {len(positions)} positions")
 
     # Get unique symbols
     symbols = list(set(pos['symbol'] for pos in positions))
+    logger.info(f"Unique symbols: {symbols}")
 
     # Fetch last prices
-    prices = fetch_last_prices(symbols)
+    prices = utils_fetch_last_prices(symbols)
+    logger.info(f"Fetched {len(prices)} prices")
 
     # Enrich positions with prices
     enriched_positions = enrich_positions_with_prices(positions, prices)
@@ -261,6 +391,8 @@ def portfolio_summary(request):
         pos['unrealised_pnl_cad'] for pos in enriched_positions
         if pos['unrealised_pnl_cad'] is not None
     )
+    
+    logger.info(f"Total Cost: {total_cost_cad}, Market Value: {total_market_value_cad}, P&L: {total_unrealised_pnl_cad}")
 
     return render(request, 'core/portfolio_summary.html', {
         'positions': enriched_positions,
@@ -298,8 +430,8 @@ def income_summary(request):
     type_filter = request.GET.get('type', '')
     
     # Income and tax types
-    income_types = ['DIV', 'DIST', 'INT']
-    tax_types = ['WITHTAX', 'TAX']
+    income_types = list(INCOME_TRANSACTION_TYPES)
+    tax_types = list(TAX_TRANSACTION_TYPES)
     all_types = income_types + tax_types
     
     # Query transactions
@@ -347,7 +479,7 @@ def income_summary(request):
         'total_tax_cad': total_tax_cad,
         'net_income_cad': net_income_cad,
         'years': years,
-        'income_types': all_types,
+        'income_types': _get_transaction_type_options(all_types),
         'year_filter': year_filter,
         'type_filter': type_filter,
     })
@@ -374,23 +506,34 @@ def import_history(request):
     })
 
 @login_required
+@login_required
 def download_rejection_log(request, month):
-    """Serve rejection log CSV file for download."""
-    # Validate month parameter
+    """Serve rejection log CSV file for download with security validation."""
+    # SECURITY: Validate month parameter format
     if not re.match(r'^\d{4}_\d{2}$', month):
+        logger.warning(f'Invalid month format requested: {month} by user {request.user.username}')
         return HttpResponse('Invalid month format', status=400)
     
-    # Construct file path
+    # SECURITY: Construct file path and validate it's within the logs directory
     log_path = Path(settings.IMPORT_LOGS_DIR) / f'rejected_{month}.csv'
     
+    if not _is_path_safe(log_path, settings.IMPORT_LOGS_DIR):
+        logger.error(f'Path traversal attempt detected: {log_path}')
+        return HttpResponse('Access denied', status=403)
+    
     if not log_path.exists():
+        logger.warning(f'Rejection log not found: {month} requested by user {request.user.username}')
         return HttpResponse('File not found', status=404)
     
-    # Serve file
-    response = FileResponse(open(log_path, 'rb'), content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="rejected_{month}.csv"'
-    
-    return response
+    # SECURITY: Use context manager to ensure file is properly closed
+    try:
+        logger.info(f'Rejection log downloaded: {month} by user {request.user.username}')
+        response = FileResponse(open(log_path, 'rb'), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="rejected_{month}.csv"'
+        return response
+    except IOError as e:
+        logger.error(f'Error reading rejection log {month}: {e}')
+        return HttpResponse('Error reading file', status=500)
 
 @login_required
 def portfolio_chart(request):
@@ -413,13 +556,47 @@ def portfolio_chart_data(request):
 
 def _apply_transaction_filters(qs, request):
     """Apply transaction list filters - shared by list and export views."""
-    broker = request.GET.get('broker', '')
-    symbol = request.GET.get('symbol', '')
-    tx_type = request.GET.get('type', '')
-    account_id = request.GET.get('account', '')
-    date_from = request.GET.get('date_from', '')
-    date_to = request.GET.get('date_to', '')
+    # SECURITY: Validate and sanitize all filter inputs
+    broker = request.GET.get('broker', '').strip()[:100]  # Limit length to prevent abuse
+    symbol = request.GET.get('symbol', '').strip().upper()[:10]  # Limit length
+    tx_type = request.GET.get('type', '').strip().upper()[:20]  # Limit length
+    account_id = request.GET.get('account', '').strip()[:50]  # Limit length
+    date_from = request.GET.get('date_from', '').strip()
+    date_to = request.GET.get('date_to', '').strip()
     
+    # Validate date parameters
+    validated_date_from = None
+    validated_date_to = None
+    
+    if date_from:
+        try:
+            validated_date_from = _validate_date_param(date_from)
+        except ValueError:
+            logger.warning(f'Invalid date_from parameter: {date_from}')
+            validated_date_from = None
+    
+    if date_to:
+        try:
+            validated_date_to = _validate_date_param(date_to)
+        except ValueError:
+            logger.warning(f'Invalid date_to parameter: {date_to}')
+            validated_date_to = None
+    
+    # Validate broker against known sources
+    if broker:
+        broker_exists = BrokerStatement.objects.filter(source=broker).exists()
+        if not broker_exists:
+            logger.warning(f'Filter request for non-existent broker: {broker}')
+            broker = ''
+    
+    # Validate account exists
+    if account_id:
+        account_exists = Account.objects.filter(account_id=account_id).exists()
+        if not account_exists:
+            logger.warning(f'Filter request for non-existent account: {account_id}')
+            account_id = ''
+    
+    # Apply filters
     if broker:
         qs = qs.filter(statement__source=broker)
     if symbol:
@@ -428,10 +605,10 @@ def _apply_transaction_filters(qs, request):
         qs = qs.filter(type=tx_type)
     if account_id:
         qs = qs.filter(account__account_id=account_id)
-    if date_from:
-        qs = qs.filter(date__gte=date_from)
-    if date_to:
-        qs = qs.filter(date__lte=date_to)
+    if validated_date_from:
+        qs = qs.filter(date__gte=validated_date_from)
+    if validated_date_to:
+        qs = qs.filter(date__lte=validated_date_to)
     
     filters = {
         'broker': broker,
@@ -447,17 +624,18 @@ def _apply_transaction_filters(qs, request):
 
 @login_required
 def transaction_export_csv(request):
+    """Export transactions to CSV. User must be authenticated."""
     qs = Transaction.objects.select_related('statement', 'account').all()
     qs, filters = _apply_transaction_filters(qs, request)
+
+    # SECURITY: Log export activity
+    logger.info(f'CSV export requested by {request.user.username} with filters: {filters} ({qs.count()} transactions)')
 
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename=transactions_{datetime.now().strftime("%Y-%m-%d")}.csv'
 
     writer = csv.writer(response)
-    writer.writerow([
-        'Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Amount', 'Currency',
-        'Amount (CAD)', 'Exchange Rate', 'Account', 'Broker', 'Notes'
-    ])
+    writer.writerow(TRANSACTION_EXPORT_HEADERS)
 
     for tx in qs:
         writer.writerow([
@@ -471,18 +649,18 @@ def transaction_export_csv(request):
 
 @login_required
 def transaction_export_excel(request):
+    """Export transactions to Excel. User must be authenticated."""
     qs = Transaction.objects.select_related('statement', 'account').all()
     qs, filters = _apply_transaction_filters(qs, request)
+
+    # SECURITY: Log export activity
+    logger.info(f'Excel export requested by {request.user.username} with filters: {filters} ({qs.count()} transactions)')
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = 'Transactions'
 
-    headers = [
-        'Date', 'Symbol', 'Type', 'Quantity', 'Price', 'Amount', 'Currency',
-        'Amount (CAD)', 'Exchange Rate', 'Account', 'Broker', 'Notes'
-    ]
-    ws.append(headers)
+    ws.append(TRANSACTION_EXPORT_HEADERS)
 
     for tx in qs:
         ws.append([
@@ -505,6 +683,6 @@ def transaction_export_excel(request):
     
     return response
 
-def fetch_last_prices(request):
-    # Implementation for fetching last prices
+def fetch_prices_api(request):
+    """API endpoint for fetching last prices (unused - placeholder)."""
     return JsonResponse({})

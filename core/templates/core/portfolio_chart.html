@@ -27,7 +27,7 @@
             datasets: [{
               label: 'Market Value (CAD)',
               data: data.values,
-              borderColor: '#4e79a7',
+              borderColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#4e79a7',
               fill: false,
               tension: 0.3
             }]

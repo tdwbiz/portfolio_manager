@@ -1,74 +1,114 @@
 # Portfolio Manager
 
-Django-based portfolio management application for tracking broker statements and transactions from Interactive Brokers (IB) and RBC Royal Bank.
+Modern, professional Django-based portfolio management application for tracking broker statements and transactions from Interactive Brokers (IB) and RBC Royal Bank.
+
+## ✨ Features
+
+- 📊 **Real-time Portfolio Tracking** with yfinance integration
+- 💼 **Multi-broker Support** (Interactive Brokers, RBC)
+- 📈 **Performance Charts** with historical price data
+- 💰 **P&L Calculations** (Realised & Unrealised)
+- 📥 **Automated Statement Import** with file watching
+- 🎨 **Fully Customizable Branding** - colors, logos, themes
+- 📱 **Modern Responsive UI** with Bootstrap 5
+- 🔐 **Secure Admin Interface** for complete control
 
 ## Project Overview
 
-This application provides a foundation for importing and managing financial transaction data from brokerage statements. The system is designed to:
+This application provides a comprehensive solution for importing and managing financial transaction data from brokerage statements. The system is designed to:
 
-- Store broker statements (IB or RBC sources)
-- Parse and import transaction data
-- Track transaction history with full audit trail
-- Provide admin interface for data management
+- Store and track broker statements (IB or RBC sources)
+- Parse and import transaction data automatically
+- Calculate real-time portfolio values using Yahoo Finance
+- Generate P&L reports with FIFO and average-cost methods
+- Track income (dividends, interest)
+- Visualize performance with interactive charts
+- Provide customizable branding for professional deployment
 
 ## Tech Stack
 
-- Django: 5.1.x (latest stable)
-- Database: Microsoft SQL Server (MSSQL)
-- Python: 3.11+
-- ORM: Django ORM with MSSQL backend
+- **Django**: 5.1.x (latest stable)
+- **Database**: Microsoft SQL Server (MSSQL)
+- **Python**: 3.11+
+- **UI Framework**: Bootstrap 5 with responsive design
+- **Price Data**: yfinance (Yahoo Finance API)
+- **Charts**: Chart.js
+- **Icons**: Bootstrap Icons
 
-## Installation and Setup
+## Quick Start
 
 ### 1. Clone or Access the Project
 
+```bash
 cd C:\AI-DevTeam\projects\portfolio_manager
+```
 
 ### 2. Create Virtual Environment
 
+```bash
 python -m venv venv
 venv\Scripts\activate
+```
 
 ### 3. Install Dependencies
 
+```bash
 pip install -r requirements.txt
+```
 
 ### 4. Configure Environment Variables
 
 Copy the example environment file:
+```bash
 copy .env.example .env
+```
 
-Edit .env and fill in your database credentials:
-See .env.example for required variables
+Edit `.env` and fill in your database credentials (see `.env.example` for required variables)
 
 ### 5. Configure Database
 
-Ensure your SQL Server database PortfolioDB exists, or create it:
+Ensure your SQL Server database exists, or create it:
 
-CREATE DATABASE PortfolioDB;
+```sql
+CREATE DATABASE PortfolioDev;
+```
 
-Update your .env file with the correct database credentials:
+Update your `.env` file with the correct database credentials:
 
+```
 DB_HOST=localhost
 DB_PORT=1433
-DB_NAME=PortfolioDB
+DB_NAME=PortfolioDev
 DB_USER=your_username
 DB_PASSWORD=your_password
+```
 
 ### 6. Run Migrations
 
-python manage.py makemigrations
+```bash
 python manage.py migrate
+```
 
 ### 7. Create Superuser
 
+```bash
 python manage.py createsuperuser
+```
 
 ### 8. Start Development Server
 
+```bash
 python manage.py runserver
+```
 
-Visit http://localhost:8000/admin/ to access the admin interface.
+Visit:
+- **Application**: http://localhost:8000/
+- **Admin Interface**: http://localhost:8000/admin/
+
+## 📚 Documentation
+
+- **[Admin & Branding Guide](ADMIN_BRANDING_GUIDE.md)** - Complete guide to customization, admin features, and branding configuration
+- **Specs Directory** - Feature specifications in `specs/` folder
 
 ## Project Structure
 

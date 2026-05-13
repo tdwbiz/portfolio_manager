@@ -5,7 +5,7 @@
 
 <p>
   Gross Income (CAD): <strong>{{ total_income_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;
-  Tax Withheld (CAD): <strong style="color:red">{{ total_tax_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;
+  Tax Withheld (CAD): <strong class="negative">{{ total_tax_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;
   Net Income (CAD): <strong>{{ net_income_cad|floatformat:2 }}</strong>
 </p>
 
@@ -18,8 +18,8 @@
   </select>
   <select name="type" onchange="this.form.submit()">
     <option value="">All Types</option>
-    {% for t in income_types %}
-      <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
+    {% for option in income_types %}
+      <option value="{{ option.code }}" {% if type_filter == option.code %}selected{% endif %}>{{ option.label }}</option>
     {% endfor %}
   </select>
   <button type="submit">Filter</button>

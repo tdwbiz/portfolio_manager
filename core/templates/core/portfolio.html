@@ -36,7 +36,7 @@
             <td>{% if pos.market_value_cad %}{{ pos.market_value_cad|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
             <td>
                 {% if pos.unrealised_pnl_cad is not None %}
-                    <span style="color:{% if pos.unrealised_pnl_cad >= 0 %}green{% else %}red{% endif %}">
+                    <span class="{% if pos.unrealised_pnl_cad >= 0 %}positive{% else %}negative{% endif %}">
                         {{ pos.unrealised_pnl_cad|floatformat:2 }}
                     </span>
                 {% else %}
@@ -45,7 +45,7 @@
             </td>
             <td>
                 {% if pos.unrealised_pnl_pct is not None %}
-                    <span style="color:{% if pos.unrealised_pnl_pct >= 0 %}green{% else %}red{% endif %}">
+                    <span class="{% if pos.unrealised_pnl_pct >= 0 %}positive{% else %}negative{% endif %}">
                         {{ pos.unrealised_pnl_pct|floatformat:2 }}
                     </span>
                 {% else %}

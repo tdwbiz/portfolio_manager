@@ -111,3 +111,44 @@ class FileImportLog(models.Model):
 
     def __str__(self):
         return f"{self.filename} - {self.status}"
+
+
+class BrandingConfig(models.Model):
+    """Singleton model for application branding and theme configuration."""
+    company_name = models.CharField(max_length=100, default='Portfolio Manager', help_text='Company or application name')
+    company_logo_url = models.URLField(blank=True, default='', help_text='URL to company logo image')
+    tagline = models.CharField(max_length=255, blank=True, default='', help_text='Company tagline or slogan')
+    
+    # Color scheme - Django Admin inspired colors
+    primary_color = models.CharField(max_length=7, default='#417690', help_text='Primary brand color (hex)')
+    secondary_color = models.CharField(max_length=7, default='#447e9b', help_text='Secondary color (hex)')
+    success_color = models.CharField(max_length=7, default='#28a745', help_text='Success/positive color (hex)')
+    danger_color = models.CharField(max_length=7, default='#ba2121', help_text='Danger/negative color (hex)')
+    navbar_bg_color = models.CharField(max_length=7, default='#417690', help_text='Navigation bar background (hex)')
+    navbar_text_color = models.CharField(max_length=7, default='#ffffff', help_text='Navigation bar text (hex)')
+    
+    # Footer
+    footer_text = models.CharField(max_length=255, blank=True, default='', help_text='Footer copyright text')
+    footer_bg_color = models.CharField(max_length=7, default='#f8f9fa', help_text='Footer background (hex)')
+    
+    # Features
+    show_logo = models.BooleanField(default=True, help_text='Display company logo in navbar')
+    show_tagline = models.BooleanField(default=True, help_text='Display tagline')
+    
+    class Meta:
+        verbose_name = 'Branding Configuration'
+        verbose_name_plural = 'Branding Configuration'
+    
+    def __str__(self):
+        return f"Branding: {self.company_name}"
+    
+    def save(self, *args, **kwargs):
+        """Ensure only one instance exists (singleton pattern)."""
+        self.pk = 1
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def load(cls):
+        """Load the singleton instance, create if not exists."""
+        obj, created = cls.objects.get_or_create(pk=1)
+        return obj

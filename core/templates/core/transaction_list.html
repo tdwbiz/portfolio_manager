@@ -18,13 +18,9 @@
     <label>Type:
         <select name="type">
             <option value="">All</option>
-            <option value="BUY" {% if filters.type == 'BUY' %}selected{% endif %}>Buy</option>
-            <option value="SELL" {% if filters.type == 'SELL' %}selected{% endif %}>Sell</option>
-            <option value="DIV" {% if filters.type == 'DIV' %}selected{% endif %}>Dividend</option>
-            <option value="DIST" {% if filters.type == 'DIST' %}selected{% endif %}>Distribution</option>
-            <option value="INT" {% if filters.type == 'INT' %}selected{% endif %}>Interest</option>
-            <option value="WITHTAX" {% if filters.type == 'WITHTAX' %}selected{% endif %}>Withholding Tax</option>
-            <option value="TAX" {% if filters.type == 'TAX' %}selected{% endif %}>Tax</option>
+            {% for option in transaction_type_options %}
+            <option value="{{ option.code }}" {% if filters.type == option.code %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
         </select>
     </label>
     <label>Account:

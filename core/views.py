@@ -506,7 +506,6 @@ def import_history(request):
     })
 
 @login_required
-@login_required
 def download_rejection_log(request, month):
     """Serve rejection log CSV file for download with security validation."""
     # SECURITY: Validate month parameter format

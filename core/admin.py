@@ -9,18 +9,18 @@ class BrandingConfigAdmin(admin.ModelAdmin):
             'fields': ['company_name', 'company_logo_url', 'tagline', 'show_logo', 'show_tagline']
         }),
         ('Color Scheme', {
-            'fields': ['primary_color', 'secondary_color', 'success_color', 'danger_color', 
+            'fields': ['primary_color', 'secondary_color', 'success_color', 'danger_color',
                       'navbar_bg_color', 'navbar_text_color', 'footer_bg_color']
         }),
         ('Footer', {
             'fields': ['footer_text']
         }),
     ]
-    
+
     def has_add_permission(self, request):
         # Only allow one instance
         return not BrandingConfig.objects.exists()
-    
+
     def has_delete_permission(self, request, obj=None):
         # Don't allow deletion of the singleton
         return False
@@ -35,9 +35,9 @@ class BrokerStatementAdmin(admin.ModelAdmin):
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
-    list_display = ['account_id', 'name', 'broker', 'currency', 'starting_balance']
-    search_fields = ['account_id', 'name']
-    list_filter = ['currency', 'broker']
+    list_display = ['account_id', 'name', 'broker', 'category', 'owner', 'currency', 'starting_balance']
+    search_fields = ['account_id', 'name', 'owner']
+    list_filter = ['broker', 'category', 'owner']
 
 
 @admin.register(Transaction)

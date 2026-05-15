@@ -45,11 +45,31 @@ class TransactionType(models.Model):
 
 class Account(models.Model):
     BROKER_CHOICES = [('IB', 'Interactive Brokers'), ('RBC', 'RBC Brokerage')]
-    account_id    = models.CharField(max_length=50, unique=True)   # e.g. "TOM IB", "TS JOINT", "RBC-123456"
-    name          = models.CharField(max_length=100)               # human display name, editable
-    broker        = models.CharField(max_length=3, choices=BROKER_CHOICES)
-    currency      = models.CharField(max_length=3, default='USD')
-    starting_balance     = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    CATEGORY_CHOICES = [
+        ('RRSP',    'RRSP (Retirement)'),
+        ('LIRA',    'LIRA (Locked-In Retirement)'),
+        ('TFSA',    'TFSA (Tax-Free)'),
+        ('TAXABLE', 'Taxable'),
+        ('RESP',    'RESP (Education)'),
+        ('OTHER',   'Other'),
+    ]
+    account_id         = models.CharField(max_length=50, unique=True)   # e.g. "TOM IB", "TS JOINT", "RBC-123456"
+    name               = models.CharField(max_length=100)               # human display name, editable
+    broker             = models.CharField(max_length=3, choices=BROKER_CHOICES)
+    currency           = models.CharField(max_length=3, default='USD')
+    category           = models.CharField(
+        max_length=10,
+        choices=CATEGORY_CHOICES,
+        default='TAXABLE',
+        help_text='Account tax category (RRSP, TFSA, Taxable, etc.)'
+    )
+    owner              = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text='Person or entity this account belongs to (e.g. "Tom", "Wife", "Joint")'
+    )
+    starting_balance       = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     starting_balance_date = models.DateField(null=True, blank=True)
 
     def __str__(self):

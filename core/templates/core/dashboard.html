@@ -55,6 +55,8 @@
                                 <th>Name</th>
                                 <th>Broker</th>
                                 <th>Currency</th>
+                                <th>Category</th>
+                                <th>Owner</th>
                                 <th>Transactions</th>
                                 <th>Actions</th>
                             </tr>
@@ -66,6 +68,8 @@
                                 <td>{{ account.name }}</td>
                                 <td><span class="badge bg-primary">{{ account.get_broker_display }}</span></td>
                                 <td><span class="badge bg-secondary">{{ account.currency }}</span></td>
+                                <td><span class="badge bg-info">{{ account.get_category_display }}</span></td>
+                                <td>{{ account.owner|default:"—" }}</td>
                                 <td>{{ account.transaction_count }}</td>
                                 <td>
                                     <a href="{% url 'account_detail' account.account_id %}" class="btn btn-sm btn-outline-primary">
@@ -75,7 +79,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted">
+                                <td colspan="8" class="text-center text-muted">
                                     <i class="bi bi-inbox"></i> No accounts found.
                                 </td>
                             </tr>

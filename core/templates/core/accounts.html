@@ -12,6 +12,8 @@
             <th>Name</th>
             <th>Broker</th>
             <th>Currency</th>
+            <th>Category</th>
+            <th>Owner</th>
             <th>Starting Balance</th>
             <th>Starting Date</th>
             <th>Transaction Count</th>
@@ -26,6 +28,8 @@
             <td>{{ account.name }}</td>
             <td>{{ account.get_broker_display }}</td>
             <td>{{ account.currency }}</td>
+            <td>{{ account.get_category_display }}</td>
+            <td>{{ account.owner|default:"—" }}</td>
             <td>{{ account.starting_balance }}</td>
             <td>{{ account.starting_balance_date|default:'' }}</td>
             <td>{{ account.transaction_count }}</td>

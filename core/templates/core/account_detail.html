@@ -7,6 +7,10 @@
     <strong>Broker:</strong> {{ account.get_broker_display }} &nbsp;|&nbsp;
     <strong>Base Currency:</strong> {{ account.currency }}
 </p>
+<p>
+    <strong>Category:</strong> {{ account.get_category_display }} &nbsp;|&nbsp;
+    <strong>Owner:</strong> {{ account.owner|default:"—" }}
+</p>
 
 <!-- ── Balance summary ─────────────────────────────────────────────────── -->
 <h2>Balance Summary (CAD)</h2>

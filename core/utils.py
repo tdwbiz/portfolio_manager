@@ -203,17 +203,22 @@ def compute_positions(broker=None):
     if broker:
         qs = qs.filter(statement__source=broker)
     
-    # Group by (symbol, broker, account)
+    # Group by (symbol, broker, account_id)
     positions = {}
     
     for tx in qs:
+        account_id = tx.account.account_id if tx.account else ''
         account_name = tx.account.name if tx.account else ''
-        key = (tx.symbol, tx.statement.source, account_name)
+        key = (tx.symbol, tx.statement.source, account_id)
         if key not in positions:
             positions[key] = {
                 'symbol': tx.symbol,
                 'broker': tx.statement.source,
+                'account_id': account_id,
                 'account_name': account_name,
+                'category': tx.account.category if tx.account else 'TAXABLE',
+                'category_display': tx.account.get_category_display() if tx.account else 'Taxable',
+                'owner': tx.account.owner if tx.account else '',
                 'currency': tx.currency,
                 'total_shares': Decimal('0'),
                 'total_cost_cad': Decimal('0'),
@@ -240,7 +245,11 @@ def compute_positions(broker=None):
             result.append({
                 'symbol': pos['symbol'],
                 'broker': pos['broker'],
+                'account_id': pos['account_id'],
                 'account_name': pos['account_name'],
+                'category': pos['category'],
+                'category_display': pos['category_display'],
+                'owner': pos['owner'],
                 'currency': pos['currency'],
                 'total_shares': pos['total_shares'],
                 'avg_cost_cad': avg_cost,
@@ -249,6 +258,105 @@ def compute_positions(broker=None):
     
     # Sort by broker, account name, symbol
     result.sort(key=lambda x: (x['broker'], x['account_name'], x['symbol'] or ''))
+    return result
+
+
+def group_positions_by_account(positions: list[dict]) -> list[dict]:
+    """Group an enriched positions list by account, computing per-account subtotals.
+
+    Returns a list of account-group dicts, each with:
+        account_id, account_name, broker, category, category_display, owner,
+        positions (list of position dicts for that account),
+        subtotal_cost_cad, subtotal_market_value_cad, subtotal_unrealised_pnl_cad
+    """
+    groups: dict[str, dict] = {}
+    
+    for pos in positions:
+        acct_id = pos['account_id']
+        if acct_id not in groups:
+            groups[acct_id] = {
+                'account_id': acct_id,
+                'account_name': pos['account_name'],
+                'broker': pos['broker'],
+                'category': pos['category'],
+                'category_display': pos['category_display'],
+                'owner': pos['owner'],
+                'positions': [],
+                'subtotal_cost_cad': Decimal('0'),
+                'subtotal_market_value_cad': Decimal('0'),
+                'subtotal_unrealised_pnl_cad': Decimal('0'),
+            }
+        
+        group = groups[acct_id]
+        group['positions'].append(pos)
+        group['subtotal_cost_cad'] += pos['total_cost_cad']
+        if pos.get('market_value_cad') is not None:
+            group['subtotal_market_value_cad'] += pos['market_value_cad']
+    
+    # Compute unrealised P&L for each group
+    for group in groups.values():
+        group['subtotal_unrealised_pnl_cad'] = (
+            group['subtotal_market_value_cad'] - group['subtotal_cost_cad']
+        )
+    
+    # Sort by (category, broker, account_id)
+    category_order = {
+        'RRSP': 0, 'LIRA': 1, 'TFSA': 2, 'RESP': 3, 'TAXABLE': 4, 'OTHER': 5
+    }
+    
+    result = list(groups.values())
+    result.sort(key=lambda g: (
+        category_order.get(g['category'], 99),
+        g['broker'],
+        g['account_id'],
+    ))
+    
+    return result
+
+
+def group_positions_by_category(positions: list[dict]) -> list[dict]:
+    """Group an enriched positions list by account category, computing per-category subtotals.
+
+    Returns a list of category-group dicts, each with:
+        category, category_display,
+        positions (list of position dicts for that category),
+        subtotal_cost_cad, subtotal_market_value_cad, subtotal_unrealised_pnl_cad,
+        allocation_pct (percentage of total portfolio market value — computed in view)
+    """
+    groups: dict[str, dict] = {}
+    
+    for pos in positions:
+        cat = pos['category']
+        if cat not in groups:
+            groups[cat] = {
+                'category': cat,
+                'category_display': pos['category_display'],
+                'positions': [],
+                'subtotal_cost_cad': Decimal('0'),
+                'subtotal_market_value_cad': Decimal('0'),
+                'subtotal_unrealised_pnl_cad': Decimal('0'),
+            }
+        
+        group = groups[cat]
+        group['positions'].append(pos)
+        group['subtotal_cost_cad'] += pos['total_cost_cad']
+        if pos.get('market_value_cad') is not None:
+            group['subtotal_market_value_cad'] += pos['market_value_cad']
+    
+    # Compute unrealised P&L for each group
+    for group in groups.values():
+        group['subtotal_unrealised_pnl_cad'] = (
+            group['subtotal_market_value_cad'] - group['subtotal_cost_cad']
+        )
+    
+    # Sort by fixed order: RRSP, LIRA, TFSA, RESP, TAXABLE, OTHER
+    category_order = {
+        'RRSP': 0, 'LIRA': 1, 'TFSA': 2, 'RESP': 3, 'TAXABLE': 4, 'OTHER': 5
+    }
+    
+    result = list(groups.values())
+    result.sort(key=lambda g: category_order.get(g['category'], 99))
+    
     return result
 
 

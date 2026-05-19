@@ -25,8 +25,8 @@ def _generate_monthly_dates(start_date: date, end_date: date) -> list[date]:
             current = current.replace(year=current.year + 1, month=1, day=1)
         else:
             current = current.replace(month=current.month + 1, day=1)
-        # Last day of the new month
-        dates.append(current.replace(day=current.day - 1))
+        # Last day of the previous month (current is now the 1st of the next month)
+        dates.append(current - timedelta(days=1))
     return dates
 
 
@@ -62,20 +62,14 @@ def compute_portfolio_value_series(
         if date_from:
             try:
                 parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                if parsed_from < start_date:
-                    start_date = parsed_from
-                elif parsed_from > end_date:
-                    start_date = end_date
+                start_date = max(start_date, parsed_from)
             except ValueError:
                 pass
 
         if date_to:
             try:
                 parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                if parsed_to > end_date:
-                    end_date = parsed_to
-                elif parsed_to < start_date:
-                    end_date = start_date
+                end_date = min(end_date, parsed_to)
             except ValueError:
                 pass
 
@@ -92,7 +86,7 @@ def compute_portfolio_value_series(
         cache_key = 'hist_prices'
         prices_df = cache.get(cache_key)
 
-        if not prices_df:
+        if prices_df is None or (hasattr(prices_df, 'empty') and prices_df.empty):
             # Add USDCAD for currency conversion
             symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
             logger.info(f"Fetching historical data from yfinance for {len(symbols_with_usdcad)} symbols")
@@ -273,20 +267,14 @@ def compute_cost_basis_series(
         if date_from:
             try:
                 parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                if parsed_from < start_date:
-                    start_date = parsed_from
-                elif parsed_from > end_date:
-                    start_date = end_date
+                start_date = max(start_date, parsed_from)
             except ValueError:
                 pass
 
         if date_to:
             try:
                 parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                if parsed_to > end_date:
-                    end_date = parsed_to
-                elif parsed_to < start_date:
-                    end_date = start_date
+                end_date = min(end_date, parsed_to)
             except ValueError:
                 pass
 
@@ -384,7 +372,7 @@ def compute_income_series(
                 tx_month_end = tx_month_end.replace(year=tx_month_end.year + 1, month=1, day=1)
             else:
                 tx_month_end = tx_month_end.replace(month=tx_month_end.month + 1, day=1)
-            tx_month_end = tx_month_end.replace(day=tx_month_end.day - 1)
+            tx_month_end = tx_month_end - timedelta(days=1)
             income_by_date[tx_month_end] += tx.amount_cad
 
         results = []
@@ -416,7 +404,7 @@ def compute_series_by_account(
         # Get all accounts that have at least one BUY transaction
         accounts_with_buys = Transaction.objects.filter(
             type='BUY'
-        ).values_list('account_id', flat=True).distinct()
+        ).values_list('account__account_id', flat=True).distinct()
 
         if not accounts_with_buys:
             return {}
@@ -439,20 +427,14 @@ def compute_series_by_account(
             if date_from:
                 try:
                     parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                    if parsed_from < start_date:
-                        start_date = parsed_from
-                    elif parsed_from > end_date:
-                        start_date = end_date
+                    start_date = max(start_date, parsed_from)
                 except ValueError:
                     pass
 
             if date_to:
                 try:
                     parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                    if parsed_to > end_date:
-                        end_date = parsed_to
-                    elif parsed_to < start_date:
-                        end_date = start_date
+                    end_date = min(end_date, parsed_to)
                 except ValueError:
                     pass
 
@@ -462,7 +444,7 @@ def compute_series_by_account(
             cache_key = 'hist_prices'
             prices_df = cache.get(cache_key)
 
-            if not prices_df:
+            if prices_df is None or (hasattr(prices_df, 'empty') and prices_df.empty):
                 all_symbols = list(set(tx.symbol for tx in account_txs))
                 symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
 

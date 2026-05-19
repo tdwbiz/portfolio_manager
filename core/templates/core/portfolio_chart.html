@@ -96,14 +96,21 @@
   // Chart.js instance reference
   let chartInstance = null;
 
-  // CSS color variables
-  const COLORS = {
-    marketValue: getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#417690',
-    costBasis: getComputedStyle(document.documentElement).getPropertyValue('--secondary-color').trim() || '#447e9b',
-    income: (getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim() || '#28a745') + '99',
-    benchmark: '#f4a261',
-    accountColors: ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948'],
+  // Series colours — distinct palette
+  const SERIES_COLORS = {
+    market_value: '#1565C0',
+    cost_basis:   '#E65100',
+    income:       '#2E7D32',
   };
+  const BENCHMARK_COLOR = '#6A1B9A';
+  const ACCOUNT_COLORS = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948'];
+
+  function getSeriesColor(ds, idx) {
+    if (SERIES_COLORS[ds.id]) return SERIES_COLORS[ds.id];
+    if (ds.id.startsWith('benchmark_')) return BENCHMARK_COLOR;
+    if (ds.id.startsWith('account_')) return ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length];
+    return '#417690';
+  }
 
   // Date range presets
   const DATE_RANGES = {
@@ -205,20 +212,27 @@
 
     // Build datasets
     const datasets = data.datasets.map((ds, idx) => {
+      const color = ds.borderColor || getSeriesColor(ds, idx);
+      const bgColor = ds.id === 'income'
+        ? color + 'CC'
+        : ds.backgroundColor || color;
       const dataset = {
         label: ds.label,
         data: ds.data,
         type: ds.type,
         yAxisID: ds.yAxisID || 'y',
-        borderColor: ds.borderColor || COLORS[ds.id] || COLORS.marketValue,
-        backgroundColor: ds.backgroundColor || COLORS[ds.id] || COLORS.marketValue,
+        borderColor: color,
+        backgroundColor: bgColor,
+        borderWidth: 2,
+        pointRadius: 3,
         fill: false,
       };
 
       // Apply chart type overrides
       if (chartType === 'area' && ds.id === 'market_value') {
         dataset.fill = true;
-      } else if (chartType === 'bar' && ds.id === 'market_value') {
+        dataset.backgroundColor = color + '33';
+      } else if (chartType === 'bar' && ds.id !== 'income' && !ds.id.startsWith('benchmark_')) {
         dataset.type = 'bar';
       }
 

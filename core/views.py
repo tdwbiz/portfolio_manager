@@ -656,6 +656,9 @@ def portfolio_chart_data(request):
                             bench_series = []
                         else:
                             close_prices = bench_data['Close']
+                            # Newer yfinance returns DataFrame for single ticker; squeeze to Series
+                            if hasattr(close_prices, 'columns'):
+                                close_prices = close_prices.iloc[:, 0]
                             bench_series = []
                             for d, price in close_prices.items():
                                 if not (isinstance(price, float) and price != price):  # not NaN
@@ -673,9 +676,11 @@ def portfolio_chart_data(request):
                         logger.error(f"Error fetching benchmark data: {e}")
                         bench_series = []
                 
-                # Match benchmark dates to portfolio labels
-                bench_by_date = {item['date']: item['price'] for item in bench_series}
-                bench_values = [bench_by_date.get(lbl, 0) for lbl in labels]
+                # Match benchmark to portfolio labels by year-month (last trading day per month)
+                bench_by_month = {}
+                for item in bench_series:
+                    bench_by_month[item['date'][:7]] = item['price']  # last entry per YYYY-MM wins
+                bench_values = [bench_by_month.get(lbl[:7], None) for lbl in labels]
                 
                 safe_id = benchmark_ticker.replace('.', '_').replace('^', '_').replace('=', '_')
                 datasets.append({

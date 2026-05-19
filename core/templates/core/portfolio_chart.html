@@ -3,49 +3,356 @@
 {% block title %}Portfolio Performance Chart{% endblock %}
 
 {% block content %}
-<div style="max-width: 800px; margin: 2rem auto;">
+<div style="max-width: 1200px; margin: 2rem auto;">
   <h2>Portfolio Performance</h2>
-  <p id="loading">Loading chart data…</p>
+
+  <!-- Controls Panel -->
+  <div class="controls-panel" style="background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+    <!-- Date Range Buttons -->
+    <div class="mb-3">
+      <label class="form-label fw-bold">Date Range:</label>
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="1M">1M</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="3M">3M</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="6M">6M</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="YTD">YTD</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="1Y">1Y</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="All">All</button>
+      </div>
+    </div>
+
+    <!-- Custom Date Range -->
+    <div class="mb-3">
+      <label class="form-label fw-bold">Custom Range:</label>
+      <div class="d-flex gap-2 align-items-center">
+        <input type="date" id="custom_date_from" class="form-control form-control-sm" style="max-width: 160px;">
+        <span>to</span>
+        <input type="date" id="custom_date_to" class="form-control form-control-sm" style="max-width: 160px;">
+        <button type="button" id="apply_date_range" class="btn btn-sm btn-primary">Apply</button>
+      </div>
+    </div>
+
+    <!-- Series Toggles -->
+    <div class="mb-3">
+      <label class="form-label fw-bold">Show:</label>
+      <div class="d-flex gap-3 flex-wrap">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="toggle_cost_basis">
+          <label class="form-check-label" for="toggle_cost_basis">Cost Basis</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="toggle_income">
+          <label class="form-check-label" for="toggle_income">Income</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="toggle_benchmark">
+          <label class="form-check-label" for="toggle_benchmark">Benchmark</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="toggle_by_account">
+          <label class="form-check-label" for="toggle_by_account">By Account</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Benchmark Ticker Input -->
+    <div class="mb-3" id="benchmark_ticker_container" style="display: none;">
+      <label for="benchmark_ticker" class="form-label fw-bold">Benchmark Ticker:</label>
+      <input type="text" id="benchmark_ticker" class="form-control form-control-sm" value="^GSPC" maxlength="20">
+    </div>
+
+    <!-- Chart Type Selector -->
+    <div class="mb-3">
+      <label class="form-label fw-bold">Chart Type:</label>
+      <div class="btn-group" role="group">
+        <input type="radio" class="btn-check" name="chart_type" id="type_line" value="line" checked>
+        <label class="btn btn-outline-secondary btn-sm" for="type_line">Line</label>
+
+        <input type="radio" class="btn-check" name="chart_type" id="type_area" value="area">
+        <label class="btn btn-outline-secondary btn-sm" for="type_area">Area</label>
+
+        <input type="radio" class="btn-check" name="chart_type" id="type_bar" value="bar">
+        <label class="btn btn-outline-secondary btn-sm" for="type_bar">Bar</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Spinner -->
+  <div id="chart_loading" style="display: none; text-align: center; padding: 2rem;">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="mt-2">Loading chart data...</p>
+  </div>
+
+  <!-- Error Message -->
+  <div id="chart_error" class="alert alert-danger" style="display: none;"></div>
+
+  <!-- Chart Canvas -->
   <canvas id="portfolioChart"></canvas>
 </div>
 
 <script>
-  document.addEventListener('DOMContentLoaded', function () {
-    fetch("{% url 'portfolio_chart_data' %}")
-      .then(response => response.json())
-      .then(data => {
-        const ctx = document.getElementById('portfolioChart').getContext('2d');
-        
-        // Hide loading message
-        document.getElementById('loading').style.display = 'none';
-        
-        // Create chart
-        new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: data.labels,
-            datasets: [{
-              label: 'Market Value (CAD)',
-              data: data.values,
-              borderColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim() || '#4e79a7',
-              fill: false,
-              tension: 0.3
-            }]
+  // Chart.js instance reference
+  let chartInstance = null;
+
+  // Series colours — distinct palette
+  const SERIES_COLORS = {
+    market_value: '#1565C0',
+    cost_basis:   '#E65100',
+    income:       '#2E7D32',
+  };
+  const BENCHMARK_COLOR = '#6A1B9A';
+  const ACCOUNT_COLORS = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948'];
+
+  function getSeriesColor(ds, idx) {
+    if (SERIES_COLORS[ds.id]) return SERIES_COLORS[ds.id];
+    if (ds.id.startsWith('benchmark_')) return BENCHMARK_COLOR;
+    if (ds.id.startsWith('account_')) return ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length];
+    return '#417690';
+  }
+
+  // Date range presets
+  const DATE_RANGES = {
+    '1M': { months: 1 },
+    '3M': { months: 3 },
+    '6M': { months: 6 },
+    'YTD': { ytd: true },
+    '1Y': { months: 12 },
+    'All': null,
+  };
+
+  function getDateRange(rangeKey) {
+    if (rangeKey === 'All') return { date_from: null, date_to: null };
+    const preset = DATE_RANGES[rangeKey];
+    if (!preset) return { date_from: null, date_to: null };
+
+    const today = new Date();
+    let fromDate;
+
+    if (preset.ytd) {
+      fromDate = new Date(today.getFullYear(), 0, 1);
+    } else {
+      fromDate = new Date(today.getFullYear(), today.getMonth() - preset.months, 1);
+    }
+
+    return {
+      date_from: fromDate.toISOString().split('T')[0],
+      date_to: today.toISOString().split('T')[0],
+    };
+  }
+
+  function buildQueryString(params) {
+    const queryParts = [];
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== null && value !== undefined && value !== '') {
+        queryParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+      }
+    }
+    return queryParts.length > 0 ? '?' + queryParts.join('&') : '';
+  }
+
+  async function fetchChartData() {
+    const loadingEl = document.getElementById('chart_loading');
+    const errorEl = document.getElementById('chart_error');
+
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+
+    // Gather parameters
+    const dateRange = getDateRange(getActiveDateRange());
+    const showCostBasis = document.getElementById('toggle_cost_basis').checked;
+    const showIncome = document.getElementById('toggle_income').checked;
+    const showBenchmark = document.getElementById('toggle_benchmark').checked;
+    const showByAccount = document.getElementById('toggle_by_account').checked;
+    const benchmarkTicker = document.getElementById('benchmark_ticker').value.trim() || '^GSPC';
+    const chartType = document.querySelector('input[name="chart_type"]:checked').value;
+
+    // Build series list
+    const series = ['market_value'];
+    if (showCostBasis) series.push('cost_basis');
+    if (showIncome) series.push('income');
+    if (showBenchmark) series.push('benchmark');
+    if (showByAccount) series.push('by_account');
+
+    const params = {
+      series: series.join(','),
+      benchmark: benchmarkTicker,
+    };
+
+    if (dateRange.date_from) params.date_from = dateRange.date_from;
+    if (dateRange.date_to) params.date_to = dateRange.date_to;
+
+    const queryString = buildQueryString(params);
+    const url = `{% url 'portfolio_chart_data' %}${queryString}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const data = await response.json();
+      renderChart(data, chartType);
+    } catch (error) {
+      loadingEl.style.display = 'none';
+      errorEl.style.display = 'block';
+      errorEl.textContent = `Failed to load chart data: ${error.message}`;
+      console.error('Chart data error:', error);
+    }
+  }
+
+  function renderChart(data, chartType) {
+    const canvas = document.getElementById('portfolioChart');
+    const ctx = canvas.getContext('2d');
+
+    // Destroy previous chart instance
+    if (chartInstance) {
+      chartInstance.destroy();
+    }
+
+    // Build datasets
+    const datasets = data.datasets.map((ds, idx) => {
+      const color = ds.borderColor || getSeriesColor(ds, idx);
+      const bgColor = ds.id === 'income'
+        ? color + 'CC'
+        : ds.backgroundColor || color;
+      const dataset = {
+        label: ds.label,
+        data: ds.data,
+        type: ds.type,
+        yAxisID: ds.yAxisID || 'y',
+        borderColor: color,
+        backgroundColor: bgColor,
+        borderWidth: 2,
+        pointRadius: 3,
+        fill: false,
+      };
+
+      // Apply chart type overrides
+      if (chartType === 'area' && ds.id === 'market_value') {
+        dataset.fill = true;
+        dataset.backgroundColor = color + '33';
+      } else if (chartType === 'bar' && ds.id !== 'income' && !ds.id.startsWith('benchmark_')) {
+        dataset.type = 'bar';
+      }
+
+      return dataset;
+    });
+
+    chartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.labels || [],
+        datasets: datasets,
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        interaction: {
+          mode: 'index',
+          intersect: false,
+        },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
           },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: {
-                display: false
-              }
-            }
-          }
-        });
-      })
-      .catch(error => {
-        document.getElementById('loading').innerHTML = 'Failed to load chart data.';
-        console.error('Chart data error:', error);
-      });
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+          },
+        },
+        scales: {
+          y: {
+            type: 'linear',
+            display: true,
+            position: 'left',
+            title: {
+              display: true,
+              text: 'Value (CAD)',
+            },
+          },
+          y2: {
+            type: 'linear',
+            display: data.datasets.some(ds => ds.yAxisID === 'y2'),
+            position: 'right',
+            title: {
+              display: true,
+              text: 'Income (CAD)',
+            },
+            grid: {
+              drawOnChartArea: false,
+            },
+          },
+          y3: {
+            type: 'linear',
+            display: data.datasets.some(ds => ds.yAxisID === 'y3'),
+            position: 'right',
+            title: {
+              display: true,
+              text: 'Benchmark (rebased)',
+            },
+            grid: {
+              drawOnChartArea: false,
+            },
+            ticks: {
+              callback: function(value) {
+                return value.toFixed(1);
+              },
+            },
+          },
+        },
+      },
+    });
+
+    document.getElementById('chart_loading').style.display = 'none';
+  }
+
+  // Track active date range for the "All" button state
+  let activeDateRange = 'All';
+
+  function getActiveDateRange() {
+    return activeDateRange;
+  }
+
+  // Event listeners for date range buttons
+  document.querySelectorAll('.date-range-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      activeDateRange = this.dataset.range;
+      // Update custom date inputs to reflect the selection
+      const range = getDateRange(activeDateRange);
+      document.getElementById('custom_date_from').value = range.date_from || '';
+      document.getElementById('custom_date_to').value = range.date_to || '';
+      fetchChartData();
+    });
+  });
+
+  // Custom date range apply button
+  document.getElementById('apply_date_range').addEventListener('click', function() {
+    activeDateRange = 'custom';
+    fetchChartData();
+  });
+
+  // Series toggle checkboxes
+  document.getElementById('toggle_cost_basis').addEventListener('change', fetchChartData);
+  document.getElementById('toggle_income').addEventListener('change', fetchChartData);
+  document.getElementById('toggle_benchmark').addEventListener('change', function() {
+    document.getElementById('benchmark_ticker_container').style.display = this.checked ? 'block' : 'none';
+    fetchChartData();
+  });
+  document.getElementById('toggle_by_account').addEventListener('change', fetchChartData);
+
+  // Benchmark ticker input
+  document.getElementById('benchmark_ticker').addEventListener('change', fetchChartData);
+
+  // Chart type radio buttons
+  document.querySelectorAll('input[name="chart_type"]').forEach(radio => {
+    radio.addEventListener('change', fetchChartData);
+  });
+
+  // Initial load
+  document.addEventListener('DOMContentLoaded', function() {
+    fetchChartData();
   });
 </script>
 {% endblock %}

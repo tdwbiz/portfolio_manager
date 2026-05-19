@@ -12,7 +12,7 @@ import csv
 import re
 from pathlib import Path
 from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 import openpyxl
 from io import BytesIO
@@ -70,6 +70,9 @@ from core.utils import (
     compute_positions,
     fetch_last_prices as utils_fetch_last_prices,  # Renamed to avoid conflict with view
     enrich_positions_with_prices,
+    compute_cost_basis_series,
+    compute_income_series,
+    compute_series_by_account,
 )
 from core.forms import AccountForm
 
@@ -541,17 +544,179 @@ def portfolio_chart(request):
 
 @login_required
 def portfolio_chart_data(request):
-    """JSON endpoint for portfolio chart data."""
+    """JSON endpoint for portfolio chart data with multiple series support."""
     try:
-        series = compute_portfolio_value_series()
-        
-        # Format for Chart.js
-        labels = [item['date'] for item in series]
-        values = [float(item['market_value_cad']) for item in series]
-        
-        return JsonResponse({'labels': labels, 'values': values})
-    except Exception:
-        return JsonResponse({'labels': [], 'values': []}, status=500)
+        # Parse query parameters
+        date_from = request.GET.get('date_from', '')
+        date_to = request.GET.get('date_to', '')
+        freq = request.GET.get('freq', 'monthly')
+        series_param = request.GET.get('series', 'market_value')
+        benchmark_ticker = request.GET.get('benchmark', '^GSPC')
+
+        # Validate date_from
+        if date_from:
+            try:
+                datetime.strptime(date_from, '%Y-%m-%d')
+            except ValueError:
+                return JsonResponse({'error': f'Invalid date_from format: {date_from}'}, status=400)
+
+        # Validate date_to
+        if date_to:
+            try:
+                datetime.strptime(date_to, '%Y-%m-%d')
+            except ValueError:
+                return JsonResponse({'error': f'Invalid date_to format: {date_to}'}, status=400)
+
+        # Sanitize benchmark ticker
+        if benchmark_ticker:
+            # Strip non-alphanumeric except '.', '^', '='
+            sanitized = re.sub(r'[^a-zA-Z0-9.^=]', '', benchmark_ticker)
+            if len(sanitized) > 20:
+                sanitized = sanitized[:20]
+            benchmark_ticker = sanitized
+
+        # Parse series list
+        series_list = [s.strip() for s in series_param.split(',') if s.strip()]
+        if not series_list:
+            series_list = ['market_value']
+
+        # Build response
+        labels = []
+        datasets = []
+
+        # Always include market_value
+        if 'market_value' in series_list or not series_list:
+            try:
+                mv_series = compute_portfolio_value_series(freq=freq, date_from=date_from, date_to=date_to)
+                labels = [item['date'] for item in mv_series]
+                values = [float(item['market_value_cad']) for item in mv_series]
+                datasets.append({
+                    'id': 'market_value',
+                    'label': 'Portfolio Market Value (CAD)',
+                    'data': values,
+                    'type': 'line',
+                    'yAxisID': 'y',
+                })
+            except Exception as e:
+                logger.error(f"Error computing market value series: {e}")
+
+        # Optional: cost_basis
+        if 'cost_basis' in series_list:
+            try:
+                cb_series = compute_cost_basis_series(date_from=date_from, date_to=date_to)
+                cb_values = [float(item['cost_basis_cad']) for item in cb_series]
+                datasets.append({
+                    'id': 'cost_basis',
+                    'label': 'Cost Basis (CAD)',
+                    'data': cb_values,
+                    'type': 'line',
+                    'yAxisID': 'y',
+                })
+            except Exception as e:
+                logger.error(f"Error computing cost basis series: {e}")
+
+        # Optional: income
+        if 'income' in series_list:
+            try:
+                inc_series = compute_income_series(date_from=date_from, date_to=date_to)
+                inc_values = [float(item['income_cad']) for item in inc_series]
+                datasets.append({
+                    'id': 'income',
+                    'label': 'Monthly Income (CAD)',
+                    'data': inc_values,
+                    'type': 'bar',
+                    'yAxisID': 'y2',
+                })
+            except Exception as e:
+                logger.error(f"Error computing income series: {e}")
+
+        # Optional: benchmark
+        if 'benchmark' in series_list:
+            try:
+                import yfinance as yf
+                benchmark_cache_key = f'benchmark_{benchmark_ticker}'
+                bench_series = cache.get(benchmark_cache_key)
+                
+                if bench_series is None:
+                    # Fetch from yfinance
+                    try:
+                        # Determine date range for benchmark
+                        bench_start = datetime.strptime(date_from, '%Y-%m-%d').date() if date_from else date.today() - timedelta(days=365)
+                        bench_end = datetime.strptime(date_to, '%Y-%m-%d').date() if date_to else date.today()
+                        
+                        bench_data = yf.download(
+                            benchmark_ticker,
+                            start=bench_start.strftime('%Y-%m-%d'),
+                            end=(bench_end + timedelta(days=1)).strftime('%Y-%m-%d'),
+                            auto_adjust=True,
+                            progress=False
+                        )
+                        
+                        if bench_data.empty or 'Close' not in bench_data.columns:
+                            bench_series = []
+                        else:
+                            close_prices = bench_data['Close']
+                            # Newer yfinance returns DataFrame for single ticker; squeeze to Series
+                            if hasattr(close_prices, 'columns'):
+                                close_prices = close_prices.iloc[:, 0]
+                            bench_series = []
+                            for d, price in close_prices.items():
+                                if not (isinstance(price, float) and price != price):  # not NaN
+                                    bench_series.append({'date': d.strftime('%Y-%m-%d'), 'price': float(price)})
+                            
+                            # Rebase to 100 at first date
+                            if bench_series:
+                                first_price = bench_series[0]['price']
+                                if first_price > 0:
+                                    for item in bench_series:
+                                        item['price'] = (item['price'] / first_price) * 100
+                            
+                            cache.set(benchmark_cache_key, bench_series, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
+                    except Exception as e:
+                        logger.error(f"Error fetching benchmark data: {e}")
+                        bench_series = []
+                
+                # Match benchmark to portfolio labels by year-month (last trading day per month)
+                bench_by_month = {}
+                for item in bench_series:
+                    bench_by_month[item['date'][:7]] = item['price']  # last entry per YYYY-MM wins
+                bench_values = [bench_by_month.get(lbl[:7], None) for lbl in labels]
+                
+                safe_id = benchmark_ticker.replace('.', '_').replace('^', '_').replace('=', '_')
+                datasets.append({
+                    'id': f'benchmark_{safe_id}',
+                    'label': f'{benchmark_ticker} (rebased)',
+                    'data': bench_values,
+                    'type': 'line',
+                    'yAxisID': 'y3',
+                })
+            except Exception as e:
+                logger.error(f"Error computing benchmark series: {e}")
+
+        # Optional: by_account
+        if 'by_account' in series_list:
+            try:
+                account_series = compute_series_by_account(date_from=date_from, date_to=date_to)
+                account_colors = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948']
+                
+                for idx, (acct_id, acct_data) in enumerate(account_series.items()):
+                    color = account_colors[idx % len(account_colors)]
+                    datasets.append({
+                        'id': f'account_{acct_id}',
+                        'label': f'Account {acct_id}',
+                        'data': [float(item['market_value_cad']) for item in acct_data],
+                        'type': 'line',
+                        'yAxisID': 'y',
+                        'borderColor': color,
+                        'backgroundColor': color,
+                    })
+            except Exception as e:
+                logger.error(f"Error computing series by account: {e}")
+
+        return JsonResponse({'labels': labels, 'datasets': datasets})
+    except Exception as e:
+        logger.exception("Error in portfolio_chart_data")
+        return JsonResponse({'labels': [], 'datasets': [], 'error': str(e)}, status=500)
 
 def _apply_transaction_filters(qs, request):
     """Apply transaction list filters - shared by list and export views."""

@@ -1,0 +1,166 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<h1>Annual Tax Summary</h1>
+
+<!-- Year Selector -->
+<form method="get" class="mb-4">
+  <div class="row g-2 align-items-center">
+    <div class="col-auto">
+      <label for="year" class="form-label mb-0">Tax Year:</label>
+    </div>
+    <div class="col-auto">
+      <select name="year" id="year" class="form-select" onchange="this.form.submit()">
+        {% for y in years_available %}
+          <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+</form>
+
+<!-- Section A — Capital Gains / Losses -->
+<div class="card mb-3">
+  <div class="card-header" data-bs-toggle="collapse" data-bs-target="#section-a" style="cursor:pointer;">
+    <strong>Section A — Capital Gains / Losses</strong>
+  </div>
+  <div id="section-a" class="collapse show">
+    <div class="card-body">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="text-end">FIFO (CAD)</th>
+            <th class="text-end">Avg Cost (CAD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Total Gains</td>
+            <td class="text-end positive">${{ total_gains_fifo|floatformat:2 }}</td>
+            <td class="text-end positive">${{ total_gains_avg|floatformat:2 }}</td>
+          </tr>
+          <tr>
+            <td>Total Losses</td>
+            <td class="text-end negative">${{ total_losses_fifo|floatformat:2 }}</td>
+            <td class="text-end negative">${{ total_losses_avg|floatformat:2 }}</td>
+          </tr>
+          <tr>
+            <td><strong>Net Capital Gain</strong></td>
+            <td class="text-end {% if net_capital_gain_fifo >= 0 %}positive{% else %}negative{% endif %}"><strong>${{ net_capital_gain_fifo|floatformat:2 }}</strong></td>
+            <td class="text-end {% if net_capital_gain_avg >= 0 %}positive{% else %}negative{% endif %}"><strong>${{ net_capital_gain_avg|floatformat:2 }}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Section B — Income -->
+<div class="card mb-3">
+  <div class="card-header" data-bs-toggle="collapse" data-bs-target="#section-b" style="cursor:pointer;">
+    <strong>Section B — Income</strong>
+  </div>
+  <div id="section-b" class="collapse show">
+    <div class="card-body">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th class="text-end">Total (CAD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tx_type, total in income_by_type.items %}
+          <tr>
+            <td>{{ tx_type }}</td>
+            <td class="text-end">${{ total|floatformat:2 }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="2" class="text-center">No income transactions found.</td></tr>
+          {% endfor %}
+          <tr>
+            <td><strong>Total Gross Income</strong></td>
+            <td class="text-end"><strong>${{ total_gross_income_cad|floatformat:2 }}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Section C — Withholding Tax -->
+<div class="card mb-3">
+  <div class="card-header" data-bs-toggle="collapse" data-bs-target="#section-c" style="cursor:pointer;">
+    <strong>Section C — Withholding Tax</strong>
+  </div>
+  <div id="section-c" class="collapse show">
+    <div class="card-body">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="text-end">Amount (CAD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Total Tax Withheld</td>
+            <td class="text-end negative">${{ total_tax_withheld_cad|floatformat:2 }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Section D — By Account Category -->
+<div class="card mb-3">
+  <div class="card-header" data-bs-toggle="collapse" data-bs-target="#section-d" style="cursor:pointer;">
+    <strong>Section D — By Account Category</strong>
+  </div>
+  <div id="section-d" class="collapse show">
+    <div class="card-body">
+      {% if category_data %}
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th class="text-end">Capital Gains FIFO (CAD)</th>
+            <th class="text-end">Capital Gains Avg (CAD)</th>
+            <th class="text-end">Income (CAD)</th>
+            <th class="text-end">Tax Withheld (CAD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat, data in category_data.items %}
+          <tr>
+            <td>{{ cat }}</td>
+            <td class="text-end {% if data.capital_gains_fifo >= 0 %}positive{% else %}negative{% endif %}">
+              ${{ data.capital_gains_fifo|floatformat:2 }}
+            </td>
+            <td class="text-end {% if data.capital_gains_avg >= 0 %}positive{% else %}negative{% endif %}">
+              ${{ data.capital_gains_avg|floatformat:2 }}
+            </td>
+            <td class="text-end">${{ data.income_cad|floatformat:2 }}</td>
+            <td class="text-end">${{ data.tax_withheld_cad|floatformat:2 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p>No data available for this year.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="mt-4 p-3 bg-light border rounded">
+  <small class="text-muted">
+    <i class="bi bi-info-circle"></i>
+    To save as PDF, use your browser's Print function (Ctrl+P / ⌘+P) and select 'Save as PDF'.
+  </small>
+</div>
+
+{% endblock %}

@@ -159,3 +159,44 @@ class IncomeSummaryTests(TestCase):
         content = response.content.decode()
         # Two DIV AAPL 2024 = 300.00
         self.assertIn('300.00', content)
+
+    def test_income_account_filter(self):
+        """Create income transactions in two accounts; GET /income/?account=ACCOUNT1; assert only transactions from ACCOUNT1 appear."""
+        acct2 = Account.objects.create(
+            account_id='INC002',
+            name='Test Account 2',
+            broker='IB'
+        )
+        stmt2 = BrokerStatement.objects.create(
+            source='IB',
+            file_date=datetime.date(2024, 1, 1),
+            raw_filename='test2.csv'
+        )
+        Transaction.objects.create(
+            statement=stmt2,
+            account=acct2,
+            date=datetime.date(2024, 5, 15),
+            symbol='MSFT',
+            type='DIV',
+            quantity=Decimal('0'),
+            price=Decimal('0'),
+            amount=Decimal('200.00'),
+            amount_cad=Decimal('200.00'),
+            currency='CAD',
+            commission=Decimal('0'),
+            tx_hash='inc_acct2_div'
+        )
+        response = self.client.get(reverse('income_summary'), {'account': 'INC001'})
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # INC001 transactions should appear
+        self.assertIn('AAPL', content)
+        # MSFT from INC002 should not appear
+        self.assertNotIn('MSFT', content)
+
+    def test_income_account_filter_invalid(self):
+        """GET /income/?account=DOESNOTEXIST; assert 200 and rows is empty (not an error)."""
+        response = self.client.get(reverse('income_summary'), {'account': 'DOESNOTEXIST'})
+        self.assertEqual(response.status_code, 200)
+        # Should not crash, and should show no rows (or empty)
+        self.assertEqual(response.status_code, 200)

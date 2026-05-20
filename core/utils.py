@@ -160,11 +160,32 @@ def compute_portfolio_value_series(
         return []
 
 
-def compute_realised_pnl(account_id: str = None) -> list[dict]:
-    """Compute realised P&L using FIFO and average-cost methods."""
+def compute_realised_pnl(
+    account_id: str | None = None,
+    symbol: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
+    """Compute realised P&L using FIFO and average-cost methods.
+
+    Args:
+        account_id: Optional account filter.
+        symbol: Optional symbol filter (case-insensitive).
+        date_from: Optional ISO date string to filter results (sell_date >= date_from).
+                   Applied AFTER FIFO/avg-cost lot processing.
+        date_to: Optional ISO date string to filter results (sell_date <= date_to).
+                 Applied AFTER FIFO/avg-cost lot processing.
+
+    Returns:
+        List of dicts with P&L data per closed position.
+    """
     qs = Transaction.objects.select_related('account')
     if account_id:
         qs = qs.filter(account__account_id=account_id)
+
+    # Symbol filter on the query (case-insensitive)
+    if symbol:
+        qs = qs.filter(symbol__iexact=symbol)
 
     transactions = qs.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
 
@@ -176,7 +197,7 @@ def compute_realised_pnl(account_id: str = None) -> list[dict]:
 
     result = []
 
-    for (symbol, acct_id), txs in groups.items():
+    for (symbol_key, acct_id), txs in groups.items():
         fifo_deque: deque = deque()
         total_shares = Decimal('0')
         total_cost = Decimal('0')
@@ -219,7 +240,7 @@ def compute_realised_pnl(account_id: str = None) -> list[dict]:
                 total_cost -= cost_basis_avg
 
                 result.append({
-                    'symbol': symbol,
+                    'symbol': symbol_key,
                     'account_id': acct_id,
                     'sell_date': tx.date,
                     'qty_sold': qty_to_sell,
@@ -229,6 +250,30 @@ def compute_realised_pnl(account_id: str = None) -> list[dict]:
                     'realised_pnl_fifo': sell_amount - matched_cost_fifo,
                     'realised_pnl_avg': sell_amount - cost_basis_avg,
                 })
+
+    # Apply date range filter AFTER all FIFO/avg-cost processing
+    if date_from or date_to:
+        filtered = []
+        for trade in result:
+            sell_date = trade['sell_date']
+            if date_from:
+                try:
+                    from datetime import date as date_type
+                    df = datetime.strptime(date_from, '%Y-%m-%d').date()
+                    if sell_date < df:
+                        continue
+                except ValueError:
+                    pass
+            if date_to:
+                try:
+                    from datetime import date as date_type
+                    dt = datetime.strptime(date_to, '%Y-%m-%d').date()
+                    if sell_date > dt:
+                        continue
+                except ValueError:
+                    pass
+            filtered.append(trade)
+        result = filtered
 
     result.sort(key=lambda x: x['sell_date'], reverse=True)
     return result

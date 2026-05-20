@@ -15,6 +15,7 @@ urlpatterns = [
     path('portfolio/chart/data/', views.portfolio_chart_data, name='portfolio_chart_data'),
     path('realised-pnl/', views.realised_pnl, name='realised_pnl'),
     path('income/', views.income_summary, name='income_summary'),
+    path('reports/tax-summary/', views.tax_summary, name='tax_summary'),
     path('imports/', views.import_history, name='import_history'),
     path('imports/rejection-log/<str:month>/', views.download_rejection_log, name='download_rejection_log'),
     path('accounts/', views.accounts_list, name='accounts_list'),

@@ -5,7 +5,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse, FileResponse, HttpResponseNotAllowed
 from django.conf import settings
 from django.urls import reverse
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q as dj_Q
+from collections import defaultdict
 from django.core.cache import cache
 from django.utils.dateparse import parse_date
 import csv
@@ -394,36 +395,99 @@ def portfolio_summary(request):
         pos['unrealised_pnl_cad'] for pos in enriched_positions
         if pos['unrealised_pnl_cad'] is not None
     )
+
+    # Total Return metrics
+    all_realised = compute_realised_pnl()
+    total_realised_pnl_cad = sum(t['realised_pnl_fifo'] for t in all_realised)
+
+    total_income_cad = Transaction.objects.filter(
+        type__in=INCOME_TRANSACTION_TYPES
+    ).aggregate(total=Sum('amount_cad'))['total'] or Decimal('0')
+
+    total_return_cad = total_unrealised_pnl_cad + total_realised_pnl_cad + total_income_cad
     
     logger.info(f"Total Cost: {total_cost_cad}, Market Value: {total_market_value_cad}, P&L: {total_unrealised_pnl_cad}")
+    logger.info(f"Total Realised: {total_realised_pnl_cad}, Total Income: {total_income_cad}, Total Return: {total_return_cad}")
 
     return render(request, 'core/portfolio_summary.html', {
         'positions': enriched_positions,
         'total_cost_cad': total_cost_cad,
         'total_market_value_cad': total_market_value_cad,
         'total_unrealised_pnl_cad': total_unrealised_pnl_cad,
+        'total_realised_pnl_cad': total_realised_pnl_cad,
+        'total_income_cad': total_income_cad,
+        'total_return_cad': total_return_cad,
     })
 
 @login_required
 def realised_pnl(request):
     """Realised P&L page with FIFO and average-cost methods."""
     account = request.GET.get('account', '')
-    
-    trades = compute_realised_pnl(account_id=account if account else None)
-    
+    symbol = request.GET.get('symbol', '').strip().upper()[:20]
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
+
+    # Validate date parameters — silently discard invalid ones
+    validated_date_from = None
+    validated_date_to = None
+    if date_from:
+        try:
+            validated_date_from = _validate_date_param(date_from)
+        except ValueError:
+            validated_date_from = None
+    if date_to:
+        try:
+            validated_date_to = _validate_date_param(date_to)
+        except ValueError:
+            validated_date_to = None
+
+    trades = compute_realised_pnl(
+        account_id=account if account else None,
+        symbol=symbol if symbol else None,
+        date_from=validated_date_from.strftime('%Y-%m-%d') if validated_date_from else None,
+        date_to=validated_date_to.strftime('%Y-%m-%d') if validated_date_to else None,
+    )
+
     # Compute totals
     total_pnl_fifo = sum(t['realised_pnl_fifo'] for t in trades)
     total_pnl_avg = sum(t['realised_pnl_avg'] for t in trades)
-    
+
+    # Year grouping
+    from collections import defaultdict
+    year_groups = defaultdict(list)
+    for trade in trades:
+        year_groups[trade['sell_date'].year].append(trade)
+
+    year_groups_sorted = sorted(
+        [
+            {
+                'year': year,
+                'trades': trade_list,
+                'total_pnl_fifo': sum(t['realised_pnl_fifo'] for t in trade_list),
+                'total_pnl_avg': sum(t['realised_pnl_avg'] for t in trade_list),
+            }
+            for year, trade_list in year_groups.items()
+        ],
+        key=lambda g: g['year'],
+        reverse=True,
+    )
+
     # Get all accounts for filter dropdown
     accounts = Account.objects.all().order_by('account_id')
-    
+
+    group_by = request.GET.get('group_by', 'flat')
+
     return render(request, 'core/realised_pnl.html', {
         'trades': trades,
         'total_pnl_fifo': total_pnl_fifo,
         'total_pnl_avg': total_pnl_avg,
         'accounts': accounts,
         'account_filter': account,
+        'symbol_filter': symbol,
+        'date_from_filter': validated_date_from.strftime('%Y-%m-%d') if validated_date_from else date_from,
+        'date_to_filter': validated_date_to.strftime('%Y-%m-%d') if validated_date_to else date_to,
+        'year_groups_sorted': year_groups_sorted,
+        'group_by': group_by,
     })
 
 @login_required
@@ -431,30 +495,38 @@ def income_summary(request):
     """Income summary grouped by year, symbol, and type."""
     year_filter = request.GET.get('year', '')
     type_filter = request.GET.get('type', '')
-    
+    account_filter = request.GET.get('account', '').strip()[:50]
+
+    # Validate account exists
+    if account_filter:
+        if not Account.objects.filter(account_id=account_filter).exists():
+            account_filter = ''
+
     # Income and tax types
     income_types = list(INCOME_TRANSACTION_TYPES)
     tax_types = list(TAX_TRANSACTION_TYPES)
     all_types = income_types + tax_types
-    
+
     # Query transactions
     qs = Transaction.objects.filter(type__in=all_types)
-    
+
     if year_filter:
         qs = qs.filter(date__year=int(year_filter))
     if type_filter:
         qs = qs.filter(type=type_filter)
-    
+    if account_filter:
+        qs = qs.filter(account__account_id=account_filter)
+
     # Group by (year, symbol, type) in Python
     from collections import defaultdict
     groups = defaultdict(lambda: {'total_amount_cad': Decimal('0'), 'count': 0})
-    
+
     for tx in qs.select_related('account'):
         year = tx.date.year
         key = (year, tx.symbol, tx.type)
         groups[key]['total_amount_cad'] += tx.amount_cad
         groups[key]['count'] += 1
-    
+
     # Build sorted rows
     rows = []
     for (year, symbol, tx_type), data in groups.items():
@@ -465,17 +537,20 @@ def income_summary(request):
             'count': data['count'],
             'total_amount_cad': data['total_amount_cad'],
         })
-    
+
     rows.sort(key=lambda x: (x['year'], x['symbol'], x['type']), reverse=True)
-    
+
     # Compute totals
     total_income_cad = sum(r['total_amount_cad'] for r in rows if r['type'] in income_types)
     total_tax_cad = sum(r['total_amount_cad'] for r in rows if r['type'] in tax_types)
     net_income_cad = total_income_cad + total_tax_cad
-    
+
     # Get distinct years for filter
     years = sorted(set(r['year'] for r in rows), reverse=True)
-    
+
+    # Get all accounts for filter dropdown
+    accounts = Account.objects.all().order_by('account_id')
+
     return render(request, 'core/income_summary.html', {
         'rows': rows,
         'total_income_cad': total_income_cad,
@@ -485,6 +560,8 @@ def income_summary(request):
         'income_types': _get_transaction_type_options(all_types),
         'year_filter': year_filter,
         'type_filter': type_filter,
+        'account_filter': account_filter,
+        'accounts': accounts,
     })
 
 @login_required
@@ -846,6 +923,166 @@ def transaction_export_excel(request):
     response.write(buffer.getvalue())
     
     return response
+
+@login_required
+def tax_summary(request):
+    """Annual Tax Summary report covering capital gains, income, withholding tax, and by account category."""
+    year_param = request.GET.get('year', '')
+    if year_param:
+        try:
+            year = int(year_param)
+        except (ValueError, TypeError):
+            year = date.today().year - 1
+    else:
+        year = date.today().year - 1
+
+    date_from = f'{year}-01-01'
+    date_to = f'{year}-12-31'
+
+    # Section A — Capital Gains / Losses
+    trades = compute_realised_pnl(date_from=date_from, date_to=date_to)
+    total_gains_fifo = sum(t['realised_pnl_fifo'] for t in trades if t['realised_pnl_fifo'] > 0)
+    total_losses_fifo = sum(t['realised_pnl_fifo'] for t in trades if t['realised_pnl_fifo'] < 0)
+    net_capital_gain_fifo = total_gains_fifo + total_losses_fifo
+
+    total_gains_avg = sum(t['realised_pnl_avg'] for t in trades if t['realised_pnl_avg'] > 0)
+    total_losses_avg = sum(t['realised_pnl_avg'] for t in trades if t['realised_pnl_avg'] < 0)
+    net_capital_gain_avg = total_gains_avg + total_losses_avg
+
+    # Section B — Income
+    income_txs = Transaction.objects.filter(
+        date__year=year,
+        type__in=INCOME_TRANSACTION_TYPES
+    ).select_related('account')
+    income_by_type = defaultdict(lambda: Decimal('0'))
+    for tx in income_txs:
+        income_by_type[tx.type] += tx.amount_cad
+    total_gross_income_cad = sum(income_by_type.values())
+
+    # Section C — Withholding Tax
+    tax_txs = Transaction.objects.filter(
+        date__year=year,
+        type__in=TAX_TRANSACTION_TYPES
+    ).select_related('account')
+    total_tax_withheld_cad = sum(tx.amount_cad for tx in tax_txs)
+
+    # Section D — By Account Category
+    all_txs_for_category = Transaction.objects.filter(
+        date__year=year
+    ).select_related('account').filter(
+        dj_Q(type__in=POSITION_TRANSACTION_TYPES) | dj_Q(type__in=INCOME_TRANSACTION_TYPES)
+    )
+    category_data = {}
+    for tx in all_txs_for_category:
+        cat = tx.account.category if tx.account and tx.account.category else 'TAXABLE'
+        if cat not in category_data:
+            category_data[cat] = {
+                'capital_gains_fifo': Decimal('0'),
+                'capital_gains_avg': Decimal('0'),
+                'income_cad': Decimal('0'),
+                'tax_withheld_cad': Decimal('0'),
+            }
+        if tx.type in POSITION_TRANSACTION_TYPES:
+            # We need to compute per-trade P&L — for simplicity, use the trades list
+            pass
+        elif tx.type in INCOME_TRANSACTION_TYPES:
+            category_data[cat]['income_cad'] += tx.amount_cad
+        elif tx.type in TAX_TRANSACTION_TYPES:
+            category_data[cat]['tax_withheld_cad'] += tx.amount_cad
+
+    # Compute capital gains per category from trades
+    for trade in trades:
+        cat = trade.get('account_category', 'TAXABLE')
+        if cat not in category_data:
+            category_data[cat] = {
+                'capital_gains_fifo': Decimal('0'),
+                'capital_gains_avg': Decimal('0'),
+                'income_cad': Decimal('0'),
+                'tax_withheld_cad': Decimal('0'),
+            }
+        category_data[cat]['capital_gains_fifo'] += trade['realised_pnl_fifo']
+        category_data[cat]['capital_gains_avg'] += trade['realised_pnl_avg']
+
+    # Rebuild Section D with proper category from accounts
+    category_data = {}
+    # Get all relevant transactions with account categories
+    relevant_txs = Transaction.objects.filter(
+        date__year=year
+    ).select_related('account').filter(
+        dj_Q(type__in=POSITION_TRANSACTION_TYPES) |
+        dj_Q(type__in=INCOME_TRANSACTION_TYPES) |
+        dj_Q(type__in=TAX_TRANSACTION_TYPES)
+    )
+
+    # Compute capital gains per account for category grouping
+    account_gains = defaultdict(lambda: {'fifo': Decimal('0'), 'avg': Decimal('0')})
+    for trade in trades:
+        acct_id = trade['account_id']
+        account_gains[acct_id]['fifo'] += trade['realised_pnl_fifo']
+        account_gains[acct_id]['avg'] += trade['realised_pnl_avg']
+
+    # Build category-level data
+    for tx in relevant_txs:
+        cat = tx.account.category if tx.account and tx.account.category else 'TAXABLE'
+        if cat not in category_data:
+            category_data[cat] = {
+                'capital_gains_fifo': Decimal('0'),
+                'capital_gains_avg': Decimal('0'),
+                'income_cad': Decimal('0'),
+                'tax_withheld_cad': Decimal('0'),
+            }
+        if tx.type in POSITION_TRANSACTION_TYPES:
+            # Capital gains will be added from trades below
+            pass
+        elif tx.type in INCOME_TRANSACTION_TYPES:
+            category_data[cat]['income_cad'] += tx.amount_cad
+        elif tx.type in TAX_TRANSACTION_TYPES:
+            category_data[cat]['tax_withheld_cad'] += tx.amount_cad
+
+    # Add capital gains per category from trades
+    for trade in trades:
+        acct_id = trade['account_id']
+        acct = Account.objects.filter(account_id=acct_id).first()
+        cat = acct.category if acct and acct.category else 'TAXABLE'
+        if cat not in category_data:
+            category_data[cat] = {
+                'capital_gains_fifo': Decimal('0'),
+                'capital_gains_avg': Decimal('0'),
+                'income_cad': Decimal('0'),
+                'tax_withheld_cad': Decimal('0'),
+            }
+        category_data[cat]['capital_gains_fifo'] += trade['realised_pnl_fifo']
+        category_data[cat]['capital_gains_avg'] += trade['realised_pnl_avg']
+
+    # Get distinct years available from all relevant transactions
+    years_available = sorted(
+        set(
+            Transaction.objects.exclude(date__year=None)
+            .values_list('date__year', flat=True)
+            .distinct()
+        ),
+        reverse=True,
+    )
+
+    return render(request, 'core/tax_summary.html', {
+        'year': year,
+        'years_available': years_available,
+        # Section A
+        'total_gains_fifo': total_gains_fifo,
+        'total_losses_fifo': total_losses_fifo,
+        'net_capital_gain_fifo': net_capital_gain_fifo,
+        'total_gains_avg': total_gains_avg,
+        'total_losses_avg': total_losses_avg,
+        'net_capital_gain_avg': net_capital_gain_avg,
+        # Section B
+        'income_by_type': dict(income_by_type),
+        'total_gross_income_cad': total_gross_income_cad,
+        # Section C
+        'total_tax_withheld_cad': total_tax_withheld_cad,
+        # Section D
+        'category_data': category_data,
+    })
+
 
 def fetch_prices_api(request):
     """API endpoint for fetching last prices (unused - placeholder)."""

@@ -5,57 +5,137 @@
 
 <p>
   Total Realised P&L (FIFO):
-  <strong class="{% if total_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">{{ total_pnl_fifo|floatformat:2 }}</strong>
+  <strong class="{% if total_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">${{ total_pnl_fifo|floatformat:2 }}</strong>
   &nbsp;|&nbsp;
   Total Realised P&L (Avg Cost):
-  <strong class="{% if total_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">{{ total_pnl_avg|floatformat:2 }}</strong>
+  <strong class="{% if total_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">${{ total_pnl_avg|floatformat:2 }}</strong>
 </p>
 
+<!-- View Toggle -->
+<div class="btn-group mb-3" role="group">
+  <a href="{% url 'realised_pnl' %}?account={{ account_filter }}&symbol={{ symbol_filter }}&date_from={{ date_from_filter }}&date_to={{ date_to_filter }}&group_by=flat"
+     class="btn btn-sm {% if group_by == 'flat' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+    Flat
+  </a>
+  <a href="{% url 'realised_pnl' %}?account={{ account_filter }}&symbol={{ symbol_filter }}&date_from={{ date_from_filter }}&date_to={{ date_to_filter }}&group_by=year"
+     class="btn btn-sm {% if group_by == 'year' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+    By Year
+  </a>
+</div>
+
 <form method="get">
-  <select name="account" onchange="this.form.submit()">
-    <option value="">All Accounts</option>
-    {% for account in accounts %}
-      <option value="{{ account.account_id }}" {% if account_filter == account.account_id %}selected{% endif %}>
-        {{ account.account_id }} - {{ account.name }}
-      </option>
-    {% endfor %}
-  </select>
+  <div class="row g-2 mb-3">
+    <div class="col-auto">
+      <select name="account" onchange="this.form.submit()">
+        <option value="">All Accounts</option>
+        {% for account in accounts %}
+          <option value="{{ account.account_id }}" {% if account_filter == account.account_id %}selected{% endif %}>
+            {{ account.account_id }} - {{ account.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <input type="text" name="symbol" value="{{ symbol_filter }}" placeholder="Symbol" class="form-control form-control-sm" style="width: 120px;">
+    </div>
+    <div class="col-auto">
+      <input type="date" name="date_from" value="{{ date_from_filter }}" class="form-control form-control-sm" style="width: 150px;">
+    </div>
+    <div class="col-auto">
+      <input type="date" name="date_to" value="{{ date_to_filter }}" class="form-control form-control-sm" style="width: 150px;">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+    </div>
+  </div>
 </form>
 
-<table>
-  <thead>
-    <tr>
-      <th>Sell Date</th>
-      <th>Symbol</th>
-      <th>Account</th>
-      <th>Qty Sold</th>
-      <th>Sell Proceeds (CAD)</th>
-      <th>Cost Basis FIFO (CAD)</th>
-      <th>P&L FIFO (CAD)</th>
-      <th>Cost Basis Avg (CAD)</th>
-      <th>P&L Avg (CAD)</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for trade in trades %}
+{% if group_by == 'year' and year_groups_sorted %}
+  <!-- Year Grouped View -->
+  {% for group in year_groups_sorted %}
+  <div class="card mb-3">
+    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#year-{{ group.year }}" style="cursor:pointer;">
+      {{ group.year }} &mdash; FIFO P&L: ${{ group.total_pnl_fifo|floatformat:2 }} | Avg P&L: ${{ group.total_pnl_avg|floatformat:2 }}
+    </div>
+    <div id="year-{{ group.year }}" class="collapse show">
+      <div class="card-body">
+        <table class="table table-striped table-hover">
+          <thead>
+            <tr>
+              <th>Sell Date</th>
+              <th>Symbol</th>
+              <th>Account</th>
+              <th>Qty Sold</th>
+              <th>Sell Proceeds (CAD)</th>
+              <th>Cost Basis FIFO (CAD)</th>
+              <th>P&L FIFO (CAD)</th>
+              <th>Cost Basis Avg (CAD)</th>
+              <th>P&L Avg (CAD)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for trade in group.trades %}
+              <tr>
+                <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
+                <td>{{ trade.symbol }}</td>
+                <td>{{ trade.account_id }}</td>
+                <td>{{ trade.qty_sold|floatformat:2 }}</td>
+                <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
+                <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
+                <td style="text-align:right">
+                  <span class="{% if trade.realised_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">${{ trade.realised_pnl_fifo|floatformat:2 }}</span>
+                </td>
+                <td style="text-align:right">{{ trade.cost_basis_avg|floatformat:2 }}</td>
+                <td style="text-align:right">
+                  <span class="{% if trade.realised_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">${{ trade.realised_pnl_avg|floatformat:2 }}</span>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="9">No trades found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <!-- Flat View -->
+  <table class="table table-striped table-hover">
+    <thead>
       <tr>
-        <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
-        <td>{{ trade.symbol }}</td>
-        <td>{{ trade.account_id }}</td>
-        <td>{{ trade.qty_sold|floatformat:2 }}</td>
-        <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
-        <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
-        <td style="text-align:right">
-          <span class="{% if trade.realised_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realised_pnl_fifo|floatformat:2 }}</span>
-        </td>
-        <td style="text-align:right">{{ trade.cost_basis_avg|floatformat:2 }}</td>
-        <td style="text-align:right">
-          <span class="{% if trade.realised_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realised_pnl_avg|floatformat:2 }}</span>
-        </td>
+        <th>Sell Date</th>
+        <th>Symbol</th>
+        <th>Account</th>
+        <th>Qty Sold</th>
+        <th>Sell Proceeds (CAD)</th>
+        <th>Cost Basis FIFO (CAD)</th>
+        <th>P&L FIFO (CAD)</th>
+        <th>Cost Basis Avg (CAD)</th>
+        <th>P&L Avg (CAD)</th>
       </tr>
-    {% empty %}
-      <tr><td colspan="9">No closed positions found.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      {% for trade in trades %}
+        <tr>
+          <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
+          <td>{{ trade.symbol }}</td>
+          <td>{{ trade.account_id }}</td>
+          <td>{{ trade.qty_sold|floatformat:2 }}</td>
+          <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
+          <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
+          <td style="text-align:right">
+            <span class="{% if trade.realised_pnl_fifo >= 0 %}positive{% else %}negative{% endif %}">${{ trade.realised_pnl_fifo|floatformat:2 }}</span>
+          </td>
+          <td style="text-align:right">{{ trade.cost_basis_avg|floatformat:2 }}</td>
+          <td style="text-align:right">
+            <span class="{% if trade.realised_pnl_avg >= 0 %}positive{% else %}negative{% endif %}">${{ trade.realised_pnl_avg|floatformat:2 }}</span>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9">No closed positions found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
 {% endblock %}

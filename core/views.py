@@ -9,6 +9,7 @@ from django.db.models import Sum, Count, Q as dj_Q
 from collections import defaultdict
 from django.core.cache import cache
 from django.utils.dateparse import parse_date
+from django.utils.html import format_html
 import csv
 import re
 from pathlib import Path
@@ -38,7 +39,7 @@ def _record_login_attempt(ip_address):
 
 def _get_client_ip(request):
     """Get client IP address from request, accounting for proxies."""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDER_FOR')
     if x_forwarded_for:
         ip = x_forwarded_for.split(',')[0].strip()
     else:
@@ -74,6 +75,8 @@ from core.utils import (
     compute_cost_basis_series,
     compute_income_series,
     compute_series_by_account,
+    group_positions_by_account,
+    group_positions_by_category,
 )
 from core.forms import AccountForm
 
@@ -405,6 +408,41 @@ def portfolio_summary(request):
     ).aggregate(total=Sum('amount_cad'))['total'] or Decimal('0')
 
     total_return_cad = total_unrealised_pnl_cad + total_realised_pnl_cad + total_income_cad
+
+    # Add allocation_pct to each position
+    for pos in enriched_positions:
+        if pos.get('market_value_cad') is not None and total_market_value_cad:
+            pos['allocation_pct'] = round(
+                pos['market_value_cad'] / total_market_value_cad * 100, 2
+            )
+        else:
+            pos['allocation_pct'] = None
+
+    # Group by account
+    account_groups = group_positions_by_account(enriched_positions)
+
+    # Group by category
+    category_groups = group_positions_by_category(enriched_positions)
+    for group in category_groups:
+        if total_market_value_cad:
+            group['allocation_pct'] = round(
+                group['subtotal_market_value_cad'] / total_market_value_cad * 100, 2
+            )
+        else:
+            group['allocation_pct'] = None
+
+    # Build currency breakdown
+    currency_breakdown = {}
+    for pos in enriched_positions:
+        cur = pos['currency']
+        if cur not in currency_breakdown:
+            currency_breakdown[cur] = {'cost_cad': Decimal('0'), 'market_value_cad': Decimal('0')}
+        currency_breakdown[cur]['cost_cad'] += pos['total_cost_cad']
+        if pos.get('market_value_cad') is not None:
+            currency_breakdown[cur]['market_value_cad'] += pos['market_value_cad']
+    currency_breakdown = [
+        {'currency': k, **v} for k, v in sorted(currency_breakdown.items())
+    ]
     
     logger.info(f"Total Cost: {total_cost_cad}, Market Value: {total_market_value_cad}, P&L: {total_unrealised_pnl_cad}")
     logger.info(f"Total Realised: {total_realised_pnl_cad}, Total Income: {total_income_cad}, Total Return: {total_return_cad}")
@@ -417,6 +455,9 @@ def portfolio_summary(request):
         'total_realised_pnl_cad': total_realised_pnl_cad,
         'total_income_cad': total_income_cad,
         'total_return_cad': total_return_cad,
+        'account_groups': account_groups,
+        'category_groups': category_groups,
+        'currency_breakdown': currency_breakdown,
     })
 
 @login_required

@@ -70,6 +70,134 @@
     </div>
 </div>
 
+<!-- Section A: Currency Breakdown -->
+{% if currency_breakdown|length > 1 %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-currency-exchange"></i> Currency Breakdown
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for cur in currency_breakdown %}
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">{{ cur.currency }}</h6>
+                        <p class="mb-1">Cost: ${{ cur.cost_cad|floatformat:2 }}</p>
+                        <p class="mb-0">Market Value: ${{ cur.market_value_cad|floatformat:2 }}</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Section B: Summary by Category -->
+<div class="card mb-4">
+    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#collapseCategory" style="cursor:pointer;">
+        <i class="bi bi-chevron-down"></i> Summary by Category
+    </div>
+    <div id="collapseCategory" class="collapse show">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th class="text-end">Cost (CAD)</th>
+                            <th class="text-end">Market Value (CAD)</th>
+                            <th class="text-end">Unrealised P&L (CAD)</th>
+                            <th class="text-end">% of Portfolio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for group in category_groups %}
+                        <tr>
+                            <td>{{ group.category_display }}</td>
+                            <td class="text-end">${{ group.subtotal_cost_cad|floatformat:2 }}</td>
+                            <td class="text-end">
+                                {% if group.subtotal_market_value_cad %}${{ group.subtotal_market_value_cad|floatformat:2 }}{% else %}&mdash;{% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if group.subtotal_unrealised_pnl_cad is not None %}
+                                    <strong class="{% if group.subtotal_unrealised_pnl_cad >= 0 %}positive{% else %}negative{% endif %}">
+                                        ${{ group.subtotal_unrealised_pnl_cad|floatformat:2 }}
+                                    </strong>
+                                {% else %}
+                                    <span class="text-muted">&mdash;</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if group.allocation_pct is not None %}{{ group.allocation_pct|floatformat:2 }}%{% else %}&mdash;{% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">No categories.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Section C: Summary by Account -->
+<div class="card mb-4">
+    <div class="card-header" data-bs-toggle="collapse" data-bs-target="#collapseAccount" style="cursor:pointer;">
+        <i class="bi bi-chevron-down"></i> Summary by Account
+    </div>
+    <div id="collapseAccount" class="collapse show">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Category</th>
+                            <th>Owner</th>
+                            <th>Broker</th>
+                            <th class="text-end">Cost (CAD)</th>
+                            <th class="text-end">Market Value (CAD)</th>
+                            <th class="text-end">Unrealised P&L (CAD)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for group in account_groups %}
+                        <tr>
+                            <td>{{ group.account_name }}</td>
+                            <td>{{ group.category_display }}</td>
+                            <td>{{ group.owner|default:"&mdash;" }}</td>
+                            <td><span class="badge bg-primary">{{ group.broker }}</span></td>
+                            <td class="text-end">${{ group.subtotal_cost_cad|floatformat:2 }}</td>
+                            <td class="text-end">
+                                {% if group.subtotal_market_value_cad %}${{ group.subtotal_market_value_cad|floatformat:2 }}{% else %}&mdash;{% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if group.subtotal_unrealised_pnl_cad is not None %}
+                                    <strong class="{% if group.subtotal_unrealised_pnl_cad >= 0 %}positive{% else %}negative{% endif %}">
+                                        ${{ group.subtotal_unrealised_pnl_cad|floatformat:2 }}
+                                    </strong>
+                                {% else %}
+                                    <span class="text-muted">&mdash;</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted">No accounts.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Positions Table -->
 <div class="card">
     <div class="card-header">
@@ -90,6 +218,7 @@
                         <th class="text-end">Market Value (CAD)</th>
                         <th class="text-end">Unrealised P&L (CAD)</th>
                         <th class="text-end">P&L %</th>
+                        <th class="text-end">% of Portfolio</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -127,10 +256,13 @@
                                 <span class="text-muted">&mdash;</span>
                             {% endif %}
                         </td>
+                        <td class="text-end">
+                            {% if pos.allocation_pct is not None %}{{ pos.allocation_pct|floatformat:1 }}%{% else %}&mdash;{% endif %}
+                        </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="10" class="text-center text-muted py-4">
+                        <td colspan="11" class="text-center text-muted py-4">
                             <i class="bi bi-inbox" style="font-size: 2rem;"></i>
                             <p class="mt-2">No positions found.</p>
                         </td>

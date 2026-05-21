@@ -1,7 +1,10 @@
 {% extends "core/base.html" %}
 
 {% block content %}
-<h1>{{ account.name }}</h1>
+<div class="page-header">
+  <h1><i class="bi bi-bank"></i> {{ account.name }}</h1>
+  <p>Account details and transaction history</p>
+</div>
 <p>
     <strong>Account ID:</strong> {{ account.account_id }} &nbsp;|&nbsp;
     <strong>Broker:</strong> {{ account.get_broker_display }} &nbsp;|&nbsp;

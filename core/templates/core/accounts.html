@@ -1,48 +1,67 @@
 {% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Accounts — TS Money{% endblock %}
 
 {% block content %}
-<h1>Accounts</h1>
+<div class="page-header">
+  <h1><i class="bi bi-bank"></i> Accounts</h1>
+  <p>Manage your brokerage and investment accounts</p>
+</div>
 
-<a href="{% url 'account_create' %}">Add Account</a>
+<div class="d-flex justify-content-end mb-3">
+  <a href="{% url 'account_create' %}" class="btn btn-primary">
+    <i class="bi bi-plus-circle"></i> Add Account
+  </a>
+</div>
 
-<table>
+{% if accounts %}
+<div class="table-responsive">
+  <table class="table table-striped table-hover align-middle">
     <thead>
-        <tr>
-            <th>Account ID</th>
-            <th>Name</th>
-            <th>Broker</th>
-            <th>Currency</th>
-            <th>Category</th>
-            <th>Owner</th>
-            <th>Starting Balance</th>
-            <th>Starting Date</th>
-            <th>Transaction Count</th>
-            <th>Total Invested (CAD)</th>
-            <th>Actions</th>
-        </tr>
+      <tr>
+        <th>Account ID</th>
+        <th>Name</th>
+        <th>Broker</th>
+        <th>Currency</th>
+        <th>Category</th>
+        <th>Owner</th>
+        <th class="text-end">Starting Balance</th>
+        <th>Starting Date</th>
+        <th>Actions</th>
+      </tr>
     </thead>
     <tbody>
-        {% for account in accounts %}
-        <tr>
-            <td><a href="{% url 'account_detail' account.account_id %}">{{ account.account_id }}</a></td>
-            <td>{{ account.name }}</td>
-            <td>{{ account.get_broker_display }}</td>
-            <td>{{ account.currency }}</td>
-            <td>{{ account.get_category_display }}</td>
-            <td>{{ account.owner|default:"—" }}</td>
-            <td>{{ account.starting_balance }}</td>
-            <td>{{ account.starting_balance_date|default:'' }}</td>
-            <td>{{ account.transaction_count }}</td>
-            <td>{{ account.total_invested_cad|default:0 }}</td>
-            <td>
-                <a href="{% url 'account_edit' account.account_id %}">Edit</a>
-                <form method="post" action="{% url 'account_delete' account.account_id %}" style="display:inline">
-                    {% csrf_token %}
-                    <button type="submit" onclick="return confirm('Delete account {{ account.account_id }}?')">Delete</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
+      {% for account in accounts %}
+      <tr>
+        <td><code>{{ account.account_id }}</code></td>
+        <td><strong>{{ account.name|default:"\u2014" }}</strong></td>
+        <td>{{ account.get_broker_display|default:"\u2014" }}</td>
+        <td><span class="badge bg-secondary">{{ account.currency }}</span></td>
+        <td>{{ account.get_category_display|default:"\u2014" }}</td>
+        <td>{{ account.owner|default:"\u2014" }}</td>
+        <td class="text-end">${{ account.starting_balance|floatformat:2 }}</td>
+        <td>{{ account.starting_balance_date|default:"\u2014" }}</td>
+        <td>
+          <a href="{% url 'account_detail' account.account_id %}" class="btn btn-sm btn-outline-primary me-1">
+            <i class="bi bi-eye"></i>
+          </a>
+          <a href="{% url 'account_edit' account.account_id %}" class="btn btn-sm btn-outline-secondary me-1">
+            <i class="bi bi-pencil"></i>
+          </a>
+          <a href="{% url 'account_delete' account.account_id %}" class="btn btn-sm btn-outline-danger">
+            <i class="bi bi-trash"></i>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle"></i> No accounts found.
+  <a href="{% url 'account_create' %}">Add your first account</a>.
+</div>
+{% endif %}
 {% endblock %}

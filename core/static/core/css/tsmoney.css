@@ -1,0 +1,346 @@
+/* ============================================================
+   TS Money — Brand & UI Stylesheet
+   Colours match the TS Money logo palette.
+   ============================================================ */
+
+/* ---- CSS custom properties (brand palette) ---- */
+:root {
+  --ts-navy:     #1A3F8B;
+  --ts-green:    #2FA02A;
+  --ts-light-bg: #EBF4FB;
+  --ts-dark:     #162F66;
+  --ts-mid:      #2D5FA0;
+  --ts-white:    #FFFFFF;
+  --ts-danger:   #C0392B;
+  --ts-muted:    #6B7A8D;
+  --ts-border:   #D0DFF0;
+  --ts-shadow:   rgba(26, 63, 139, 0.10);
+}
+
+/* ---- Base ---- */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--ts-light-bg);
+  color: var(--ts-dark);
+}
+
+/* ---- Navbar ---- */
+.navbar {
+  background-color: var(--ts-navy) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.navbar-brand {
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--ts-white) !important;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navbar-brand img {
+  height: 32px;
+  width: 32px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.nav-link {
+  color: rgba(255, 255, 255, 0.82) !important;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem !important;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--ts-white) !important;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.nav-link.active {
+  color: var(--ts-white) !important;
+  background-color: var(--ts-green) !important;
+  font-weight: 600;
+}
+
+/* Dropdown menu */
+.dropdown-menu {
+  border: 1px solid var(--ts-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--ts-shadow);
+  padding: 0.4rem;
+}
+
+.dropdown-item {
+  border-radius: 5px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.9rem;
+  color: var(--ts-dark);
+}
+
+.dropdown-item:hover {
+  background-color: var(--ts-light-bg);
+  color: var(--ts-navy);
+}
+
+/* ---- Site Banner ---- */
+.site-banner {
+  background-color: var(--ts-light-bg);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-bottom: 2px solid var(--ts-border);
+  overflow: hidden;
+  height: 90px;
+}
+
+.site-banner img {
+  height: 90px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ---- Main content area ---- */
+.main-content {
+  flex: 1;
+  padding: 1.75rem 0;
+  background-color: var(--ts-light-bg);
+}
+
+/* ---- Page content card ---- */
+.content-wrapper {
+  background: var(--ts-white);
+  border-radius: 10px;
+  padding: 2rem;
+  box-shadow: 0 2px 16px var(--ts-shadow);
+  border-top: 3px solid var(--ts-navy);
+}
+
+/* ---- Page header ---- */
+.page-header {
+  border-bottom: 2px solid var(--ts-border);
+  padding-bottom: 0.85rem;
+  margin-bottom: 1.75rem;
+}
+
+.page-header h1 {
+  color: var(--ts-navy);
+  font-weight: 700;
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.page-header p {
+  color: var(--ts-muted);
+  font-size: 0.9rem;
+  margin: 0.3rem 0 0 0;
+}
+
+/* ---- Buttons ---- */
+.btn-primary {
+  background-color: var(--ts-navy);
+  border-color: var(--ts-navy);
+  font-weight: 500;
+}
+
+.btn-primary:hover, .btn-primary:focus {
+  background-color: var(--ts-mid);
+  border-color: var(--ts-mid);
+}
+
+.btn-success {
+  background-color: var(--ts-green);
+  border-color: var(--ts-green);
+  font-weight: 500;
+}
+
+.btn-success:hover {
+  background-color: #259022;
+  border-color: #259022;
+}
+
+.btn-outline-primary {
+  color: var(--ts-navy);
+  border-color: var(--ts-navy);
+}
+
+.btn-outline-primary:hover, .btn-outline-primary.active {
+  background-color: var(--ts-navy);
+  border-color: var(--ts-navy);
+  color: var(--ts-white);
+}
+
+/* ---- Tables ---- */
+.table {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 6px var(--ts-shadow);
+  font-size: 0.9rem;
+}
+
+.table thead th {
+  background-color: var(--ts-navy);
+  color: var(--ts-white);
+  font-weight: 600;
+  border: none;
+  padding: 0.75rem 1rem;
+  white-space: nowrap;
+}
+
+.table tbody tr:nth-of-type(odd) {
+  background-color: rgba(235, 244, 251, 0.5);
+}
+
+.table tbody tr:hover {
+  background-color: rgba(26, 63, 139, 0.06);
+}
+
+.table td, .table th {
+  vertical-align: middle;
+  padding: 0.6rem 1rem;
+}
+
+/* ---- Cards ---- */
+.card {
+  border: 1px solid var(--ts-border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px var(--ts-shadow);
+  transition: transform 0.18s, box-shadow 0.18s;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px var(--ts-shadow);
+}
+
+.card-header {
+  background: linear-gradient(135deg, var(--ts-navy), var(--ts-mid));
+  color: var(--ts-white);
+  font-weight: 600;
+  border-radius: 10px 10px 0 0 !important;
+  border: none;
+}
+
+/* ---- Stat cards ---- */
+.stat-card {
+  text-align: center;
+  padding: 1.4rem;
+  border-top: 3px solid var(--ts-navy);
+}
+
+.stat-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--ts-navy);
+  line-height: 1.1;
+}
+
+.stat-label {
+  color: var(--ts-muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 0.35rem;
+}
+
+/* ---- Positive / Negative values ---- */
+.positive { color: var(--ts-green) !important; font-weight: 600; }
+.negative { color: var(--ts-danger) !important; font-weight: 600; }
+
+/* ---- Alerts ---- */
+.alert {
+  border-radius: 8px;
+  border-left: 4px solid;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+}
+
+.alert-success  { border-left-color: var(--ts-green); }
+.alert-danger   { border-left-color: var(--ts-danger); }
+.alert-warning  { border-left-color: #E67E22; }
+.alert-info     { border-left-color: var(--ts-mid); }
+
+/* ---- Badge ---- */
+.badge {
+  padding: 0.45em 0.75em;
+  font-weight: 500;
+  font-size: 0.8em;
+}
+
+/* ---- Forms ---- */
+.form-control:focus, .form-select:focus {
+  border-color: var(--ts-mid);
+  box-shadow: 0 0 0 0.2rem rgba(26, 63, 139, 0.18);
+}
+
+.form-label {
+  font-weight: 500;
+  color: var(--ts-dark);
+  font-size: 0.9rem;
+}
+
+/* ---- Filter panel (used on transactions, P&L, income, chart pages) ---- */
+.filter-panel {
+  background: var(--ts-white);
+  border: 1px solid var(--ts-border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 4px var(--ts-shadow);
+}
+
+.filter-panel label {
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: var(--ts-dark);
+  margin-bottom: 0.25rem;
+}
+
+/* ---- Footer ---- */
+footer {
+  background-color: var(--ts-navy);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 1rem 0;
+  margin-top: auto;
+  font-size: 0.85rem;
+}
+
+footer p { margin: 0; color: rgba(255, 255, 255, 0.7); }
+footer a { color: rgba(255, 255, 255, 0.85); text-decoration: none; }
+footer a:hover { color: var(--ts-white); }
+
+/* ---- Login page ---- */
+.login-card {
+  border-top: 4px solid var(--ts-navy);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px var(--ts-shadow);
+}
+
+.login-logo {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 1rem;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+  .content-wrapper { padding: 1rem; }
+  .stat-value { font-size: 1.8rem; }
+  .site-banner { height: 60px; }
+  .site-banner img { height: 60px; }
+  .page-header h1 { font-size: 1.3rem; }
+}

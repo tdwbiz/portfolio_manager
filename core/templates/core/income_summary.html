@@ -1,7 +1,10 @@
 {% extends "core/base.html" %}
 
 {% block content %}
-<h1>Dividend & Income Summary</h1>
+<div class="page-header">
+  <h1><i class="bi bi-piggy-bank"></i> Dividend & Income Summary</h1>
+  <p>Track your dividend and income transactions</p>
+</div>
 
 <p>
   Gross Income (CAD): <strong>{{ total_income_cad|floatformat:2 }}</strong> &nbsp;|&nbsp;

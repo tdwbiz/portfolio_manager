@@ -3,16 +3,16 @@
 {% block title %}Sign In - {{ branding.company_name }}{% endblock %}
 
 {% block content %}
+{% load static %}
 <div class="row justify-content-center">
   <div class="col-md-6 col-lg-4">
     <div class="card shadow-lg" style="margin-top: 50px;">
       <div class="card-body p-5">
         <div class="text-center mb-4">
-          {% if branding.show_logo and branding.company_logo_url %}
-          <img src="{{ branding.company_logo_url }}" alt="{{ branding.company_name }}" style="max-height: 60px;" class="mb-3">
-          {% endif %}
-          <h2 class="mb-3">Sign In</h2>
-          <p class="text-muted">Enter your credentials to access your portfolio</p>
+          <img src="{% static 'core/img/tsmoney_icon.jpg' %}"
+               alt="TS Money" class="login-logo">
+          <h2 class="mb-1" style="color: var(--ts-navy); font-weight: 700;">TS Money</h2>
+          <p class="text-muted small">invest like you mean it</p>
         </div>
 
         {% if error %}

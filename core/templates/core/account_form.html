@@ -1,7 +1,10 @@
 {% extends "core/base.html" %}
 
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-header">
+  <h1><i class="bi bi-bank"></i> {{ title }}</h1>
+  <p>Add or edit an account</p>
+</div>
 <form method="post">
     {% csrf_token %}
     {{ form.as_p }}

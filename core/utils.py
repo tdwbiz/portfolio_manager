@@ -1,6 +1,8 @@
 from collections import deque, defaultdict
 from decimal import Decimal
+import math
 import yfinance as yf
+import pandas as pd
 from django.core.cache import cache
 from django.conf import settings
 from django.utils import timezone
@@ -15,19 +17,69 @@ logger = logging.getLogger(__name__)
 POSITION_TRANSACTION_TYPES = ('BUY', 'SELL')
 
 
-def _generate_monthly_dates(start_date: date, end_date: date) -> list[date]:
-    """Generate a list of month-end dates from start_date to end_date (inclusive)."""
-    dates = []
-    current = start_date.replace(day=1)
-    while current <= end_date:
-        # Move to next month
-        if current.month == 12:
-            current = current.replace(year=current.year + 1, month=1, day=1)
-        else:
-            current = current.replace(month=current.month + 1, day=1)
-        # Last day of the previous month (current is now the 1st of the next month)
-        dates.append(current - timedelta(days=1))
-    return dates
+def _generate_date_series(
+    start_date: date,
+    end_date: date,
+    freq: str = 'monthly',
+) -> list[date]:
+    """Generate period-end dates between start_date and end_date (inclusive).
+
+    Args:
+        freq: One of 'daily', 'weekly', 'monthly', 'annual'.
+
+    Returns:
+        List of date objects. For monthly: last day of each month.
+        For weekly: each Friday (or last trading day of week).
+        For daily: every calendar day in range.
+        For annual: last day of each calendar year (Dec 31).
+    """
+    if freq == 'daily':
+        dates = []
+        current = start_date
+        while current <= end_date:
+            dates.append(current)
+            current += timedelta(days=1)
+        return dates
+
+    elif freq == 'weekly':
+        dates = []
+        # Find the first Friday on or after start_date
+        days_to_friday = (4 - start_date.weekday()) % 7
+        current = start_date + timedelta(days=days_to_friday)
+        while current <= end_date:
+            dates.append(current)
+            current += timedelta(days=7)
+        return dates
+
+    elif freq == 'annual':
+        dates = []
+        year = start_date.year
+        while True:
+            year_end = date(year, 12, 31)
+            if year_end < start_date:
+                year += 1
+                continue
+            if year_end > end_date:
+                year_end = end_date
+            dates.append(year_end)
+            if year_end == end_date:
+                break
+            year += 1
+        return dates
+
+    else:
+        # monthly (default)
+        dates = []
+        current = start_date.replace(day=1)
+        while current <= end_date:
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1, day=1)
+            else:
+                current = current.replace(month=current.month + 1, day=1)
+            # Last day of the previous month (current is now the 1st of the next month)
+            dates.append(current - timedelta(days=1))
+        return dates
 
 
 def compute_portfolio_value_series(
@@ -38,7 +90,7 @@ def compute_portfolio_value_series(
     """Compute portfolio market value over time with historical prices.
 
     Args:
-        freq: Frequency of data points ('monthly' or 'weekly'). Defaults to 'monthly'.
+        freq: Frequency of data points ('daily', 'weekly', 'monthly', 'annual').
         date_from: Optional ISO date string to clip the start of the series.
         date_to: Optional ISO date string to clip the end of the series.
 
@@ -75,8 +127,8 @@ def compute_portfolio_value_series(
 
         logger.info(f"Date range: {start_date} to {end_date}")
 
-        # Generate monthly period-end dates
-        dates = _generate_monthly_dates(start_date, end_date)
+        # Generate period-end dates based on freq
+        dates = _generate_date_series(start_date, end_date, freq)
 
         # Collect all unique symbols ever held
         all_symbols = list(set(tx.symbol for tx in transactions))
@@ -92,13 +144,22 @@ def compute_portfolio_value_series(
             logger.info(f"Fetching historical data from yfinance for {len(symbols_with_usdcad)} symbols")
 
             try:
-                prices_df = yf.download(
+                raw_df = yf.download(
                     ' '.join(symbols_with_usdcad),
                     start=start_date.strftime('%Y-%m-%d'),
                     end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
                     auto_adjust=True,
-                    progress=False
-                )['Close']
+                    progress=False,
+                    group_by='ticker',   # force consistent MultiIndex format
+                )
+                # Normalise to a flat DataFrame with tickers as columns
+                if isinstance(raw_df.columns, pd.MultiIndex):
+                    prices_df = raw_df['Close'] if 'Close' in raw_df.columns.get_level_values(0) else raw_df.xs('Close', axis=1, level=0)
+                elif len(symbols_with_usdcad) == 1:
+                    # Single ticker: raw_df has simple columns; rename the 'Close' column
+                    prices_df = raw_df[['Close']].rename(columns={'Close': symbols_with_usdcad[0]})
+                else:
+                    prices_df = raw_df.get('Close', raw_df)
                 cache.set(cache_key, prices_df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
                 logger.info(f"✓ Historical data fetched and cached")
             except Exception as e:
@@ -130,29 +191,44 @@ def compute_portfolio_value_series(
             if prices_df is not None and not prices_df.empty:
                 for symbol in symbols:
                     try:
-                        # Get price for this symbol on this date
-                        if symbol in prices_df.columns:
-                            price_series = prices_df[symbol]
-                            if not price_series.empty:
-                                price = price_series.asof(tx_date)
+                        if symbol not in prices_df.columns:
+                            logger.warning(f"Symbol {symbol!r} not in prices_df columns; skipping.")
+                            continue
+                        price_series = prices_df[symbol].dropna()
+                        if price_series.empty:
+                            logger.warning(f"No price data for {symbol!r} on {tx_date}; skipping.")
+                            continue
+                        raw_price = price_series.asof(pd.Timestamp(tx_date))
+                        if raw_price is None or (isinstance(raw_price, float) and math.isnan(raw_price)):
+                            logger.warning(f"NaN/None price for {symbol!r} on {tx_date}; skipping.")
+                            continue
+                        price = Decimal(str(raw_price))
 
-                                # Handle currency conversion
-                                if symbol.endswith('CAD'):
-                                    fx_rate = Decimal('1')
-                                else:
-                                    usdcad_series = prices_df['USDCAD=X']
-                                    fx_rate = usdcad_series.asof(tx_date)
+                        if symbol.endswith('.TO') or symbol.endswith('.AX') or symbol.endswith('.V'):
+                            # Already CAD-denominated TSX/ASX/TSXV stock
+                            fx_rate = Decimal('1')
+                        elif 'USDCAD=X' in prices_df.columns:
+                            raw_fx = prices_df['USDCAD=X'].dropna().asof(pd.Timestamp(tx_date))
+                            if raw_fx is None or (isinstance(raw_fx, float) and math.isnan(raw_fx)):
+                                logger.warning(f"NaN FX rate on {tx_date}; using 1.0 fallback.")
+                                fx_rate = Decimal('1')
+                            else:
+                                fx_rate = Decimal(str(raw_fx))
+                        else:
+                            logger.warning("USDCAD=X not in prices_df; using fx_rate=1")
+                            fx_rate = Decimal('1')
 
-                                # Add to market value
-                                market_value += Decimal(str(price)) * holdings[symbol] * Decimal(str(fx_rate))
-                    except Exception:
-                        # Skip symbols with price errors
-                        pass
+                        market_value += price * holdings[symbol] * fx_rate
+                    except Exception as sym_err:
+                        logger.warning(f"Price lookup error for {symbol!r} on {tx_date}: {sym_err}")
 
             results.append({
                 'date': tx_date.strftime('%Y-%m-%d'),
                 'market_value_cad': market_value,
             })
+
+        if prices_df is not None and not prices_df.empty and not results:
+            logger.warning("Price fetch succeeded but results are empty — check date range or symbols.")
 
         return results
     except Exception:
@@ -282,27 +358,23 @@ def compute_realised_pnl(
 def compute_cost_basis_series(
     date_from: str | None = None,
     date_to: str | None = None,
+    freq: str = 'monthly',
 ) -> list[dict]:
-    """Compute total invested cost basis over time (monthly series).
+    """Compute total invested cost basis over time.
 
-    For each monthly date point, sum the amount_cad of all BUY transactions
+    For each period-end date, sum the amount_cad of all BUY transactions
     (absolute value) up to and including that date, minus the cost of all
-    sold shares (approximated as average cost at time of sale, same as the
-    avg-cost method in compute_realised_pnl).
+    sold shares (approximated as average cost at time of sale).
+
+    Uses an incremental pointer over a pre-fetched transaction list to avoid
+    re-querying per date (fixes double-count bug).
 
     Returns a list of dicts: [{'date': 'YYYY-MM-DD', 'cost_basis_cad': Decimal}]
-    Uses the same monthly date grid as compute_portfolio_value_series.
     """
-    cache_key = 'cost_basis_series'
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
     try:
         transactions = Transaction.objects.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
 
         if not transactions.exists():
-            cache.set(cache_key, [], settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
             return []
 
         # Determine date range
@@ -323,34 +395,41 @@ def compute_cost_basis_series(
             except ValueError:
                 pass
 
-        dates = _generate_monthly_dates(start_date, end_date)
+        dates = _generate_date_series(start_date, end_date, freq)
 
-        # Compute cost basis using average-cost method
-        total_shares = Decimal('0')
-        total_cost = Decimal('0')
+        # Use a pointer into the transactions list to avoid re-querying
+        all_txs = list(transactions)
+        tx_idx = 0
+
+        # Incremental state keyed by (symbol, account_id)
+        total_shares: dict[str, Decimal] = {}
+        total_cost: dict[str, Decimal] = {}
 
         results = []
         for tx_date in dates:
-            # Replay transactions up to this date
-            for tx in transactions.filter(date__lte=tx_date):
+            # Advance pointer: process only NEW transactions up to tx_date
+            while tx_idx < len(all_txs) and all_txs[tx_idx].date <= tx_date:
+                tx = all_txs[tx_idx]
+                key = (tx.symbol, tx.account_id if tx.account_id else '')
                 cost = abs(tx.amount_cad)
 
                 if tx.type == 'BUY':
-                    total_shares += tx.quantity
-                    total_cost += cost
-
+                    total_shares[key] = total_shares.get(key, Decimal('0')) + tx.quantity
+                    total_cost[key] = total_cost.get(key, Decimal('0')) + cost
                 elif tx.type == 'SELL':
-                    avg_cost_per_share = total_cost / total_shares if total_shares > 0 else Decimal('0')
-                    cost_basis_avg = tx.quantity * avg_cost_per_share
-                    total_shares -= tx.quantity
-                    total_cost -= cost_basis_avg
+                    shares = total_shares.get(key, Decimal('0'))
+                    avg = total_cost[key] / shares if shares > 0 else Decimal('0')
+                    sold_cost = tx.quantity * avg
+                    total_shares[key] = max(shares - tx.quantity, Decimal('0'))
+                    total_cost[key] = max(total_cost.get(key, Decimal('0')) - sold_cost, Decimal('0'))
+                tx_idx += 1
 
+            running_cost = sum(total_cost.values())
             results.append({
                 'date': tx_date.strftime('%Y-%m-%d'),
-                'cost_basis_cad': total_cost,
+                'cost_basis_cad': running_cost,
             })
 
-        cache.set(cache_key, results, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
         return results
     except Exception:
         logger.exception("Error in compute_cost_basis_series")
@@ -360,14 +439,14 @@ def compute_cost_basis_series(
 def compute_income_series(
     date_from: str | None = None,
     date_to: str | None = None,
+    freq: str = 'monthly',
 ) -> list[dict]:
-    """Compute monthly income (dividends, distributions, interest) over time.
+    """Compute income (dividends, distributions, interest) over time.
 
-    For each calendar month, sums amount_cad of transactions with type in
-    ('DIV', 'DIST', 'INT'). Returns each month as a separate bar value.
+    For each period-end date, sums amount_cad of transactions with type in
+    ('DIV', 'DIST', 'INT') that fall within that period.
 
     Returns a list of dicts: [{'date': 'YYYY-MM-DD', 'income_cad': Decimal}]
-    where 'date' is the last day of the month (matching other series).
     """
     cache_key = 'income_series'
     cached = cache.get(cache_key)
@@ -406,19 +485,31 @@ def compute_income_series(
             except ValueError:
                 pass
 
-        dates = _generate_monthly_dates(start_date, end_date)
+        dates = _generate_date_series(start_date, end_date, freq)
 
-        # Build a lookup of income by month-end date
+        # Build a lookup of income by period-end date
         income_by_date = defaultdict(lambda: Decimal('0'))
         for tx in transactions:
-            # Find the month-end date that this transaction falls into
-            tx_month_end = date(tx.date.year, tx.date.month, 1)
-            if tx_month_end.month == 12:
-                tx_month_end = tx_month_end.replace(year=tx_month_end.year + 1, month=1, day=1)
+            # Find the period-end date that this transaction falls into
+            if freq == 'monthly':
+                tx_period_end = date(tx.date.year, tx.date.month, 1)
+                if tx_period_end.month == 12:
+                    tx_period_end = tx_period_end.replace(year=tx_period_end.year + 1, month=1, day=1)
+                else:
+                    tx_period_end = tx_period_end.replace(month=tx_period_end.month + 1, day=1)
+                tx_period_end = tx_period_end - timedelta(days=1)
+                income_by_date[tx_period_end] += tx.amount_cad
+            elif freq == 'weekly':
+                # Find the Friday on or after the transaction date
+                days_to_friday = (4 - tx.date.weekday()) % 7
+                tx_period_end = tx.date + timedelta(days=days_to_friday)
+                income_by_date[tx_period_end] += tx.amount_cad
+            elif freq == 'annual':
+                tx_period_end = date(tx.date.year, 12, 31)
+                income_by_date[tx_period_end] += tx.amount_cad
             else:
-                tx_month_end = tx_month_end.replace(month=tx_month_end.month + 1, day=1)
-            tx_month_end = tx_month_end - timedelta(days=1)
-            income_by_date[tx_month_end] += tx.amount_cad
+                # daily: each transaction goes to its own date
+                income_by_date[tx.date] += tx.amount_cad
 
         results = []
         for tx_date in dates:
@@ -437,13 +528,16 @@ def compute_income_series(
 def compute_series_by_account(
     date_from: str | None = None,
     date_to: str | None = None,
+    freq: str = 'monthly',
 ) -> dict[str, list[dict]]:
-    """Compute monthly market value series for each account independently.
+    """Compute market value series for each account independently.
+
+    All accounts share the same global date grid (from the earliest
+    transaction across all accounts to end_date), ensuring arrays
+    are the same length as the labels produced by the market-value series.
 
     Returns a dict keyed by account_id, each value being a list of
     {'date': 'YYYY-MM-DD', 'market_value_cad': Decimal} dicts.
-    Uses the same historical price data as compute_portfolio_value_series
-    (served from cache if already fetched).
     """
     try:
         # Get all accounts that have at least one BUY transaction
@@ -454,9 +548,70 @@ def compute_series_by_account(
         if not accounts_with_buys:
             return {}
 
+        # Compute global date range from ALL accounts
+        global_start = Transaction.objects.filter(
+            account__account_id__in=accounts_with_buys,
+            type__in=POSITION_TRANSACTION_TYPES
+        ).order_by('date', 'id').first()
+
+        if not global_start:
+            return {}
+
+        start_date = global_start.date
+        end_date = timezone.now().date()
+
+        if date_from:
+            try:
+                parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
+                start_date = max(start_date, parsed_from)
+            except ValueError:
+                pass
+
+        if date_to:
+            try:
+                parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
+                end_date = min(end_date, parsed_to)
+            except ValueError:
+                pass
+
+        # Generate a single shared dates list
+        dates = _generate_date_series(start_date, end_date, freq)
+
+        # Fetch prices once using ALL symbols across ALL accounts
+        cache_key = 'hist_prices'
+        prices_df = cache.get(cache_key)
+
+        if prices_df is None or (hasattr(prices_df, 'empty') and prices_df.empty):
+            all_symbols = list(set(
+                tx.symbol
+                for tx in Transaction.objects.filter(
+                    account__account_id__in=accounts_with_buys
+                ).values_list('symbol', flat=True)
+            ))
+            symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
+
+            try:
+                raw_df = yf.download(
+                    ' '.join(symbols_with_usdcad),
+                    start=start_date.strftime('%Y-%m-%d'),
+                    end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
+                    auto_adjust=True,
+                    progress=False,
+                    group_by='ticker',
+                )
+                if isinstance(raw_df.columns, pd.MultiIndex):
+                    prices_df = raw_df['Close'] if 'Close' in raw_df.columns.get_level_values(0) else raw_df.xs('Close', axis=1, level=0)
+                elif len(symbols_with_usdcad) == 1:
+                    prices_df = raw_df[['Close']].rename(columns={'Close': symbols_with_usdcad[0]})
+                else:
+                    prices_df = raw_df.get('Close', raw_df)
+                cache.set(cache_key, prices_df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
+            except Exception as e:
+                logger.error(f"Error fetching historical data for by-account: {e}")
+                prices_df = None
+
         results = {}
         for account_id in accounts_with_buys:
-            # Get transactions for this account
             account_txs = Transaction.objects.filter(
                 account__account_id=account_id,
                 type__in=POSITION_TRANSACTION_TYPES
@@ -465,48 +620,7 @@ def compute_series_by_account(
             if not account_txs.exists():
                 continue
 
-            # Determine date range
-            start_date = account_txs.first().date
-            end_date = timezone.now().date()
-
-            if date_from:
-                try:
-                    parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                    start_date = max(start_date, parsed_from)
-                except ValueError:
-                    pass
-
-            if date_to:
-                try:
-                    parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                    end_date = min(end_date, parsed_to)
-                except ValueError:
-                    pass
-
-            dates = _generate_monthly_dates(start_date, end_date)
-
-            # Fetch historical prices (reuse cache if available)
-            cache_key = 'hist_prices'
-            prices_df = cache.get(cache_key)
-
-            if prices_df is None or (hasattr(prices_df, 'empty') and prices_df.empty):
-                all_symbols = list(set(tx.symbol for tx in account_txs))
-                symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
-
-                try:
-                    prices_df = yf.download(
-                        ' '.join(symbols_with_usdcad),
-                        start=start_date.strftime('%Y-%m-%d'),
-                        end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
-                        auto_adjust=True,
-                        progress=False
-                    )['Close']
-                    cache.set(cache_key, prices_df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
-                except Exception as e:
-                    logger.error(f"Error fetching historical data for account {account_id}: {e}")
-                    prices_df = None
-
-            # Calculate market value for each date point
+            # Use the same dates list
             account_results = []
             for tx_date in dates:
                 holdings = {}
@@ -524,18 +638,28 @@ def compute_series_by_account(
                 if prices_df is not None and not prices_df.empty:
                     for symbol in symbols:
                         try:
-                            if symbol in prices_df.columns:
-                                price_series = prices_df[symbol]
-                                if not price_series.empty:
-                                    price = price_series.asof(tx_date)
+                            if symbol not in prices_df.columns:
+                                continue
+                            price_series = prices_df[symbol].dropna()
+                            if price_series.empty:
+                                continue
+                            raw_price = price_series.asof(pd.Timestamp(tx_date))
+                            if raw_price is None or (isinstance(raw_price, float) and math.isnan(raw_price)):
+                                continue
+                            price = Decimal(str(raw_price))
 
-                                    if symbol.endswith('CAD'):
-                                        fx_rate = Decimal('1')
-                                    else:
-                                        usdcad_series = prices_df['USDCAD=X']
-                                        fx_rate = usdcad_series.asof(tx_date)
+                            if symbol.endswith('.TO') or symbol.endswith('.AX') or symbol.endswith('.V'):
+                                fx_rate = Decimal('1')
+                            elif 'USDCAD=X' in prices_df.columns:
+                                raw_fx = prices_df['USDCAD=X'].dropna().asof(pd.Timestamp(tx_date))
+                                if raw_fx is None or (isinstance(raw_fx, float) and math.isnan(raw_fx)):
+                                    fx_rate = Decimal('1')
+                                else:
+                                    fx_rate = Decimal(str(raw_fx))
+                            else:
+                                fx_rate = Decimal('1')
 
-                                    market_value += Decimal(str(price)) * holdings[symbol] * Decimal(str(fx_rate))
+                            market_value += price * holdings[symbol] * fx_rate
                         except Exception:
                             pass
 

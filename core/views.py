@@ -630,6 +630,14 @@ def portfolio_chart_data(request):
         series_param = request.GET.get('series', 'market_value')
         benchmark_ticker = request.GET.get('benchmark', '^GSPC')
 
+        # Validate freq
+        VALID_FREQS = {'daily', 'weekly', 'monthly', 'annual'}
+        if freq not in VALID_FREQS:
+            return JsonResponse(
+                {'error': f'Invalid freq: {freq}. Must be one of {sorted(VALID_FREQS)}'},
+                status=400
+            )
+
         # Validate date_from
         if date_from:
             try:
@@ -680,7 +688,7 @@ def portfolio_chart_data(request):
         # Optional: cost_basis
         if 'cost_basis' in series_list:
             try:
-                cb_series = compute_cost_basis_series(date_from=date_from, date_to=date_to)
+                cb_series = compute_cost_basis_series(date_from=date_from, date_to=date_to, freq=freq)
                 cb_values = [float(item['cost_basis_cad']) for item in cb_series]
                 datasets.append({
                     'id': 'cost_basis',
@@ -693,9 +701,12 @@ def portfolio_chart_data(request):
                 logger.error(f"Error computing cost basis series: {e}")
 
         # Optional: income
+        # For daily/weekly, income stays monthly so it remains readable.
+        # Only for annual do we pass annual freq to income.
         if 'income' in series_list:
             try:
-                inc_series = compute_income_series(date_from=date_from, date_to=date_to)
+                income_freq = freq if freq == 'annual' else 'monthly'
+                inc_series = compute_income_series(date_from=date_from, date_to=date_to, freq=income_freq)
                 inc_values = [float(item['income_cad']) for item in inc_series]
                 datasets.append({
                     'id': 'income',
@@ -773,7 +784,7 @@ def portfolio_chart_data(request):
         # Optional: by_account
         if 'by_account' in series_list:
             try:
-                account_series = compute_series_by_account(date_from=date_from, date_to=date_to)
+                account_series = compute_series_by_account(date_from=date_from, date_to=date_to, freq=freq)
                 account_colors = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948']
                 
                 for idx, (acct_id, acct_data) in enumerate(account_series.items()):
@@ -790,7 +801,11 @@ def portfolio_chart_data(request):
             except Exception as e:
                 logger.error(f"Error computing series by account: {e}")
 
-        return JsonResponse({'labels': labels, 'datasets': datasets})
+        return JsonResponse({
+            'labels': labels,
+            'datasets': datasets,
+            'freq': freq,
+        })
     except Exception as e:
         logger.exception("Error in portfolio_chart_data")
         return JsonResponse({'labels': [], 'datasets': [], 'error': str(e)}, status=500)

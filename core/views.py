@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal
 import openpyxl
 from io import BytesIO
+import pandas as pd
 import logging
 
 logger = logging.getLogger(__name__)
@@ -731,6 +732,12 @@ def portfolio_chart_data(request):
             try:
                 cb_series = compute_cost_basis_series(date_from=date_from, date_to=date_to, freq=freq)
                 cb_values = [float(item['cost_basis_cad']) for item in cb_series]
+                # Normalize: treat the start of the range as "bought at market price that day"
+                # so cost basis starts at the same value as portfolio market value at t0
+                if mv_series and cb_values and float(mv_series[0]['market_value_cad']) > 0:
+                    mv0 = float(mv_series[0]['market_value_cad'])
+                    cb0 = cb_values[0]
+                    cb_values = [mv0 + (v - cb0) for v in cb_values]
                 datasets.append({
                     'id': 'cost_basis',
                     'label': 'Cost Basis (CAD)',
@@ -759,65 +766,62 @@ def portfolio_chart_data(request):
             except Exception as e:
                 logger.error(f"Error computing income series: {e}")
 
-        # Optional: benchmark
+        # Optional: benchmark — same starting balance, grows/falls with index returns.
+        # Transaction-based cash-flow matching is not used because round-trip trades
+        # (buy and sell within a period) cause the benchmark to diverge incorrectly.
         if 'benchmark' in series_list:
             try:
-                import yfinance as yf
-                benchmark_cache_key = f'benchmark_{benchmark_ticker}'
-                bench_series = cache.get(benchmark_cache_key)
-                
-                if bench_series is None:
-                    # Fetch from yfinance
-                    try:
-                        # Determine date range for benchmark
-                        bench_start = datetime.strptime(date_from, '%Y-%m-%d').date() if date_from else date.today() - timedelta(days=365)
-                        bench_end = datetime.strptime(date_to, '%Y-%m-%d').date() if date_to else date.today()
-                        
-                        bench_data = yf.download(
-                            benchmark_ticker,
-                            start=bench_start.strftime('%Y-%m-%d'),
-                            end=(bench_end + timedelta(days=1)).strftime('%Y-%m-%d'),
-                            auto_adjust=True,
-                            progress=False
-                        )
-                        
-                        if bench_data.empty or 'Close' not in bench_data.columns:
-                            bench_series = []
-                        else:
-                            close_prices = bench_data['Close']
-                            # Newer yfinance returns DataFrame for single ticker; squeeze to Series
-                            if hasattr(close_prices, 'columns'):
-                                close_prices = close_prices.iloc[:, 0]
-                            bench_series = []
-                            for d, price in close_prices.items():
-                                if not (isinstance(price, float) and price != price):  # not NaN
-                                    bench_series.append({'date': d.strftime('%Y-%m-%d'), 'price': float(price)})
-                            
-                            # Rebase to 100 at first date
-                            if bench_series:
-                                first_price = bench_series[0]['price']
-                                if first_price > 0:
-                                    for item in bench_series:
-                                        item['price'] = (item['price'] / first_price) * 100
-                            
-                            cache.set(benchmark_cache_key, bench_series, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
-                    except Exception as e:
-                        logger.error(f"Error fetching benchmark data: {e}")
-                        bench_series = []
-                
-                # Match benchmark to portfolio labels by year-month (last trading day per month)
-                bench_by_month = {}
-                for item in bench_series:
-                    bench_by_month[item['date'][:7]] = item['price']  # last entry per YYYY-MM wins
-                bench_values = [bench_by_month.get(lbl[:7], None) for lbl in labels]
-                
+                from .utils import _load_prices_from_db, _load_prices_from_yfinance
+                from .models import Transaction as TxModel
+                first_tx = TxModel.objects.order_by('date').values_list('date', flat=True).first()
+                bench_start = first_tx if first_tx else (date.today() - timedelta(days=3650))
+                bench_end = date.today()
+
+                bench_df = _load_prices_from_db([benchmark_ticker], bench_start, bench_end)
+                if bench_df is None or benchmark_ticker not in bench_df.columns:
+                    bench_df = _load_prices_from_yfinance([benchmark_ticker], bench_start, bench_end)
+
+                bench_prices_series = None
+                if bench_df is not None and benchmark_ticker in bench_df.columns:
+                    bench_prices_series = bench_df[benchmark_ticker].dropna()
+
+                # Start at portfolio market value at t0 and grow with index returns only.
+                mv0 = float(mv_series[0]['market_value_cad']) if mv_series else 0.0
+                bench_portfolio = mv0
+                prev_bench_price = None
+                bench_initialized = False
+                bench_values = []
+
+                for lbl in labels:
+                    bench_price = None
+                    if bench_prices_series is not None:
+                        raw = bench_prices_series.asof(pd.Timestamp(lbl[:10]))
+                        if raw is not None and not (isinstance(raw, float) and pd.isna(raw)):
+                            bench_price = float(raw)
+
+                    if bench_price is None:
+                        bench_values.append(None)
+                        continue
+
+                    if not bench_initialized:
+                        bench_initialized = True
+                        prev_bench_price = bench_price
+                        bench_values.append(max(0.0, bench_portfolio))
+                        continue
+
+                    if prev_bench_price > 0:
+                        bench_portfolio *= (bench_price / prev_bench_price)
+
+                    prev_bench_price = bench_price
+                    bench_values.append(max(0.0, bench_portfolio))
+
                 safe_id = benchmark_ticker.replace('.', '_').replace('^', '_').replace('=', '_')
                 datasets.append({
                     'id': f'benchmark_{safe_id}',
-                    'label': f'{benchmark_ticker} (rebased)',
+                    'label': f'{benchmark_ticker} (if invested same)',
                     'data': bench_values,
                     'type': 'line',
-                    'yAxisID': 'y3',
+                    'yAxisID': 'y',
                 })
             except Exception as e:
                 logger.error(f"Error computing benchmark series: {e}")

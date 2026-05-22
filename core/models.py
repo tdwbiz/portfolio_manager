@@ -172,3 +172,24 @@ class BrandingConfig(models.Model):
         """Load the singleton instance, create if not exists."""
         obj, created = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class HistoricalPrice(models.Model):
+    """Daily closing prices for portfolio symbols and FX rates.
+
+    Populated by the fetch_historical_prices management command.
+    Used by compute_portfolio_value_series to avoid live yfinance calls.
+    """
+    symbol = models.CharField(max_length=20)
+    date = models.DateField()
+    close = models.DecimalField(max_digits=18, decimal_places=6)
+
+    class Meta:
+        unique_together = [('symbol', 'date')]
+        indexes = [
+            models.Index(fields=['symbol', 'date']),
+        ]
+        ordering = ['symbol', 'date']
+
+    def __str__(self):
+        return f"{self.symbol} {self.date}: {self.close}"

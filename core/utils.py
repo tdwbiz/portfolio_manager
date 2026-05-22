@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 POSITION_TRANSACTION_TYPES = ('BUY', 'SELL')
 
+# Cash-equivalent mutual funds: always $10 per share, no exchange price needed.
+# RBF2010 = RBC CAD money market fund (CAD-denominated).
+# RBF2014 = RBC USD money market fund (USD-denominated).
+# Add any additional fixed-price fund codes here as needed.
+CASH_EQUIV_CAD = {'RBF2010': Decimal('10.00')}
+CASH_EQUIV_USD = {'RBF2014': Decimal('10.00')}
+
 
 def _generate_date_series(
     start_date: date,
@@ -82,12 +89,93 @@ def _generate_date_series(
         return dates
 
 
+def _load_prices_from_db(symbols: list[str], start: 'date_type', end: 'date_type'):
+    """Load historical prices from the HistoricalPrice table into a pandas DataFrame.
+
+    Returns a DataFrame with DatetimeIndex and symbols as columns, or None if insufficient data.
+    """
+    try:
+        from .models import HistoricalPrice  # avoid circular import at module level
+        qs = HistoricalPrice.objects.filter(
+            symbol__in=symbols,
+            date__range=(start, end),
+        ).values_list('symbol', 'date', 'close').order_by('date')
+
+        rows = list(qs)
+        if not rows:
+            return None
+
+        # Check that at least the portfolio symbols (not just USDCAD) have data
+        db_symbols = {r[0] for r in rows}
+        non_fx_needed = [s for s in symbols if s != 'USDCAD=X']
+        if not any(s in db_symbols for s in non_fx_needed):
+            return None
+
+        prices_dict: dict[str, dict] = {}
+        for symbol, price_date, close in rows:
+            if symbol not in prices_dict:
+                prices_dict[symbol] = {}
+            prices_dict[symbol][price_date] = float(close)
+
+        df = pd.DataFrame(prices_dict)
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        return df
+    except Exception as exc:
+        logger.warning(f"_load_prices_from_db error: {exc}")
+        return None
+
+
+def _load_prices_from_yfinance(symbols: list[str], start: 'date_type', end: 'date_type'):
+    """Download closing prices from yfinance for the given symbols and date range.
+
+    Returns a DataFrame with DatetimeIndex and symbols as columns, or None on failure.
+    """
+    try:
+        cache_key = f'hist_prices_{",".join(sorted(symbols))}_{start}_{end}'
+        df = cache.get(cache_key)
+        if df is not None and not df.empty:
+            logger.info("Using cached yfinance prices")
+            return df
+
+        logger.info(f"Fetching {len(symbols)} symbols from yfinance: {start} → {end}")
+        raw_df = yf.download(
+            symbols,
+            start=start.strftime('%Y-%m-%d'),
+            end=(end + timedelta(days=1)).strftime('%Y-%m-%d'),
+            auto_adjust=True,
+            progress=False,
+        )
+        if raw_df is None or raw_df.empty:
+            return None
+
+        if isinstance(raw_df.columns, pd.MultiIndex):
+            lvl0 = raw_df.columns.get_level_values(0)
+            if 'Close' in lvl0:
+                df = raw_df['Close']
+            else:
+                df = raw_df.xs('Close', axis=1, level=1)
+        elif len(symbols) == 1:
+            df = raw_df[['Close']].rename(columns={'Close': symbols[0]})
+        else:
+            df = raw_df.get('Close', raw_df)
+
+        cache.set(cache_key, df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
+        return df
+    except Exception as exc:
+        logger.error(f"_load_prices_from_yfinance error: {type(exc).__name__}: {exc}")
+        return None
+
+
 def compute_portfolio_value_series(
     freq: str = 'monthly',
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> list[dict]:
     """Compute portfolio market value over time with historical prices.
+
+    Prices are sourced from the HistoricalPrice table (populated by the
+    fetch_historical_prices management command) with live yfinance as fallback.
 
     Args:
         freq: Frequency of data points ('daily', 'weekly', 'monthly', 'annual').
@@ -106,67 +194,44 @@ def compute_portfolio_value_series(
             logger.info("No BUY/SELL transactions found, returning empty series")
             return []
 
-        # Determine date range
-        start_date = transactions.first().date
+        # Always use the FULL transaction history for holdings, but clip the visible date range.
+        # Price lookup covers the full history (from first transaction) so asof() always works.
+        first_tx_date = transactions.first().date
         end_date = timezone.now().date()
 
-        # Apply date clipping
+        # Determine the visible clip window (what dates show on the chart)
+        clip_start = first_tx_date
         if date_from:
             try:
-                parsed_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                start_date = max(start_date, parsed_from)
+                clip_start = max(first_tx_date, datetime.strptime(date_from, '%Y-%m-%d').date())
             except ValueError:
                 pass
-
         if date_to:
             try:
-                parsed_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                end_date = min(end_date, parsed_to)
+                end_date = min(end_date, datetime.strptime(date_to, '%Y-%m-%d').date())
             except ValueError:
                 pass
 
-        logger.info(f"Date range: {start_date} to {end_date}")
+        logger.info(f"Visible date range: {clip_start} to {end_date}")
 
         # Generate period-end dates based on freq
-        dates = _generate_date_series(start_date, end_date, freq)
+        dates = _generate_date_series(clip_start, end_date, freq)
 
         # Collect all unique symbols ever held
         all_symbols = list(set(tx.symbol for tx in transactions))
         logger.info(f"Found {len(all_symbols)} unique symbols: {all_symbols}")
+        symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
 
-        # Fetch historical prices from cache or yfinance
-        cache_key = 'hist_prices'
-        prices_df = cache.get(cache_key)
+        # ---- Build prices DataFrame ----
+        # 1. Try HistoricalPrice DB (from fetch_historical_prices command)
+        # 2. Fall back to live yfinance
+        prices_df = _load_prices_from_db(symbols_with_usdcad, first_tx_date, end_date)
 
-        if prices_df is None or (hasattr(prices_df, 'empty') and prices_df.empty):
-            # Add USDCAD for currency conversion
-            symbols_with_usdcad = list(set(all_symbols + ['USDCAD=X']))
-            logger.info(f"Fetching historical data from yfinance for {len(symbols_with_usdcad)} symbols")
-
-            try:
-                raw_df = yf.download(
-                    ' '.join(symbols_with_usdcad),
-                    start=start_date.strftime('%Y-%m-%d'),
-                    end=(end_date + timedelta(days=1)).strftime('%Y-%m-%d'),
-                    auto_adjust=True,
-                    progress=False,
-                    group_by='ticker',   # force consistent MultiIndex format
-                )
-                # Normalise to a flat DataFrame with tickers as columns
-                if isinstance(raw_df.columns, pd.MultiIndex):
-                    prices_df = raw_df['Close'] if 'Close' in raw_df.columns.get_level_values(0) else raw_df.xs('Close', axis=1, level=0)
-                elif len(symbols_with_usdcad) == 1:
-                    # Single ticker: raw_df has simple columns; rename the 'Close' column
-                    prices_df = raw_df[['Close']].rename(columns={'Close': symbols_with_usdcad[0]})
-                else:
-                    prices_df = raw_df.get('Close', raw_df)
-                cache.set(cache_key, prices_df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
-                logger.info(f"✓ Historical data fetched and cached")
-            except Exception as e:
-                logger.error(f"✗ Error fetching historical data: {type(e).__name__}: {e}")
-                prices_df = None
+        if prices_df is None or prices_df.empty:
+            logger.info("HistoricalPrice DB empty/incomplete — falling back to live yfinance")
+            prices_df = _load_prices_from_yfinance(symbols_with_usdcad, first_tx_date, end_date)
         else:
-            logger.info("Using cached historical data")
+            logger.info(f"Using DB prices: {len(prices_df)} rows × {len(prices_df.columns)} symbols")
 
         # Calculate market value for each date point
         results = []
@@ -191,6 +256,21 @@ def compute_portfolio_value_series(
             if prices_df is not None and not prices_df.empty:
                 for symbol in symbols:
                     try:
+                        # Cash-equivalent funds: fixed $10, no DB lookup needed
+                        if symbol in CASH_EQUIV_CAD:
+                            price = CASH_EQUIV_CAD[symbol]
+                            market_value += price * holdings[symbol]
+                            continue
+                        if symbol in CASH_EQUIV_USD:
+                            price = CASH_EQUIV_USD[symbol]
+                            if 'USDCAD=X' in prices_df.columns:
+                                raw_fx = prices_df['USDCAD=X'].dropna().asof(pd.Timestamp(tx_date))
+                                fx_rate = Decimal(str(raw_fx)) if (raw_fx is not None and not (isinstance(raw_fx, float) and math.isnan(raw_fx))) else Decimal('1')
+                            else:
+                                fx_rate = Decimal('1')
+                            market_value += price * holdings[symbol] * fx_rate
+                            continue
+
                         if symbol not in prices_df.columns:
                             logger.warning(f"Symbol {symbol!r} not in prices_df columns; skipping.")
                             continue
@@ -638,6 +718,20 @@ def compute_series_by_account(
                 if prices_df is not None and not prices_df.empty:
                     for symbol in symbols:
                         try:
+                            # Cash-equivalent funds: fixed $10, no DB lookup needed
+                            if symbol in CASH_EQUIV_CAD:
+                                market_value += CASH_EQUIV_CAD[symbol] * holdings[symbol]
+                                continue
+                            if symbol in CASH_EQUIV_USD:
+                                price = CASH_EQUIV_USD[symbol]
+                                if 'USDCAD=X' in prices_df.columns:
+                                    raw_fx = prices_df['USDCAD=X'].dropna().asof(pd.Timestamp(tx_date))
+                                    fx_rate = Decimal(str(raw_fx)) if (raw_fx is not None and not (isinstance(raw_fx, float) and math.isnan(raw_fx))) else Decimal('1')
+                                else:
+                                    fx_rate = Decimal('1')
+                                market_value += price * holdings[symbol] * fx_rate
+                                continue
+
                             if symbol not in prices_df.columns:
                                 continue
                             price_series = prices_df[symbol].dropna()

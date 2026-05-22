@@ -21,9 +21,12 @@
         <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="1M">1M</button>
         <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="3M">3M</button>
         <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="6M">6M</button>
-        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="YTD">YTD</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn active" data-range="YTD">YTD</button>
         <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="1Y">1Y</button>
-        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn active" data-range="All">All</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="3Y">3Y</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="5Y">5Y</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="10Y">10Y</button>
+        <button type="button" class="btn btn-outline-primary btn-sm date-range-btn" data-range="All">All</button>
       </div>
     </div>
 
@@ -114,7 +117,7 @@
   let chartInstance = null;
 
   // State variables
-  let activeDateRange = 'All';
+  let activeDateRange = 'YTD';
   let activeFreq = 'monthly';
   let activeChartType = 'line';
 
@@ -141,6 +144,9 @@
     '6M': { months: 6 },
     'YTD': { ytd: true },
     '1Y': { months: 12 },
+    '3Y': { months: 36 },
+    '5Y': { months: 60 },
+    '10Y': { months: 120 },
     'All': null,
   };
 
@@ -335,23 +341,7 @@
               drawOnChartArea: false,
             },
           },
-          y3: {
-            type: 'linear',
-            display: data.datasets.some(ds => ds.yAxisID === 'y3'),
-            position: 'right',
-            title: {
-              display: true,
-              text: 'Benchmark (rebased)',
-            },
-            grid: {
-              drawOnChartArea: false,
-            },
-            ticks: {
-              callback: function(value) {
-                return value.toFixed(1);
-              },
-            },
-          },
+
         },
       },
     });

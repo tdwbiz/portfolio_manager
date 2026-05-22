@@ -89,7 +89,7 @@ def _generate_date_series(
         return dates
 
 
-def _load_prices_from_db(symbols: list[str], start: 'date_type', end: 'date_type'):
+def _load_prices_from_db(symbols: list[str], start: date, end: date):
     """Load historical prices from the HistoricalPrice table into a pandas DataFrame.
 
     Returns a DataFrame with DatetimeIndex and symbols as columns, or None if insufficient data.
@@ -126,7 +126,7 @@ def _load_prices_from_db(symbols: list[str], start: 'date_type', end: 'date_type
         return None
 
 
-def _load_prices_from_yfinance(symbols: list[str], start: 'date_type', end: 'date_type'):
+def _load_prices_from_yfinance(symbols: list[str], start: date, end: date):
     """Download closing prices from yfinance for the given symbols and date range.
 
     Returns a DataFrame with DatetimeIndex and symbols as columns, or None on failure.

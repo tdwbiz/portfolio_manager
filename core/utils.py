@@ -967,7 +967,7 @@ def fetch_last_prices(symbols: list[str], cache_timeout: int | None = None) -> d
                         price = Decimal(str(price))
                         cache.set(f'price_{sym}', price, cache_timeout)
                         cached_prices[sym] = price
-                        logger.info(f"✓ Fetched price for {sym}: {price}")
+                        logger.info(f"OK Fetched price for {sym}: {price}")
                     else:
                         logger.warning(f"✗ No price available for {sym} (fast_info.last_price is None)")
                 except Exception as e:

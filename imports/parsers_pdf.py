@@ -34,9 +34,8 @@ LAST_STATEMENT_PATTERN = re.compile(
 MONTH_ABBREVS = (
     'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
     'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
-    'JANUAR', 'FEBRUAR', 'MARCH', 'APRIL', 'JUNE', 'JULY', 'AUGUST',
-    'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEPT', 'SEP', 'OCT', 'NOV', 'DEC',
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG',
+    'SEPT', 'SEP', 'OCT', 'NOV', 'DEC',
 )
 
 # Match full month names or abbreviations (including SEPT), optional dot, then day and year.

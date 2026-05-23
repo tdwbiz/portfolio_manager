@@ -31,18 +31,17 @@ ACCOUNT_NUMBER_PATTERN = re.compile(
 LAST_STATEMENT_PATTERN = re.compile(
     r'Date of Last Statement:\s*(.+)', re.IGNORECASE
 )
-STATEMENT_DATE_PATTERN = re.compile(
-    r'\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
-    r'JANUAR|FEBRUAR|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
-    r'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\.?\s+(\d{1,2})\s+(\d{4})',
-    re.IGNORECASE,
+MONTH_ABBREVS = (
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+    'JANUAR', 'FEBRUAR', 'MARCH', 'APRIL', 'JUNE', 'JULY', 'AUGUST',
+    'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEPT', 'SEP', 'OCT', 'NOV', 'DEC',
 )
 
-# Simpler fallback pattern for statement date extraction
-STATEMENT_DATE_SIMPLE = re.compile(
-    r'(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
-    r'JANUAR|FEBRUAR|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
-    r'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\.?\s+(\d{1,2})\s+(\d{4})',
+# Match full month names or abbreviations (including SEPT), optional dot, then day and year.
+STATEMENT_DATE_PATTERN = re.compile(
+    r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})\s+(\d{4})',
     re.IGNORECASE,
 )
 
@@ -55,10 +54,13 @@ def _parse_rbc_date(month_str: str, year: int) -> date:
     month_str = re.sub(r'\.', '', month_str).upper()
     month_map = {
         'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'SEPT': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
     }
     parts = month_str.split()
-    month = month_map.get(parts[0][:3])
+    # Check full token first (handles 'SEPT'), then fall back to 3-char prefix.
+    month = month_map.get(parts[0])
+    if month is None:
+        month = month_map.get(parts[0][:3])
     if month is None:
         raise ValueError(f"Unknown month abbreviation: {parts[0]}")
     day = int(parts[1]) if len(parts) > 1 else 1

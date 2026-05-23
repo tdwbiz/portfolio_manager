@@ -28,6 +28,8 @@
         <th>Owner</th>
         <th class="text-end">Starting Balance</th>
         <th>Starting Date</th>
+        <th class="text-end">Transactions</th>
+        <th class="text-end">Total Invested (CAD)</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -42,6 +44,8 @@
         <td>{{ account.owner|default:"\u2014" }}</td>
         <td class="text-end">${{ account.starting_balance|floatformat:2 }}</td>
         <td>{{ account.starting_balance_date|default:"\u2014" }}</td>
+        <td class="text-end">{{ account.transaction_count|default:0 }}</td>
+        <td class="text-end">${{ account.total_invested_cad|floatformat:2|default:"0.00" }}</td>
         <td>
           <a href="{% url 'account_detail' account.account_id %}" class="btn btn-sm btn-outline-primary me-1">
             <i class="bi bi-eye"></i>

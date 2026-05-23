@@ -1,6 +1,7 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
 from . import views
+from imports import views as import_views
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
@@ -23,4 +24,5 @@ urlpatterns = [
     path('accounts/<str:account_id>/', views.account_detail, name='account_detail'),
     path('accounts/<str:account_id>/edit/', views.account_edit, name='account_edit'),
     path('accounts/<str:account_id>/delete/', views.account_delete, name='account_delete'),
+    path('pdf-import/', import_views.pdf_import_view, name='pdf_import'),
 ]

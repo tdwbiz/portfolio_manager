@@ -312,7 +312,7 @@ def compute_portfolio_value_series(
 
         return results
     except Exception:
-        logger.exception("Error in compute_portfolio_value_series")
+        logger.exception("Error in compute_portfolio_value_series — returned empty series")
         return []
 
 
@@ -512,7 +512,7 @@ def compute_cost_basis_series(
 
         return results
     except Exception:
-        logger.exception("Error in compute_cost_basis_series")
+        logger.exception("Error in compute_cost_basis_series — returned empty series")
         return []
 
 
@@ -601,7 +601,7 @@ def compute_income_series(
         cache.set(cache_key, results, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
         return results
     except Exception:
-        logger.exception("Error in compute_income_series")
+        logger.exception("Error in compute_income_series — returned empty series")
         return []
 
 
@@ -755,7 +755,10 @@ def compute_series_by_account(
 
                             market_value += price * holdings[symbol] * fx_rate
                         except Exception:
-                            pass
+                            logger.debug(
+                                "Skipping symbol %s on %s for account %s — price lookup failed",
+                                symbol, tx_date, account_id,
+                            )
 
                 account_results.append({
                     'date': tx_date.strftime('%Y-%m-%d'),
@@ -766,7 +769,7 @@ def compute_series_by_account(
 
         return results
     except Exception:
-        logger.exception("Error in compute_series_by_account")
+        logger.exception("Error in compute_series_by_account — returned empty series")
         return {}
 
 

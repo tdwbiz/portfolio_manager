@@ -32,7 +32,17 @@ LAST_STATEMENT_PATTERN = re.compile(
     r'Date of Last Statement:\s*(.+)', re.IGNORECASE
 )
 STATEMENT_DATE_PATTERN = re.compile(
-    r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\.\s]+(\d{1,2})\s+(\d{4})',
+    r'\b(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
+    r'JANUAR|FEBRUAR|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
+    r'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\.?\s+(\d{1,2})\s+(\d{4})',
+    re.IGNORECASE,
+)
+
+# Simpler fallback pattern for statement date extraction
+STATEMENT_DATE_SIMPLE = re.compile(
+    r'(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
+    r'JANUAR|FEBRUAR|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|'
+    r'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\.?\s+(\d{1,2})\s+(\d{4})',
     re.IGNORECASE,
 )
 
@@ -360,6 +370,17 @@ def _extract_text_from_pdf(file_path: str) -> str:
     Raises:
         ValueError: If the file is not a valid PDF.
     """
+    # Verify it looks like a PDF before attempting to open
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(5)
+        if header != b'%PDF-':
+            raise ValueError("File does not appear to be a valid PDF")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Unable to read PDF file: {e}") from e
+
     try:
         doc = fitz.open(file_path)
     except Exception as e:
@@ -418,16 +439,25 @@ def parse_rbc_pdf(file_path: str) -> dict:
     statement_date = None
     last_statement_date = None
 
-    # Extract statement date from header
-    date_match = STATEMENT_DATE_PATTERN.search(full_text)
-    if date_match:
-        month_str = date_match.group(1)
-        day_str = date_match.group(2)
-        year = int(date_match.group(3))
-        try:
-            statement_date = _parse_rbc_date(month_str, year)
-        except ValueError:
-            logger.warning("Could not parse statement date: %s", date_match.group(0))
+    # Extract statement date from header — look for the main header line
+    # The header typically has "SEPT 30 2025" near the top, before "Date of Last Statement"
+    lines = full_text.split('\n')
+    statement_date = None
+    for i, line in enumerate(lines):
+        date_match = STATEMENT_DATE_PATTERN.search(line)
+        if date_match:
+            month_str = date_match.group(1)
+            day_str = date_match.group(2)
+            year = int(date_match.group(3))
+            # Skip if this line also contains "Last Statement"
+            if 'last statement' in line.lower():
+                continue
+            try:
+                statement_date = _parse_rbc_date(month_str, year)
+                break
+            except ValueError:
+                logger.warning("Could not parse statement date: %s", date_match.group(0))
+                continue
 
     # Extract last statement date
     last_stmt_match = LAST_STATEMENT_PATTERN.search(full_text)

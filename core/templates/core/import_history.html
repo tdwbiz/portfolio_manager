@@ -1,9 +1,10 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block content %}
 <div class="page-header">
   <h1><i class="bi bi-upload"></i> Import History</h1>
-  <p>View and manage your statement import history</p>
+  <p class="text-muted">View and manage your statement import history</p>
 </div>
 
 {% if entries %}

@@ -1,9 +1,10 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block content %}
 <div class="page-header">
   <h1><i class="bi bi-bank"></i> {{ account.name }}</h1>
-  <p>Account details and transaction history</p>
+  <p class="text-muted">Account details and transaction history</p>
 </div>
 <p>
     <strong>Account ID:</strong> {{ account.account_id }} &nbsp;|&nbsp;

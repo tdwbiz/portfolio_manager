@@ -1,4 +1,5 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block content %}
 <div class="page-header">
@@ -59,10 +60,13 @@
   </form>
 </div>
 
-<div style="margin: 10px 0;">
-    <a href="{% url 'transaction_export_csv' %}?{{ request.GET.urlencode }}">Download CSV</a>
-    &nbsp;|&nbsp;
-    <a href="{% url 'transaction_export_excel' %}?{{ request.GET.urlencode }}">Download Excel</a>
+<div class="mb-3">
+    <a href="{% url 'transaction_export_csv' %}?{{ request.GET.urlencode }}" class="btn btn-outline-primary btn-sm me-2">
+        <i class="bi bi-download"></i> Download CSV
+    </a>
+    <a href="{% url 'transaction_export_excel' %}?{{ request.GET.urlencode }}" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-file-earmark-excel"></i> Download Excel
+    </a>
 </div>
 
 <table>

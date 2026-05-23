@@ -1,5 +1,5 @@
 /* ============================================================
-   TS Money — Brand & UI Stylesheet
+   TS Money - Brand & UI Stylesheet
    Colours match the TS Money logo palette.
    ============================================================ */
 
@@ -94,20 +94,21 @@ body {
 
 /* ---- Site Banner ---- */
 .site-banner {
+  background-color: var(--ts-light-bg);
   display: flex;
+  justify-content: center;
   align-items: center;
-  background: linear-gradient(to right, var(--ts-light-bg) 0%, var(--ts-dark) 100%);
   border-bottom: 2px solid var(--ts-border);
-  height: 90px;
   overflow: hidden;
-  padding: 0;
+  height: 90px;
 }
 
-.banner-logo {
-  height: 80px;
+.site-banner img {
+  height: 90px;
   width: auto;
+  max-width: 100%;
+  object-fit: contain;
   display: block;
-  flex-shrink: 0;
 }
 
 /* ---- Main content area ---- */
@@ -340,6 +341,6 @@ footer a:hover { color: var(--ts-white); }
   .content-wrapper { padding: 1rem; }
   .stat-value { font-size: 1.8rem; }
   .site-banner { height: 60px; }
-  .banner-logo { height: 52px; }
+  .site-banner img { height: 60px; }
   .page-header h1 { font-size: 1.3rem; }
 }

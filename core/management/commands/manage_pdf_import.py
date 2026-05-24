@@ -79,12 +79,21 @@ class Command(BaseCommand):
                 try:
                     account = Account.objects.get(account_id=account_number)
                 except Account.DoesNotExist:
-                    account = None
+                    # Auto-create account if not found
+                    account = Account.objects.create(
+                        account_id=account_number,
+                        name=f'Auto-created from PDF: {account_number}',
+                        broker='RBC',
+                    )
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f'Auto-created account: {account_number}'
+                        )
+                    )
 
             if account is None:
-                self.stderr.write(self.style.WARNING(
-                    f'No account found for account_number="{account_number}". '
-                    f'Please create the account first or update account_id.'
+                self.stderr.write(self.style.ERROR(
+                    f'No account number found in PDF. Skipping {pdf_file.name}.'
                 ))
                 continue
 

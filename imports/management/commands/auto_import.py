@@ -11,6 +11,7 @@ from typing import Any, List, Dict
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
@@ -56,7 +57,7 @@ class Command(BaseCommand):
         """Atomic copy-then-delete to dest_dir, appending a timestamp."""
         os.makedirs(dest_dir, exist_ok=True)
         name, ext = os.path.splitext(os.path.basename(src))
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
         dest_path = os.path.join(dest_dir, f"{name}_{timestamp}{ext}")
         shutil.copy2(src, dest_path)
         os.remove(src)
@@ -131,7 +132,7 @@ class Command(BaseCommand):
                 with transaction.atomic():
                     statement = BrokerStatement.objects.create(
                         source=broker,
-                        file_date=datetime.now().date(),
+                        file_date=timezone.now().date(),
                         raw_filename=filename,
                     )
 
@@ -292,7 +293,7 @@ class Command(BaseCommand):
                             # Create statement
                             statement = BrokerStatement.objects.create(
                                 source='RBC',
-                                file_date=datetime.now().date(),
+                                file_date=timezone.now().date(),
                                 raw_filename=filename,
                             )
 

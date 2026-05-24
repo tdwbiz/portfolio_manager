@@ -114,6 +114,18 @@ class Command(BaseCommand):
                     )
                 )
                 duplicates_skipped += 1
+                # Move duplicate file to processed folder
+                if not dry_run and inbox_dir:
+                    processed_dir = str(getattr(settings, 'IMPORT_PROCESSED_DIR', settings.BASE_DIR / 'processed'))
+                    os.makedirs(processed_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    name, ext = os.path.splitext(pdf_file.name)
+                    dest_path = os.path.join(processed_dir, f"{name}_{timestamp}{ext}")
+                    try:
+                        shutil.copy2(str(pdf_file), dest_path)
+                        os.remove(str(pdf_file))
+                    except Exception as move_err:
+                        self.stderr.write(self.style.ERROR(f'Failed to move file: {move_err}'))
                 continue
 
             if dry_run:

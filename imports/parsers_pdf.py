@@ -486,7 +486,8 @@ def parse_rbc_pdf(file_path: str) -> dict:
     account_number = ''
     account_match = ACCOUNT_NUMBER_PATTERN.search(full_text)
     if account_match:
-        account_number = account_match.group(1)
+        # Strip non-numeric characters (e.g., hyphens from "900-00008-1-1" -> "9000000811")
+        account_number = re.sub(r'\D', '', account_match.group(1))
 
     fx_rate = Decimal('1.000000')
     fx_match = FX_RATE_PATTERN.search(full_text)

@@ -17,13 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 def _poll_once(inbox_dir: str) -> None:
-    """Check inbox for CSVs and run auto_import if any are found."""
+    """Check inbox for CSVs and/or PDFs and run imports if any are found."""
     if not os.path.isdir(inbox_dir):
         return
     csv_files = [f for f in os.listdir(inbox_dir) if f.lower().endswith('.csv')]
+    pdf_files = [f for f in os.listdir(inbox_dir) if f.lower().endswith('.pdf')]
     if csv_files:
-        logger.info(f"watcher: found {len(csv_files)} file(s) in {inbox_dir} — running auto_import")
+        logger.info(f"watcher: found {len(csv_files)} CSV file(s) in {inbox_dir} — running auto_import")
         call_command('auto_import', verbosity=0)
+    if pdf_files:
+        logger.info(f"watcher: found {len(pdf_files)} PDF file(s) in {inbox_dir} — running pdf import")
+        call_command('manage_pdf_import', inbox_dir=inbox_dir, verbosity=0)
 
 
 def run_watcher_loop(interval: int, inbox_dir: str) -> None:

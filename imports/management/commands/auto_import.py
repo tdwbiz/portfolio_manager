@@ -1,4 +1,4 @@
-"""Django management command to auto-import broker CSVs from the inbox folder."""
+"""Django management command to auto-import broker files (CSVs and PDFs) from the inbox folder."""
 
 import hashlib
 import logging
@@ -14,6 +14,7 @@ from django.db import transaction
 
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
+from imports.parsers_pdf import parse_rbc_pdf
 from imports.rejection_log import rejection_from_trade, write_rejection_log
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,9 @@ class Command(BaseCommand):
             return
 
         csv_files = sorted(f for f in os.listdir(inbox_dir) if f.lower().endswith('.csv'))
-        if not csv_files:
-            self.stdout.write("No CSV files found in inbox.")
+        pdf_files = sorted(f for f in os.listdir(inbox_dir) if f.lower().endswith('.pdf'))
+        if not csv_files and not pdf_files:
+            self.stdout.write("No CSV or PDF files found in inbox.")
             return
 
         total_imported = total_skipped = total_files = 0
@@ -236,6 +238,158 @@ class Command(BaseCommand):
 
                 logger.error(f"auto_import: error processing {filename}: {exc}")
                 self.stdout.write(self.style.ERROR(f"  {filename}: ERROR — {exc}"))
+
+        # --- PDF Processing ---
+        if pdf_files:
+            self.stdout.write(f"\nProcessing {len(pdf_files)} PDF file(s)...")
+            for filename in pdf_files:
+                file_path = os.path.join(inbox_dir, filename)
+                total_files += 1
+                try:
+                    # Hash check
+                    with open(file_path, 'rb') as _fh:
+                        content_hash = hashlib.sha256(_fh.read()).hexdigest()
+                    prior = FileImportLog.objects.filter(content_hash=content_hash).first()
+                    if prior and not dry_run:
+                        self.stdout.write(
+                            f"  Skipping {filename}: identical content already imported as {prior.filename}"
+                        )
+                        logger.info(f"auto_import: skipping {filename} — duplicate of {prior.filename}")
+                        if not dry_run:
+                            self._move_file(file_path, processed_dir)
+                        continue
+
+                    # Parse PDF
+                    self.stdout.write(f"  Parsing: {filename}")
+                    parsed = parse_rbc_pdf(file_path)
+
+                    if dry_run:
+                        self.stdout.write(
+                            f"  [DRY RUN] {filename}: {parsed['statement_count']} statement(s), "
+                            f"{parsed['transaction_count']} transactions, "
+                            f"{parsed['balance_count']} balances"
+                        )
+                        continue
+
+                    # Import PDF data
+                    statements_created = 0
+                    transactions_imported = 0
+                    balances_recorded = 0
+                    duplicates_skipped = 0
+
+                    for stmt_data in parsed['statements']:
+                        with transaction.atomic():
+                            # Create account
+                            account_id = stmt_data.get('account_number', '').replace('-', '').upper()
+                            if account_id:
+                                account, _ = Account.objects.get_or_create(
+                                    account_id=account_id,
+                                    defaults={'name': account_id, 'broker': 'RBC'},
+                                )
+                            else:
+                                account = None
+
+                            # Create statement
+                            statement = BrokerStatement.objects.create(
+                                source='RBC',
+                                file_date=datetime.now().date(),
+                                raw_filename=filename,
+                            )
+
+                            # Import transactions
+                            for tx_data in stmt_data.get('transactions', []):
+                                tx_hash = compute_tx_hash(
+                                    'RBC',
+                                    account.account_id if account else '',
+                                    tx_data['date'],
+                                    tx_data['symbol'],
+                                    tx_data['type'],
+                                    tx_data['quantity'],
+                                    tx_data['price'],
+                                    tx_data['amount'],
+                                    tx_data.get('currency', 'CAD'),
+                                )
+                                if Transaction.objects.filter(tx_hash=tx_hash).exists():
+                                    duplicates_skipped += 1
+                                    continue
+
+                                Transaction.objects.create(
+                                    statement=statement,
+                                    account=account,
+                                    date=tx_data['date'],
+                                    symbol=tx_data['symbol'],
+                                    type=tx_data['type'],
+                                    quantity=tx_data['quantity'],
+                                    price=tx_data['price'],
+                                    commission=tx_data.get('commission', Decimal('0.00')),
+                                    amount=tx_data['amount'],
+                                    currency=tx_data.get('currency', 'CAD'),
+                                    exchange_rate_cad=tx_data.get('exchange_rate_cad', Decimal('1.000000')),
+                                    amount_cad=tx_data.get('amount_cad', tx_data['amount']),
+                                    notes=tx_data.get('notes', ''),
+                                    tx_hash=tx_hash,
+                                )
+                                transactions_imported += 1
+
+                            if transactions_imported > 0:
+                                statements_created += 1
+
+                    # Record balances
+                    for bal_data in parsed.get('balances', []):
+                        with transaction.atomic():
+                            balance_hash = hashlib.sha256(
+                                f"{filename}:{bal_data['date']}:{bal_data['asset_class']}:{bal_data['amount']}".encode()
+                            ).hexdigest()
+                            if not FileImportLog.objects.filter(content_hash=balance_hash).exists():
+                                FileImportLog.objects.create(
+                                    filename=f"{filename}_balance_{bal_data['date']}",
+                                    broker='RBC',
+                                    records_imported=1,
+                                    records_skipped=0,
+                                    status='success',
+                                    content_hash=balance_hash,
+                                )
+                                balances_recorded += 1
+
+                    status = 'success' if statements_created > 0 else 'partial'
+                    FileImportLog.objects.create(
+                        filename=filename,
+                        broker='RBC',
+                        records_imported=transactions_imported,
+                        records_skipped=duplicates_skipped,
+                        status=status,
+                        content_hash=content_hash,
+                    )
+
+                    if not dry_run:
+                        self._move_file(file_path, processed_dir)
+
+                    total_imported += transactions_imported
+                    total_skipped += duplicates_skipped
+
+                    self.stdout.write(
+                        f"  {filename}: {statements_created} statements, "
+                        f"{transactions_imported} transactions, "
+                        f"{balances_recorded} balances, {duplicates_skipped} skipped"
+                    )
+                    logger.info(
+                        f"auto_import: {filename} (PDF) - "
+                        f"{transactions_imported} imported, {duplicates_skipped} skipped"
+                    )
+
+                except Exception as exc:
+                    FileImportLog.objects.create(
+                        filename=filename,
+                        broker='RBC',
+                        status='error',
+                        error_message=str(exc),
+                    )
+                    try:
+                        self._move_file(file_path, error_dir)
+                    except Exception as move_err:
+                        logger.error(f"auto_import: failed to move error file {filename}: {move_err}")
+                    logger.error(f"auto_import: error processing {filename}: {exc}")
+                    self.stdout.write(self.style.ERROR(f"  {filename}: ERROR — {exc}"))
 
         if not dry_run:
             self.stdout.write(self.style.SUCCESS(

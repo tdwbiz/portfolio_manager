@@ -14,7 +14,13 @@ class Command(BaseCommand):
     help = 'Import RBC PDF statements from a directory or single file.'
 
     def add_arguments(self, parser):
-        parser.add_argument('path', type=str, help='Path to PDF file or directory.')
+        parser.add_argument('path', nargs='?', type=str, help='Path to PDF file or directory.')
+        parser.add_argument(
+            '--inbox-dir',
+            type=str,
+            default=None,
+            help='Path to inbox directory (overrides positional argument).',
+        )
         parser.add_argument(
             '--dry-run',
             action='store_true',
@@ -22,7 +28,9 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        target_path = Path(options['path'])
+        # Use inbox_dir if provided, otherwise fall back to positional path
+        inbox_dir = options['inbox_dir']
+        target_path = Path(inbox_dir) if inbox_dir else Path(options['path'])
         dry_run = options['dry_run']
 
         if dry_run:

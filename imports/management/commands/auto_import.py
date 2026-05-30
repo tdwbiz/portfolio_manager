@@ -14,8 +14,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
+from core.models import RbcAnnualReport, RbcAnnualBalances
+from core.models import RbcAnnualPerformance, RbcAnnualPerformanceReturn
+from core.models import RbcAnnualCharges, RbcAnnualCompensation
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 from imports.parsers_pdf import parse_rbc_pdf
+from imports.parsers_annual import parse_rbc_annual_report
 from imports.rejection_log import rejection_from_trade, write_rejection_log
 
 logger = logging.getLogger(__name__)
@@ -260,123 +264,273 @@ class Command(BaseCommand):
                             self._move_file(file_path, processed_dir)
                         continue
 
-                    # Parse PDF
-                    self.stdout.write(f"  Parsing: {filename}")
-                    parsed = parse_rbc_pdf(file_path)
+                    # Detect PDF type: Annual Report vs Statement
+                    is_annual = filename.lower().startswith('annual report')
 
-                    if dry_run:
-                        self.stdout.write(
-                            f"  [DRY RUN] {filename}: {parsed['statement_count']} statement(s), "
-                            f"{parsed['transaction_count']} transactions, "
-                            f"{parsed['balance_count']} balances"
-                        )
-                        continue
+                    if is_annual:
+                        self.stdout.write(f"  Detected Annual Report: {filename}")
+                        parsed = parse_rbc_annual_report(file_path)
 
-                    # Import PDF data
-                    statements_created = 0
-                    transactions_imported = 0
-                    balances_recorded = 0
-                    duplicates_skipped = 0
-
-                    for stmt_data in parsed['statements']:
-                        with transaction.atomic():
-                            # Create account
-                            account_id = stmt_data.get('account_number', '').replace('-', '').upper()
-                            if account_id:
-                                account, _ = Account.objects.get_or_create(
-                                    account_id=account_id,
-                                    defaults={'name': account_id, 'broker': 'RBC'},
-                                )
-                            else:
-                                account = None
-
-                            # Create statement
-                            statement = BrokerStatement.objects.create(
-                                source='RBC',
-                                file_date=timezone.now().date(),
-                                raw_filename=filename,
+                        if dry_run:
+                            self.stdout.write(
+                                f"  [DRY RUN] {filename}: report_year={parsed.get('report_year')}, "
+                                f"account={parsed.get('account_number')}, "
+                                f"balances={len(parsed.get('balances', []))}, "
+                                f"performance={len(parsed.get('performance', []))}, "
+                                f"charges={len(parsed.get('charges', []))}, "
+                                f"compensation={len(parsed.get('compensation', []))}"
                             )
+                            continue
 
-                            # Import transactions
-                            for tx_data in stmt_data.get('transactions', []):
-                                tx_hash = compute_tx_hash(
-                                    'RBC',
-                                    account.account_id if account else '',
-                                    tx_data['date'],
-                                    tx_data['symbol'],
-                                    tx_data['type'],
-                                    tx_data['quantity'],
-                                    tx_data['price'],
-                                    tx_data['amount'],
-                                    tx_data.get('currency', 'CAD'),
-                                )
-                                if Transaction.objects.filter(tx_hash=tx_hash).exists():
-                                    duplicates_skipped += 1
-                                    continue
+                        # Import Annual Report data
+                        annual_statements_created = 0
+                        annual_balances_recorded = 0
+                        annual_performance_recorded = 0
+                        annual_charges_recorded = 0
+                        annual_compensation_recorded = 0
 
-                                Transaction.objects.create(
-                                    statement=statement,
-                                    account=account,
-                                    date=tx_data['date'],
-                                    symbol=tx_data['symbol'],
-                                    type=tx_data['type'],
-                                    quantity=tx_data['quantity'],
-                                    price=tx_data['price'],
-                                    commission=tx_data.get('commission', Decimal('0.00')),
-                                    amount=tx_data['amount'],
-                                    currency=tx_data.get('currency', 'CAD'),
-                                    exchange_rate_cad=tx_data.get('exchange_rate_cad', Decimal('1.000000')),
-                                    amount_cad=tx_data.get('amount_cad', tx_data['amount']),
-                                    notes=tx_data.get('notes', ''),
-                                    tx_hash=tx_hash,
-                                )
-                                transactions_imported += 1
+                        # Look up or create account
+                        account_number = parsed.get('account_number', '')
+                        account_type_code = parsed.get('account_type_code', '')
+                        account_name = parsed.get('account_name', '')
 
-                            if transactions_imported > 0:
-                                statements_created += 1
+                        if account_number:
+                            try:
+                                account = Account.objects.get(account_id=account_number)
+                            except Account.DoesNotExist:
+                                partial = account_number.replace('-', '')
+                                account = None
+                                for acct in Account.objects.filter(broker='RBC'):
+                                    if partial in acct.account_id.replace('-', ''):
+                                        account = acct
+                                        break
+                                if account is None:
+                                    account = Account.objects.create(
+                                        account_id=account_number,
+                                        name=account_name or f'RBC {account_type_code} {account_number}',
+                                        broker='RBC',
+                                    )
+                        else:
+                            account = None
 
-                    # Record balances
-                    for bal_data in parsed.get('balances', []):
+                        if account is None:
+                            raise ValueError(f'Could not find or create account for annual report: {filename}')
+
                         with transaction.atomic():
-                            balance_hash = hashlib.sha256(
-                                f"{filename}:{bal_data['date']}:{bal_data['asset_class']}:{bal_data['amount']}".encode()
-                            ).hexdigest()
-                            if not FileImportLog.objects.filter(content_hash=balance_hash).exists():
-                                FileImportLog.objects.create(
-                                    filename=f"{filename}_balance_{bal_data['date']}",
-                                    broker='RBC',
-                                    records_imported=1,
-                                    records_skipped=0,
-                                    status='success',
-                                    content_hash=balance_hash,
+                            # Create RbcAnnualReport
+                            report = RbcAnnualReport.objects.create(
+                                account=account,
+                                file_name=filename,
+                                report_year=parsed.get('report_year'),
+                                account_number=account_number,
+                                account_type_code=account_type_code,
+                                account_name=account_name,
+                            )
+                            annual_statements_created = 1
+
+                            # Import balances
+                            for bal in parsed.get('balances', []):
+                                RbcAnnualBalances.objects.create(
+                                    rbc_annual_report=report,
+                                    currency=bal.get('currency', 'CAD'),
+                                    beginning_value=bal.get('beginning_value', Decimal('0.00')),
+                                    contributions=bal.get('contributions', Decimal('0.00')),
+                                    withdrawals=bal.get('withdrawals', Decimal('0.00')),
+                                    net_return=bal.get('net_return', Decimal('0.00')),
+                                    ending_value=bal.get('ending_value', Decimal('0.00')),
                                 )
-                                balances_recorded += 1
+                                annual_balances_recorded += 1
 
-                    status = 'success' if statements_created > 0 else 'partial'
-                    FileImportLog.objects.create(
-                        filename=filename,
-                        broker='RBC',
-                        records_imported=transactions_imported,
-                        records_skipped=duplicates_skipped,
-                        status=status,
-                        content_hash=content_hash,
-                    )
+                            # Import performance returns
+                            for perf in parsed.get('performance', []):
+                                perf_return = RbcAnnualPerformanceReturn.objects.create(
+                                    rbc_annual_report=report,
+                                    period=perf.get('period', ''),
+                                    portfolio_return=perf.get('portfolio_return', Decimal('0.00')),
+                                    benchmark_return=perf.get('benchmark_return', Decimal('0.00')),
+                                )
+                                RbcAnnualPerformance.objects.create(
+                                    rbc_annual_report=report,
+                                    as_at_date=perf.get('as_at_date'),
+                                    one_year=perf.get('one_year', Decimal('0.00')),
+                                    three_year=perf.get('three_year', Decimal('0.00')),
+                                    five_year=perf.get('five_year', Decimal('0.00')),
+                                    ten_year=perf.get('ten_year', Decimal('0.00')),
+                                    since_inception=perf.get('since_inception', Decimal('0.00')),
+                                    performance_return=perf_return,
+                                )
+                                annual_performance_recorded += 1
 
-                    if not dry_run:
-                        self._move_file(file_path, processed_dir)
+                            # Import charges
+                            for charge in parsed.get('charges', []):
+                                RbcAnnualCharges.objects.create(
+                                    rbc_annual_report=report,
+                                    account_type=charge.get('account_type', ''),
+                                    management_fee=charge.get('management_fee', Decimal('0.00')),
+                                    other_fees=charge.get('other_fees', Decimal('0.00')),
+                                    total_charges=charge.get('total_charges', Decimal('0.00')),
+                                )
+                                annual_charges_recorded += 1
 
-                    total_imported += transactions_imported
-                    total_skipped += duplicates_skipped
+                            # Import compensation
+                            for comp in parsed.get('compensation', []):
+                                RbcAnnualCompensation.objects.create(
+                                    rbc_annual_report=report,
+                                    role=comp.get('role', ''),
+                                    base_salary=comp.get('base_salary', Decimal('0.00')),
+                                    bonus=comp.get('bonus', Decimal('0.00')),
+                                    long_term_incentive=comp.get('long_term_incentive', Decimal('0.00')),
+                                    total_compensation=comp.get('total_compensation', Decimal('0.00')),
+                                )
+                                annual_compensation_recorded += 1
 
-                    self.stdout.write(
-                        f"  {filename}: {statements_created} statements, "
-                        f"{transactions_imported} transactions, "
-                        f"{balances_recorded} balances, {duplicates_skipped} skipped"
-                    )
-                    logger.info(
-                        f"auto_import: {filename} (PDF) - "
-                        f"{transactions_imported} imported, {duplicates_skipped} skipped"
-                    )
+                        status = 'success' if annual_statements_created > 0 else 'partial'
+                        FileImportLog.objects.create(
+                            filename=filename,
+                            broker='RBC',
+                            records_imported=(annual_balances_recorded + annual_performance_recorded +
+                                              annual_charges_recorded + annual_compensation_recorded),
+                            records_skipped=0,
+                            status=status,
+                            content_hash=content_hash,
+                        )
+
+                        if not dry_run:
+                            self._move_file(file_path, processed_dir)
+
+                        total_imported += (annual_balances_recorded + annual_performance_recorded +
+                                           annual_charges_recorded + annual_compensation_recorded)
+
+                        self.stdout.write(
+                            f"  {filename}: {annual_statements_created} report, "
+                            f"{annual_balances_recorded} balances, "
+                            f"{annual_performance_recorded} performance, "
+                            f"{annual_charges_recorded} charges, "
+                            f"{annual_compensation_recorded} compensation"
+                        )
+                        logger.info(
+                            f"auto_import: {filename} (Annual Report) - "
+                            f"{annual_balances_recorded} balances, {annual_performance_recorded} performance, "
+                            f"{annual_charges_recorded} charges, {annual_compensation_recorded} compensation"
+                        )
+                    else:
+                        # Standard RBC PDF statement
+                        self.stdout.write(f"  Parsing: {filename}")
+                        parsed = parse_rbc_pdf(file_path)
+
+                        if dry_run:
+                            self.stdout.write(
+                                f"  [DRY RUN] {filename}: {parsed['statement_count']} statement(s), "
+                                f"{parsed['transaction_count']} transactions, "
+                                f"{parsed['balance_count']} balances"
+                            )
+                            continue
+
+                        # Import PDF data
+                        statements_created = 0
+                        transactions_imported = 0
+                        balances_recorded = 0
+                        duplicates_skipped = 0
+
+                        for stmt_data in parsed['statements']:
+                            with transaction.atomic():
+                                # Create account
+                                account_id = stmt_data.get('account_number', '').replace('-', '').upper()
+                                if account_id:
+                                    account, _ = Account.objects.get_or_create(
+                                        account_id=account_id,
+                                        defaults={'name': account_id, 'broker': 'RBC'},
+                                    )
+                                else:
+                                    account = None
+
+                                # Create statement
+                                statement = BrokerStatement.objects.create(
+                                    source='RBC',
+                                    file_date=timezone.now().date(),
+                                    raw_filename=filename,
+                                )
+
+                                # Import transactions
+                                for tx_data in stmt_data.get('transactions', []):
+                                    tx_hash = compute_tx_hash(
+                                        'RBC',
+                                        account.account_id if account else '',
+                                        tx_data['date'],
+                                        tx_data['symbol'],
+                                        tx_data['type'],
+                                        tx_data['quantity'],
+                                        tx_data['price'],
+                                        tx_data['amount'],
+                                        tx_data.get('currency', 'CAD'),
+                                    )
+                                    if Transaction.objects.filter(tx_hash=tx_hash).exists():
+                                        duplicates_skipped += 1
+                                        continue
+
+                                    Transaction.objects.create(
+                                        statement=statement,
+                                        account=account,
+                                        date=tx_data['date'],
+                                        symbol=tx_data['symbol'],
+                                        type=tx_data['type'],
+                                        quantity=tx_data['quantity'],
+                                        price=tx_data['price'],
+                                        commission=tx_data.get('commission', Decimal('0.00')),
+                                        amount=tx_data['amount'],
+                                        currency=tx_data.get('currency', 'CAD'),
+                                        exchange_rate_cad=tx_data.get('exchange_rate_cad', Decimal('1.000000')),
+                                        amount_cad=tx_data.get('amount_cad', tx_data['amount']),
+                                        notes=tx_data.get('notes', ''),
+                                        tx_hash=tx_hash,
+                                    )
+                                    transactions_imported += 1
+
+                                if transactions_imported > 0:
+                                    statements_created += 1
+
+                        # Record balances
+                        for bal_data in parsed.get('balances', []):
+                            with transaction.atomic():
+                                balance_hash = hashlib.sha256(
+                                    f"{filename}:{bal_data['date']}:{bal_data['asset_class']}:{bal_data['amount']}".encode()
+                                ).hexdigest()
+                                if not FileImportLog.objects.filter(content_hash=balance_hash).exists():
+                                    FileImportLog.objects.create(
+                                        filename=f"{filename}_balance_{bal_data['date']}",
+                                        broker='RBC',
+                                        records_imported=1,
+                                        records_skipped=0,
+                                        status='success',
+                                        content_hash=balance_hash,
+                                    )
+                                    balances_recorded += 1
+
+                        status = 'success' if statements_created > 0 else 'partial'
+                        FileImportLog.objects.create(
+                            filename=filename,
+                            broker='RBC',
+                            records_imported=transactions_imported,
+                            records_skipped=duplicates_skipped,
+                            status=status,
+                            content_hash=content_hash,
+                        )
+
+                        if not dry_run:
+                            self._move_file(file_path, processed_dir)
+
+                        total_imported += transactions_imported
+                        total_skipped += duplicates_skipped
+
+                        self.stdout.write(
+                            f"  {filename}: {statements_created} statements, "
+                            f"{transactions_imported} transactions, "
+                            f"{balances_recorded} balances, {duplicates_skipped} skipped"
+                        )
+                        logger.info(
+                            f"auto_import: {filename} (PDF) - "
+                            f"{transactions_imported} imported, {duplicates_skipped} skipped"
+                        )
 
                 except Exception as exc:
                     FileImportLog.objects.create(

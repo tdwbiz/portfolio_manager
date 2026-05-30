@@ -178,6 +178,9 @@ IMPORT_PROCESSED_DIR = Path(_processed_raw) if _processed_raw else BASE_DIR / 'p
 _logs_raw = os.getenv('IMPORT_LOGS_DIR', '').strip() or _cfg.get('import', 'logs_dir', fallback='').strip()
 IMPORT_LOGS_DIR = Path(_logs_raw) if _logs_raw else BASE_DIR / 'logs'
 
+_json_raw = os.getenv('IMPORT_JSON_DIR', '').strip() or _cfg.get('import', 'json_dir', fallback='').strip()
+IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / 'processed' / 'json_logs'
+
 # UI configuration via environment variables
 IMPORT_INBOX_POLL_INTERVAL = int(os.getenv('IMPORT_INBOX_POLL_INTERVAL', _cfg.get('import', 'poll_interval', fallback='300')))
 TRANSACTIONS_PAGE_SIZE = int(os.getenv('TRANSACTIONS_PAGE_SIZE', _cfg.get('ui', 'transactions_page_size', fallback='50')))
@@ -226,10 +229,19 @@ LOGGING = {
             'maxBytes': LOG_FILE_MAX_BYTES,
             'backupCount': LOG_FILE_BACKUP_COUNT,
             'formatter': 'verbose',
+            'encoding': 'utf-8',
+            'mode': 'a',
         },
     },
     'root': {
         'handlers': ['console', 'file'],
-        'level': 'DEBUG',
+        'level': 'INFO',
+    },
+    # Suppress noisy third-party debug logs
+    'loggers': {
+        'pdfminer': {'level': 'WARNING'},
+        'pdfplumber': {'level': 'WARNING'},
+        'mssql': {'level': 'WARNING'},
+        'django': {'level': 'WARNING'},
     },
 }

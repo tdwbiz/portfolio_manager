@@ -1,4 +1,4 @@
-"""RBC PDF statement parser using PyMuPDF text extraction + regex."""
+"""RBC PDF statement parser using pdfplumber text extraction + regex."""
 
 import logging
 import os
@@ -6,8 +6,6 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
-
-import fitz
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +64,38 @@ def _parse_rbc_date(month_str: str, year: int) -> date:
     return date(year, month, day)
 
 
+def _extract_date_from_filename(file_name: str) -> date | None:
+    """Extract statement date from RBC PDF filename.
+
+    Handles multiple filename formats:
+    - YYYY-MM-DD (e.g., 'Statement-5362 2025-09-30.pdf')
+    - YYYYMonDD (e.g., '90000004-2014Apr30-2014Apr30.pdf')
+    """
+    if not file_name:
+        return None
+
+    # Try YYYY-MM-DD format first
+    fn_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', file_name)
+    if fn_match:
+        try:
+            return date(int(fn_match.group(1)), int(fn_match.group(2)), int(fn_match.group(3)))
+        except ValueError:
+            pass
+
+    # Try YYYYMonDD format (e.g., 2014Apr30, 2019Dec31)
+    fn_match = re.search(r'(\d{4})(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEPT|SEP|OCT|NOV|DEC)(\d{1,2})', file_name, re.IGNORECASE)
+    if fn_match:
+        try:
+            year = int(fn_match.group(1))
+            month_str = fn_match.group(2)
+            day = int(fn_match.group(3))
+            return _parse_rbc_date(f"{month_str} {day}", year)
+        except (ValueError, IndexError):
+            pass
+
+    return None
+
+
 def _clean_currency(value_str: str) -> Decimal:
     """Convert a dollar string like '$1,036.34' to Decimal."""
     if not value_str or value_str.strip() == '':
@@ -91,6 +121,101 @@ def _clean_pct(value_str: str) -> Decimal:
 
 
 # ---------------------------------------------------------------------------
+# Currency section splitting
+# ---------------------------------------------------------------------------
+
+# Comprehensive patterns for CAD statement headers
+# RBC PDFs have multiple formats:
+#   - "RRSP Statement (CDN$) 2026"
+#   - "TFSA Statement (CDN$) 2026"
+#   - "LIF Statement (CDN$) 2026"
+#   - "FHSA Statement (CDN$) 2026"
+#   - "Cdn. Dollar Statement 2022"
+#   - "Your Canadian dollar account" (Annual Investment Performance Report format)
+CAD_STATEMENT_PATTERNS = [
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(CDN\$\)', re.IGNORECASE),
+    re.compile(r'Cdn\.\s*Dollar\s+Statement', re.IGNORECASE),
+    re.compile(r'Your\s+Canadian\s+dollar\s+account', re.IGNORECASE),
+]
+
+# Comprehensive patterns for USD statement headers
+#   - "RRSP Statement (U.S.$) 2026"
+#   - "TFSA Statement (U.S.$) 2026"
+#   - "LIF Statement (U.S.$) 2026"
+#   - "FHSA Statement (U.S.$) 2026"
+#   - "U.S. Dollar Statement"
+#   - "Your U.S. dollar account" (Annual Investment Performance Report format)
+USD_STATEMENT_PATTERNS = [
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(U\.S\.\$\)', re.IGNORECASE),
+    re.compile(r'U\.S\.\s*Dollar\s+Statement', re.IGNORECASE),
+    re.compile(r'Your\s+U\.S\.\s*dollar\s+account', re.IGNORECASE),
+    re.compile(r'Your\s+US\s+dollar\s+account', re.IGNORECASE),
+]
+
+def _is_cad_header(line: str) -> bool:
+    """Check if a line is a CAD statement header."""
+    return any(p.search(line) for p in CAD_STATEMENT_PATTERNS)
+
+def _is_usd_header(line: str) -> bool:
+    """Check if a line is a USD statement header."""
+    return any(p.search(line) for p in USD_STATEMENT_PATTERNS)
+
+
+def _split_pdf_into_sections(full_text: str) -> list[tuple[str, str]]:
+    """Split PDF text into CAD and USD statement sections.
+
+    RBC PDFs often contain two separate statements concatenated:
+    - First statement: CAD (pages 1-N)
+    - Second statement: USD (pages N+1-M)
+
+    RBC PDFs have multiple header formats:
+      CAD: "RRSP Statement (CDN$) 2026", "Cdn. Dollar Statement 2022",
+           "Your Canadian dollar account"
+      USD: "RRSP Statement (U.S.$) 2026", "U.S. Dollar Statement",
+           "Your U.S. dollar account"
+
+    This function splits the text at currency-changing headers,
+    returning a list of (currency, text) tuples.
+
+    Returns:
+        List of (currency, text) tuples. Always includes at least
+        one CAD section. If USD sections are found, they're returned
+        as additional tuples.
+    """
+    lines = full_text.split('\n')
+    sections = []
+    current_currency = 'CAD'
+    current_lines = []
+
+    for i, line in enumerate(lines):
+        # Check if this line starts a new currency section
+        if _is_usd_header(line) and current_currency == 'CAD':
+            # Switching from CAD to USD - save CAD section
+            if current_lines:
+                sections.append(('CAD', '\n'.join(current_lines)))
+            current_currency = 'USD'
+            current_lines = [line]
+        elif _is_cad_header(line) and current_currency == 'USD':
+            # Switching from USD to CAD (rare but possible) - save USD section
+            if current_lines:
+                sections.append(('USD', '\n'.join(current_lines)))
+            current_currency = 'CAD'
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+
+    # Add the last section
+    if current_lines:
+        sections.append((current_currency, '\n'.join(current_lines)))
+
+    # If no sections were found, return the whole text as CAD
+    if not sections:
+        return [('CAD', full_text)]
+
+    return sections
+
+
+# ---------------------------------------------------------------------------
 # Section parsers
 # ---------------------------------------------------------------------------
 
@@ -99,16 +224,25 @@ def _find_section(text: str, pattern: re.Pattern) -> tuple[int, int]:
 
     *start* is the line index where the header is found.
     *end* is the line index of the next header or end of text.
+    
+    For multi-page sections (like Account Activity that repeats on each page),
+    returns the range from the first header to the last occurrence.
     """
     lines = text.split('\n')
-    start_idx = None
-    for i, line in enumerate(lines):
-        if pattern.search(line):
-            start_idx = i
-            break
-    if start_idx is None:
+    
+    # Find all occurrences of the header
+    header_indices = [i for i, line in enumerate(lines) if pattern.search(line)]
+    if not header_indices:
         return -1, -1
 
+    start_idx = header_indices[0]
+    
+    # For sections that repeat across pages (like Account Activity),
+    # find the last occurrence and extend to the next different section
+    if len(header_indices) > 1:
+        # Use the last occurrence as start, then find what comes after
+        start_idx = header_indices[-1]
+    
     # Find the next section header or end
     end_idx = len(lines)
     all_headers = [
@@ -149,6 +283,10 @@ def _parse_asset_summary(text: str) -> list[dict[str, Any]]:
         )
         if match:
             asset_class = match.group(1).strip()
+            # Skip false positives: postal addresses (e.g., "200 Bay Street Other")
+            if re.search(r'\b\d+\s+[A-Z][a-z]+\s+(Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Way|Court|Ct|Place|Pl)\b', asset_class, re.IGNORECASE):
+                logger.debug("Skipping false positive asset summary line: %s", stripped)
+                continue
             market_value = _clean_currency('$' + match.group(2))
             percentage = _clean_pct(match.group(3) + '%')
             results.append({
@@ -279,18 +417,58 @@ def _parse_contribution_summary(text: str) -> dict[str, Any]:
     return result
 
 
-def _parse_account_activity(text: str) -> list[dict[str, Any]]:
-    """Parse the Account Activity table."""
-    start, end = _find_section(text, ACCOUNT_ACTIVITY_HEADER)
-    if start == -1:
+def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]:
+    """Parse the Account Activity table.
+
+    Handles both PyMuPDF (vertical field extraction) and pdfplumber
+    (horizontal row extraction) text formats.
+    
+    Activity types in RBC PDFs: BUY, SELL, SOLD, BOUGHT, DIVIDEND, DIVID,
+    INTEREST, TAX, WITHDRAW, TRANSFER. Sometimes the activity type is
+    omitted and appears on the continuation line.
+    
+    Note: Account Activity may span multiple pages with the header repeating.
+    We capture from the first header to the next non-Activity section header.
+    """
+    lines = text.split('\n')
+    
+    # Find the first Account Activity header
+    start_idx = None
+    for i, line in enumerate(lines):
+        if ACCOUNT_ACTIVITY_HEADER.search(line):
+            start_idx = i
+            break
+    if start_idx is None:
         return []
 
-    lines = text.split('\n')[start:end]
+    # Find the end: next section header that is NOT Account Activity
+    # (Account Activity may repeat on multiple pages)
+    other_headers = [
+        ASSET_SUMMARY_HEADER, CASH_BALANCE_HEADER,
+        INCOME_SUMMARY_HEADER, CONTRIBUTION_HEADER,
+        ASSET_REVIEW_HEADER,
+    ]
+    end_idx = len(lines)
+    for j in range(start_idx + 1, len(lines)):
+        for hdr in other_headers:
+            if hdr.search(lines[j]):
+                end_idx = j
+                break
+        if end_idx != len(lines):
+            break
+
+    section_lines = lines[start_idx:end_idx]
     results = []
 
     # Month abbreviation pattern for date parsing
     MONTH_PAT = r'(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEPT|SEP|OCT|NOV|DEC)'
-    date_pat = re.compile(r'^(' + MONTH_PAT + r')[\.\s]+(\d{1,2})\s+(\w+)', re.IGNORECASE)
+    # Match date + optional activity type (BUY/SELL/SOLD/BOUGHT/DIVIDEND/DIVID/INTEREST/TAX/WITHDRAW/TRANSFER)
+    date_pat = re.compile(
+        r'^(' + MONTH_PAT + r')[\.\s]+(\d{1,2})\s+'
+        r'(BUY|SELL|SOLD|BOUGHT|DIVIDEND|DIVID|INTEREST|TAX|WITHDRAW|TRANSFER)?\s*'
+        r'(.*)',
+        re.IGNORECASE
+    )
 
     i = 0
     while i < len(lines):
@@ -302,7 +480,7 @@ def _parse_account_activity(text: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
-        # Match date + activity type
+        # Match date + optional activity type
         date_match = date_pat.match(line)
         if not date_match:
             i += 1
@@ -310,65 +488,108 @@ def _parse_account_activity(text: str) -> list[dict[str, Any]]:
 
         month_str = date_match.group(1)
         day_str = date_match.group(2)
-        activity_type = date_match.group(3).upper()
+        activity_type = (date_match.group(3) or '').upper()
+        rest = date_match.group(4).strip()
 
-        # Get the rest of the line after the activity type
-        rest = line[date_match.end():].strip()
+        # If no activity type on this line, check if it's a continuation-style transaction
+        # (e.g., "JAN. 23 VANGUARD FTSE CDN HIGH 0.17 272.76" - no activity type)
+        if not activity_type:
+            # Look ahead for activity type in continuation lines
+            for j in range(i + 1, min(i + 5, len(lines))):
+                cont = lines[j].strip().upper()
+                if 'DIVID' in cont or 'DIVIDEND' in cont:
+                    activity_type = 'DIVIDEND'
+                    break
+            
+            # If still no activity type, skip (likely a non-transaction line)
+            if not activity_type:
+                i += 1
+                continue
+            
+            # No rest of line - the description starts on the next line
+            rest = ''
 
-        # Find all $X.XX amounts with their positions
-        dollar_amounts = list(re.finditer(r'\$([\d,]+\.\d+)', rest))
-
-        # Parse by column positions based on header alignment
-        # Header: DATE        ACTIVITY    DESCRIPTION                                    PRICE/RATE    QUANTITY    DEBIT    CREDIT
-        # After activity type, we have: DESCRIPTION PRICE/RATE QUANTITY DEBIT CREDIT
-        # Strategy: Find the two rightmost dollar amounts - DEBIT is left of CREDIT
-        # If only one dollar amount, determine based on activity type:
-        #   BUY/INTEREST -> DEBIT, SELL/DIVIDEND -> CREDIT
-
-        # Extract numeric fields (price/rate and quantity) - numbers without $
-        # These appear before the dollar amounts
-        numeric_pat = re.compile(r'(\d+\.?\d*)')
-        
-        # Get everything before the first dollar amount
-        if dollar_amounts:
-            pre_dollar = rest[:dollar_amounts[0].start()].strip()
-            # Extract numeric fields from pre_dollar part
-            numerics = numeric_pat.findall(pre_dollar)
-            # First numeric is price/rate, second is quantity (based on column order: PRICE/RATE then QUANTITY)
-            price_str = numerics[0] if len(numerics) >= 1 else None
-            quantity_str = numerics[1] if len(numerics) >= 2 else None
-            # Description is everything before the first numeric
-            if numerics:
-                # Find position of first numeric in pre_dollar
-                first_num_match = numeric_pat.search(pre_dollar)
-                description = pre_dollar[:first_num_match.start()].strip() if first_num_match else pre_dollar.strip()
+        # Collect continuation lines that don't end with numbers
+        # (pure description continuations like "ETF UNIT CL A")
+        while i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            if next_line and not re.match(r'^[A-Z]{2,4}\.\s+\d{1,2}\s', next_line, re.IGNORECASE):
+                # Check if line ends with numbers (financial data or account info)
+                if re.search(r'\d[\d,]*\.?\d*\s*$', next_line):
+                    break  # Don't consume - might be financial data
+                i += 1
+                rest += ' ' + next_line
             else:
-                description = pre_dollar.strip()
-        else:
-            price_str = None
-            quantity_str = None
-            description = rest.strip()
+                break
 
-        # Assign debit/credit based on column positions
-        # DEBIT column comes before CREDIT column
-        if len(dollar_amounts) >= 2:
-            # Two amounts: first is DEBIT, second is CREDIT
-            debit_str = dollar_amounts[0].group(1)
-            credit_str = dollar_amounts[1].group(1)
-        elif len(dollar_amounts) == 1:
-            # One amount: determine based on activity type
-            amount_str = dollar_amounts[0].group(1)
-            if activity_type in ('BUY', 'INTEREST'):
-                debit_str = amount_str
-                credit_str = None
-            else:  # SELL, DIVIDEND
-                debit_str = None
-                credit_str = amount_str
-        else:
-            debit_str = None
-            credit_str = None
+        # Extract financial numbers from rest
+        tokens = rest.split()
 
-        year = 2025
+        # Separate plain numeric tokens (price/quantity) from dollar-sign tokens (debit/credit).
+        # RBC column order: PRICE/RATE, QUANTITY, DEBIT($) or CREDIT($)
+        plain_tokens = []   # no $ prefix: price/rate, quantity
+        dollar_tokens = []  # $ prefix: debit or credit column
+        first_token_idx = None
+        for idx, token in enumerate(tokens):
+            is_dollar = token.startswith('$')
+            clean = token.lstrip('$').replace(',', '').replace('-', '')
+            # Must be purely numeric (digits, dots) and more than 1 char
+            if re.match(r'^\d[\d,.]*$', clean) and len(clean) > 1:
+                # Exclude 2-digit numbers (days) and 4-digit years
+                if clean.isdigit():
+                    if len(clean) == 2:
+                        continue
+                    elif len(clean) == 4 and 2020 <= int(clean) <= 2030:
+                        continue
+                if first_token_idx is None:
+                    first_token_idx = idx
+                if is_dollar:
+                    dollar_tokens.append(clean)
+                else:
+                    plain_tokens.append(clean)
+
+        if not plain_tokens and not dollar_tokens:
+            i += 1
+            continue
+
+        # Description is everything before the first numeric token
+        description = ' '.join(tokens[:first_token_idx]).strip() if first_token_idx is not None else ''
+
+        # Map financial tokens to fields based on activity type
+        quantity_str = None
+        price_str = None
+        debit_str = None
+        credit_str = None
+
+        if activity_type in ('BUY', 'BOUGHT'):
+            # Columns: PRICE/RATE, QUANTITY, DEBIT($)
+            price_str = plain_tokens[0] if len(plain_tokens) >= 1 else None
+            quantity_str = plain_tokens[1] if len(plain_tokens) >= 2 else None
+            debit_str = dollar_tokens[0] if dollar_tokens else None
+
+        elif activity_type in ('SELL', 'SOLD'):
+            # Columns: PRICE/RATE, QUANTITY, CREDIT($)
+            price_str = plain_tokens[0] if len(plain_tokens) >= 1 else None
+            quantity_str = plain_tokens[1] if len(plain_tokens) >= 2 else None
+            credit_str = dollar_tokens[0] if dollar_tokens else None
+
+        elif activity_type in ('INTEREST', 'DIVIDEND', 'DIVID'):
+            # Columns: PRICE/RATE, QUANTITY, CREDIT($) — use last dollar token (the credit column)
+            price_str = plain_tokens[0] if len(plain_tokens) >= 1 else None
+            quantity_str = plain_tokens[1] if len(plain_tokens) >= 2 else None
+            credit_str = dollar_tokens[-1] if dollar_tokens else (plain_tokens[-1] if plain_tokens else None)
+
+        elif activity_type == 'TAX':
+            # Tax: single debit amount (withheld)
+            debit_str = dollar_tokens[0] if dollar_tokens else (plain_tokens[0] if plain_tokens else None)
+
+        elif activity_type == 'WITHDRAW':
+            # Withdraw: single credit amount
+            credit_str = dollar_tokens[0] if dollar_tokens else (plain_tokens[0] if plain_tokens else None)
+
+        elif activity_type == 'TRANSFER':
+            # Transfer: quantity only (no money changes account)
+            quantity_str = plain_tokens[0] if plain_tokens else None
 
         try:
             tx_date = _parse_rbc_date(f"{month_str} {day_str}", year)
@@ -376,15 +597,31 @@ def _parse_account_activity(text: str) -> list[dict[str, Any]]:
             i += 1
             continue
 
-        price = Decimal(price_str) if price_str else Decimal('0.00')
-        quantity = Decimal(quantity_str) if quantity_str else Decimal('0.00')
-        debit = _clean_currency('$' + debit_str) if debit_str else Decimal('0.00')
-        credit = _clean_currency('$' + credit_str) if credit_str else Decimal('0.00')
+        # Clean trailing dash from quantity (e.g., "100-" -> "100")
+        if quantity_str:
+            quantity_str = quantity_str.replace('-', '')
+        
+        # Validate and convert financial tokens
+        def safe_decimal(val, label=''):
+            if not val:
+                return None
+            try:
+                return Decimal(val.replace(',', ''))
+            except InvalidOperation:
+                logger.warning("Invalid %s value '%s' in %s %s", label, val, activity_type, description[:50])
+                return None
+        
+        price = safe_decimal(price_str, 'price')
+        quantity = safe_decimal(quantity_str, 'quantity')
+        debit = safe_decimal(debit_str, 'debit')
+        credit = safe_decimal(credit_str, 'credit')
 
+        # Symbol extraction disabled - current regex grabs random uppercase words.
+        # Will be reimplemented later using LLM to look up symbols from transaction data.
         symbol = ''
-        symbol_match = re.search(r'\b([A-Z]{2,6})\b', description)
-        if symbol_match:
-            symbol = symbol_match.group(1)
+
+        # Build the full raw line for notes (everything from date to end of continuations)
+        raw_line = f"{month_str}.{day_str} {rest.strip()}" if rest.strip() else f"{month_str}.{day_str}"
 
         results.append({
             'date': tx_date,
@@ -397,6 +634,7 @@ def _parse_account_activity(text: str) -> list[dict[str, Any]]:
             'credit': credit,
             'currency': 'CAD',
             'commission': Decimal('0.00'),
+            'notes': raw_line,
         })
 
         i += 1
@@ -409,10 +647,9 @@ def _parse_account_activity(text: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from a real PDF file using PyMuPDF.
+    """Extract text from a real PDF file using pdfplumber.
 
-    If the file is not a valid PDF (e.g. synthetic test text), falls back
-    to reading it as plain text so tests can pass raw text as a .pdf file.
+    Falls back to PyMuPDF if pdfplumber is unavailable, then to plain text.
 
     Args:
         file_path: Path to the PDF file.
@@ -420,44 +657,37 @@ def _extract_text_from_pdf(file_path: str) -> str:
     Returns:
         Extracted text content.
     """
-    # Verify it looks like a PDF before attempting to open
-    is_pdf = False
+    # Try pdfplumber first (best row-level text extraction)
     try:
-        with open(file_path, 'rb') as f:
-            header = f.read(5)
-        if header == b'%PDF-':
-            is_pdf = True
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            return '\n'.join(
+                page.extract_text() or '' for page in pdf.pages
+            )
     except Exception:
         pass
 
-    if not is_pdf:
-        # Not a real PDF — read as plain text (useful for tests with synthetic text)
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                return f.read()
-        except Exception as e:
-            raise ValueError(f"Unable to read file as text: {e}") from e
-
+    # Fallback to PyMuPDF
     try:
+        import fitz
         doc = fitz.open(file_path)
-    except Exception as e:
-        raise ValueError(f"Unable to open PDF file: {e}") from e
-
-    if doc.page_count == 0:
+        if doc.page_count == 0:
+            doc.close()
+            raise ValueError("PDF has no pages")
+        full_text = '\n'.join(
+            doc.load_page(i).get_text() for i in range(doc.page_count)
+        )
         doc.close()
-        raise ValueError("PDF has no pages")
+        return full_text
+    except Exception:
+        pass
 
-    full_text = ''
+    # Fallback to plain text (for tests with synthetic text)
     try:
-        for page_num in range(doc.page_count):
-            page = doc.load_page(page_num)
-            full_text += page.get_text() + '\n'
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
     except Exception as e:
-        doc.close()
-        raise ValueError(f"Unable to extract text from PDF: {e}") from e
-
-    doc.close()
-    return full_text
+        raise ValueError(f"Unable to read file: {e}") from e
 
 
 def parse_rbc_pdf(file_path: str) -> dict:
@@ -486,8 +716,7 @@ def parse_rbc_pdf(file_path: str) -> dict:
     account_number = ''
     account_match = ACCOUNT_NUMBER_PATTERN.search(full_text)
     if account_match:
-        # Strip non-numeric characters (e.g., hyphens from "900-00008-1-1" -> "9000000811")
-        account_number = re.sub(r'\D', '', account_match.group(1))
+        account_number = account_match.group(1)
 
     fx_rate = Decimal('1.000000')
     fx_match = FX_RATE_PATTERN.search(full_text)
@@ -569,14 +798,9 @@ def parse_rbc_pdf(file_path: str) -> dict:
     # If we couldn't get a statement date from PDF content, try to infer from filename
     if statement_date is None:
         file_name = os.path.basename(file_path) if os.path.exists(file_path) else ''
-        # Try to extract YYYY-MM-DD from filename (e.g. "Statement-5362 2025-09-30.pdf")
-        fn_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', file_name)
-        if fn_match:
-            try:
-                statement_date = date(int(fn_match.group(1)), int(fn_match.group(2)), int(fn_match.group(3)))
-                logger.info("Inferred statement date from filename: %s -> %s", file_name, statement_date)
-            except ValueError:
-                logger.warning("Could not parse statement date from filename: %s", file_name)
+        statement_date = _extract_date_from_filename(file_name)
+        if statement_date:
+            logger.info("Inferred statement date from filename: %s -> %s", file_name, statement_date)
 
     if statement_date is None:
         logger.warning("Could not determine statement date from PDF content or filename")
@@ -635,7 +859,8 @@ def parse_rbc_pdf(file_path: str) -> dict:
         }
 
     try:
-        transactions = _parse_account_activity(full_text)
+        tx_year = statement_date.year if statement_date else 2025
+        transactions = _parse_account_activity(full_text, year=tx_year)
     except Exception as e:
         logger.warning("Error parsing account activity: %s", e)
         transactions = []
@@ -650,3 +875,165 @@ def parse_rbc_pdf(file_path: str) -> dict:
         'income_summary': income_summary,
         'contribution_summary': contribution_summary,
     }
+
+
+def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
+    """Parse an RBC PDF statement and return one result per currency section.
+
+    RBC PDFs often contain both CAD and USD holdings. This function splits
+    the PDF text at USD section headers and parses each section separately,
+    returning a list of parsed results (one per currency).
+
+    Args:
+        file_path: Path to the PDF file, or a string of raw text content.
+
+    Returns:
+        List of dictionaries, one per currency section. Each dict has keys:
+        currency, statement_date, last_statement_date, account_number,
+        fx_rate, balances, transactions, income_summary, contribution_summary.
+    """
+    # Extract full text
+    if not os.path.exists(file_path):
+        full_text = file_path
+    else:
+        full_text = _extract_text_from_pdf(file_path)
+
+    # Split into CAD and USD sections
+    sections = _split_pdf_into_sections(full_text)
+
+    # Extract metadata from full text (same for all currency sections)
+    account_number = ''
+    account_match = ACCOUNT_NUMBER_PATTERN.search(full_text)
+    if account_match:
+        account_number = account_match.group(1)
+
+    fx_rate = Decimal('1.000000')
+    fx_match = FX_RATE_PATTERN.search(full_text)
+    if fx_match:
+        fx_rate = Decimal(fx_match.group(1))
+
+    results = []
+    for currency, section_text in sections:
+        statement_date = None
+        last_statement_date = None
+
+        # Extract statement date
+        lines = section_text.split('\n')
+        for i, line in enumerate(lines):
+            date_match = STATEMENT_DATE_PATTERN.search(line)
+            if date_match:
+                month_str = date_match.group(1)
+                day = int(date_match.group(2))
+                year = int(date_match.group(3))
+                if 'last statement' in line.lower():
+                    continue
+                try:
+                    full_month_str = f"{month_str} {day}"
+                    statement_date = _parse_rbc_date(full_month_str, year)
+                    break
+                except ValueError:
+                    logger.warning("Could not parse statement date: %s", date_match.group(0))
+                    continue
+
+        # Extract last statement date
+        last_stmt_match = LAST_STATEMENT_PATTERN.search(section_text)
+        if last_stmt_match:
+            last_stmt_str = last_stmt_match.group(1).strip()
+            last_date_match = re.search(
+                r'(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEPT|SEP|OCT|NOV|DEC)[\.\s]+(\d{1,2})',
+                last_stmt_str, re.IGNORECASE,
+            )
+            if last_date_match and statement_date:
+                try:
+                    last_month = last_date_match.group(1)
+                    last_day = int(last_date_match.group(2))
+                    last_full_month_str = f"{last_month} {last_day}"
+                    last_statement_date = _parse_rbc_date(
+                        last_full_month_str,
+                        statement_date.year,
+                    )
+                except ValueError:
+                    logger.warning("Could not parse last statement date: %s", last_stmt_str)
+
+        # If we couldn't get a statement date, try filename
+        if statement_date is None:
+            file_name = os.path.basename(file_path) if os.path.exists(file_path) else ''
+            statement_date = _extract_date_from_filename(file_name)
+            if statement_date:
+                logger.info("Inferred statement date from filename: %s -> %s", file_name, statement_date)
+
+        # Parse section-specific data
+        try:
+            balances_raw = _parse_asset_summary(section_text)
+        except Exception as e:
+            logger.warning("Error parsing asset summary for %s: %s", currency, e)
+            balances_raw = []
+
+        try:
+            cash_balances = _parse_cash_balance(section_text)
+        except Exception as e:
+            logger.warning("Error parsing cash balance for %s: %s", currency, e)
+            cash_balances = []
+
+        # Merge cash balances
+        all_balances = []
+        cash_types = {b['account_type'] for b in cash_balances}
+        for bal in balances_raw:
+            cash_entry = next(
+                (c for c in cash_balances if c['account_type'] == bal['account_type']),
+                None,
+            )
+            if cash_entry:
+                bal['opening'] = cash_entry['opening']
+                bal['closing'] = cash_entry['closing']
+            all_balances.append(bal)
+        for cash_bal in cash_balances:
+            if cash_bal['account_type'] not in cash_types:
+                all_balances.append(cash_bal)
+
+        try:
+            income_summary = _parse_income_summary(section_text)
+        except Exception as e:
+            logger.warning("Error parsing income summary for %s: %s", currency, e)
+            income_summary = {
+                'dividends_this_month': Decimal('0.00'),
+                'dividends_ytd': Decimal('0.00'),
+                'interest_this_month': Decimal('0.00'),
+                'interest_ytd': Decimal('0.00'),
+                'total_this_month': Decimal('0.00'),
+                'total_ytd': Decimal('0.00'),
+            }
+
+        try:
+            contribution_summary = _parse_contribution_summary(section_text)
+        except Exception as e:
+            logger.warning("Error parsing contribution summary for %s: %s", currency, e)
+            contribution_summary = {
+                'first_60_days': Decimal('0.00'),
+                'balance_of_year': Decimal('0.00'),
+            }
+
+        try:
+            tx_year = statement_date.year if statement_date else 2025
+            transactions = _parse_account_activity(section_text, year=tx_year)
+        except Exception as e:
+            logger.warning("Error parsing account activity for %s: %s", currency, e)
+            transactions = []
+
+        # Tag transactions with currency
+        for tx in transactions:
+            tx['currency'] = currency
+
+        results.append({
+            'currency': currency,
+            'statement_date': statement_date,
+            'last_statement_date': last_statement_date,
+            'account_number': account_number,
+            'fx_rate': fx_rate,
+            'balances': all_balances,
+            'transactions': transactions,
+            'income_summary': income_summary,
+            'contribution_summary': contribution_summary,
+        })
+
+    return results

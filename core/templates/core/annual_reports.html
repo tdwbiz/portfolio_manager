@@ -1,0 +1,201 @@
+{% extends "core/base.html" %}
+
+{% block title %}Annual Reports{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-file-earmark-text"></i> RBC Annual Reports</h2>
+        <p class="text-muted">Summary of all imported RBC Annual Reports.</p>
+    </div>
+</div>
+
+{% if report_summaries %}
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>Year</th>
+                        <th>Account</th>
+                        <th>Account Type</th>
+                        <th>Ending Value (CAD)</th>
+                        <th>Net Return (CAD)</th>
+                        <th>Total Charges (CAD)</th>
+                        <th>Compensation (CAD)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for summary in report_summaries %}
+                    <tr>
+                        <td>{{ summary.report.report_year }}</td>
+                        <td>{{ summary.report.account.name }}</td>
+                        <td>{{ summary.report.account_type_code }}</td>
+                        <td>${{ summary.ending_value|floatformat:2 }}</td>
+                        <td>${{ summary.net_return|floatformat:2 }}</td>
+                        <td>${{ summary.total_charges_cad|floatformat:2 }}</td>
+                        <td>${{ summary.total_compensation_cad|floatformat:2 }}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary" 
+                                    data-bs-toggle="collapse" 
+                                    data-bs-target="#detail-{{ summary.report.id }}">
+                                <i class="bi bi-eye"></i> Details
+                            </button>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="detail-{{ summary.report.id }}">
+                        <td colspan="8">
+                            <div class="row">
+                                <!-- Balances -->
+                                <div class="col-md-6">
+                                    <h6>Balances</h6>
+                                    {% if summary.report.balance_snapshots.exists %}
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Currency</th>
+                                                <th>Beginning</th>
+                                                <th>Ending</th>
+                                                <th>Net Return</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for bal in summary.report.balance_snapshots.all %}
+                                            <tr>
+                                                <td>{{ bal.currency }}</td>
+                                                <td>${{ bal.beginning_market_value|floatformat:2 }}</td>
+                                                <td>${{ bal.ending_market_value|floatformat:2 }}</td>
+                                                <td>${{ bal.net_investment_return|floatformat:2 }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                    {% else %}
+                                    <p class="text-muted">No balance data.</p>
+                                    {% endif %}
+                                </div>
+                                <!-- Performance -->
+                                <div class="col-md-6">
+                                    <h6>Performance (Money-Weighted Returns)</h6>
+                                    {% if summary.report.performance_records.exists %}
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Currency</th>
+                                                <th>1Yr</th>
+                                                <th>3Yr</th>
+                                                <th>5Yr</th>
+                                                <th>10Yr</th>
+                                                <th>Since</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for perf in summary.report.performance_records.all %}
+                                            <tr>
+                                                <td>{{ perf.currency }}</td>
+                                                <td>
+                                                    {% for ret in perf.returns.all %}
+                                                        {% if ret.period_label == '1_year' %}{{ ret.return_pct }}%{% endif %}
+                                                    {% endfor %}
+                                                </td>
+                                                <td>
+                                                    {% for ret in perf.returns.all %}
+                                                        {% if ret.period_label == '3_years' %}{{ ret.return_pct }}%{% endif %}
+                                                    {% endfor %}
+                                                </td>
+                                                <td>
+                                                    {% for ret in perf.returns.all %}
+                                                        {% if ret.period_label == '5_years' %}{{ ret.return_pct }}%{% endif %}
+                                                    {% endfor %}
+                                                </td>
+                                                <td>
+                                                    {% for ret in perf.returns.all %}
+                                                        {% if ret.period_label == '10_years' %}{{ ret.return_pct }}%{% endif %}
+                                                    {% endfor %}
+                                                </td>
+                                                <td>
+                                                    {% for ret in perf.returns.all %}
+                                                        {% if ret.period_label == 'since_date' %}{{ ret.return_pct }}%{% endif %}
+                                                    {% endfor %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                    {% else %}
+                                    <p class="text-muted">No performance data.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <!-- Charges -->
+                                <div class="col-md-6">
+                                    <h6>Charges</h6>
+                                    {% if summary.report.charge_records.exists %}
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Currency</th>
+                                                <th>Category</th>
+                                                <th>Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for charge in summary.report.charge_records.all %}
+                                            <tr {% if charge.is_subtotal %}class="table-warning"{% endif %}>
+                                                <td>{{ charge.currency }}</td>
+                                                <td>{{ charge.charge_category }}</td>
+                                                <td>${{ charge.amount|floatformat:2 }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                    {% else %}
+                                    <p class="text-muted">No charge data.</p>
+                                    {% endif %}
+                                </div>
+                                <!-- Compensation -->
+                                <div class="col-md-6">
+                                    <h6>Third-Party Compensation</h6>
+                                    {% if summary.report.compensation_records.exists %}
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Currency</th>
+                                                <th>Type</th>
+                                                <th>Amount</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for comp in summary.report.compensation_records.all %}
+                                            <tr>
+                                                <td>{{ comp.currency }}</td>
+                                                <td>{{ comp.compensation_type }}</td>
+                                                <td>${{ comp.amount|floatformat:2 }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                    {% else %}
+                                    <p class="text-muted">No compensation data.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <p class="text-muted">No annual reports imported yet. <a href="{% url 'annual_report_import' %}">Import one now</a>.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

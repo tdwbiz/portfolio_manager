@@ -5,7 +5,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse, FileResponse, HttpResponseNotAllowed
 from django.conf import settings
 from django.urls import reverse
-from django.db.models import Sum, Count, Q as dj_Q
+from django.db.models import Sum, Count, Q as dj_Q, F
 from collections import defaultdict
 from django.core.cache import cache
 from django.utils.dateparse import parse_date
@@ -66,7 +66,7 @@ def _validate_date_param(date_str):
         raise ValueError(f"Invalid date format: {date_str}")
     return parsed
 
-from core.models import Transaction, Account, BrokerStatement, FileImportLog, TransactionType
+from core.models import Transaction, Account, BrokerStatement, FileImportLog, TransactionType, RbcAnnualReport, RbcAnnualBalances, RbcAnnualPerformance, RbcAnnualCharges, RbcAnnualCompensation
 from core.utils import (
     compute_portfolio_value_series,
     compute_realised_pnl,
@@ -1147,3 +1147,41 @@ def tax_summary(request):
 def fetch_prices_api(request):
     """API endpoint for fetching last prices (unused - placeholder)."""
     return JsonResponse({})
+
+
+@login_required
+def annual_reports_view(request):
+    """List all RBC Annual Reports for the user's accounts."""
+    reports = RbcAnnualReport.objects.select_related('account').order_by('-report_year')
+
+    # Enrich each report with summary data
+    report_summaries = []
+    for report in reports:
+        # Get total charges in CAD
+        total_charges_cad = RbcAnnualCharges.objects.filter(
+            rbc_annual_report=report, currency='CAD'
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+
+        # Get total compensation in CAD
+        total_compensation_cad = RbcAnnualCompensation.objects.filter(
+            rbc_annual_report=report, currency='CAD'
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+
+        # Get net investment return from balances in CAD
+        cad_balance = RbcAnnualBalances.objects.filter(
+            rbc_annual_report=report, currency='CAD'
+        ).first()
+        net_return = cad_balance.net_investment_return if cad_balance else Decimal('0')
+        ending_value = cad_balance.ending_market_value if cad_balance else Decimal('0')
+
+        report_summaries.append({
+            'report': report,
+            'total_charges_cad': total_charges_cad,
+            'total_compensation_cad': total_compensation_cad,
+            'net_return': net_return,
+            'ending_value': ending_value,
+        })
+
+    return render(request, 'core/annual_reports.html', {
+        'report_summaries': report_summaries,
+    })

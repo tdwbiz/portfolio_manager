@@ -8,7 +8,11 @@ from django.conf import settings
 from decimal import Decimal
 
 from core.models import Account, PdfStatement, PdfAccountBalance, PdfTransaction
+from core.models import RbcAnnualReport, RbcAnnualBalances
+from core.models import RbcAnnualPerformance, RbcAnnualPerformanceReturn
+from core.models import RbcAnnualCharges, RbcAnnualCompensation
 from imports.parsers_pdf import parse_rbc_pdf
+from imports.parsers_annual import parse_rbc_annual_report
 
 logger = logging.getLogger(__name__)
 
@@ -129,3 +133,152 @@ def pdf_import_view(request):
     context['pdf_statements'] = PdfStatement.objects.select_related('account').all()
 
     return render(request, 'core/pdf_import.html', context)
+
+
+def annual_report_import_view(request):
+    """Handle RBC Annual Report upload and display results.
+
+    GET: Show upload form + list of existing annual reports.
+    POST: Handle file upload, parse PDF, create records, show results.
+    """
+    context = {}
+
+    if request.method == 'POST':
+        uploaded_file = request.FILES.get('pdf_file')
+        if not uploaded_file:
+            context['error'] = 'No file uploaded.'
+        else:
+            if not uploaded_file.name.lower().endswith('.pdf'):
+                context['error'] = 'Only PDF files are accepted.'
+            else:
+                try:
+                    # Save uploaded file temporarily
+                    upload_dir = Path(settings.MEDIA_ROOT) / 'pdf_uploads'
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    temp_path = upload_dir / uploaded_file.name
+                    with open(temp_path, 'wb+') as destination:
+                        for chunk in uploaded_file.chunks():
+                            destination.write(chunk)
+
+                    # Parse the Annual Report PDF
+                    parsed = parse_rbc_annual_report(str(temp_path))
+
+                    # Look up or create Account
+                    account = None
+                    if parsed.get('account_number'):
+                        try:
+                            account = Account.objects.get(
+                                account_id=parsed['account_number']
+                            )
+                        except Account.DoesNotExist:
+                            account = None
+
+                    if account is None:
+                        # Try partial match
+                        acct_num = parsed.get('account_number', '')
+                        if acct_num:
+                            partial = acct_num.replace('-', '')
+                            for acct in Account.objects.filter(broker='RBC'):
+                                if partial in acct.account_id.replace('-', ''):
+                                    account = acct
+                                    break
+
+                    if account is None:
+                        # Auto-create account
+                        account = Account.objects.create(
+                            account_id=parsed.get('account_number', f"RBC-{parsed.get('account_type_code', 'UNKNOWN')}"),
+                            name=f"RBC {parsed.get('account_type_code', 'Account')} {parsed.get('account_number', '')}",
+                            broker='RBC',
+                        )
+                        context['account_created'] = True
+
+                    # Check for duplicate
+                    existing = RbcAnnualReport.objects.filter(
+                        account=account,
+                        report_year=parsed['report_year'],
+                    )
+                    if existing.exists():
+                        context['error'] = (
+                            f'Duplicate annual report: account={account}, '
+                            f'year={parsed["report_year"]}'
+                        )
+                    else:
+                        # Create RbcAnnualReport
+                        report = RbcAnnualReport.objects.create(
+                            account=account,
+                            broker='RBC',
+                            file_name=uploaded_file.name,
+                            report_year=parsed['report_year'],
+                            report_period_start=parsed['report_period_start'],
+                            report_period_end=parsed['report_period_end'],
+                            account_number=parsed.get('account_number', ''),
+                            account_type_code=parsed.get('account_type_code', ''),
+                        )
+
+                        # Create balances
+                        for bal in parsed.get('balances', []):
+                            RbcAnnualBalances.objects.create(
+                                rbc_annual_report=report,
+                                currency=bal['currency'],
+                                beginning_market_value=bal['beginning_market_value'],
+                                deposits_transfers_in=bal['deposits_transfers_in'],
+                                withdrawals_transfers_out=bal['withdrawals_transfers_out'],
+                                net_investment_return=bal['net_investment_return'],
+                                ending_market_value=bal['ending_market_value'],
+                                amount_invested=bal['amount_invested'],
+                            )
+
+                        # Create performance records
+                        for perf in parsed.get('performance', []):
+                            perf_record = RbcAnnualPerformance.objects.create(
+                                rbc_annual_report=report,
+                                currency=perf['currency'],
+                                since_date=perf.get('since_date'),
+                            )
+                            for ret in perf.get('returns', []):
+                                RbcAnnualPerformanceReturn.objects.create(
+                                    performance=perf_record,
+                                    period_label=ret['period_label'],
+                                    return_pct=ret['return_pct'],
+                                )
+
+                        # Create charges
+                        for charge in parsed.get('charges', []):
+                            RbcAnnualCharges.objects.create(
+                                rbc_annual_report=report,
+                                currency=charge['currency'],
+                                charge_category=charge['category'],
+                                amount=charge['amount'],
+                                is_subtotal=charge.get('is_subtotal', False),
+                            )
+
+                        # Create compensation
+                        for comp in parsed.get('compensation', []):
+                            RbcAnnualCompensation.objects.create(
+                                rbc_annual_report=report,
+                                currency=comp['currency'],
+                                compensation_type=comp['type'],
+                                amount=comp['amount'],
+                            )
+
+                        # Clean up temp file
+                        try:
+                            temp_path.unlink()
+                        except OSError:
+                            pass
+
+                        context['success'] = (
+                            f'Successfully imported {uploaded_file.name}: '
+                            f'year={parsed["report_year"]}, '
+                            f'{len(parsed.get("balances", []))} balances, '
+                            f'{len(parsed.get("performance", []))} performance records'
+                        )
+                        context['annual_report'] = report
+                except Exception as e:
+                    logger.exception("Error processing Annual Report upload")
+                    context['error'] = f'Error processing Annual Report: {e}'
+
+    # Load existing annual reports
+    context['annual_reports'] = RbcAnnualReport.objects.select_related('account').all()
+
+    return render(request, 'core/annual_report_import.html', context)

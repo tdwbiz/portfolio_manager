@@ -25,4 +25,6 @@ urlpatterns = [
     path('accounts/<str:account_id>/edit/', views.account_edit, name='account_edit'),
     path('accounts/<str:account_id>/delete/', views.account_delete, name='account_delete'),
     path('pdf-import/', import_views.pdf_import_view, name='pdf_import'),
+    path('annual-report-import/', import_views.annual_report_import_view, name='annual_report_import'),
+    path('annual-reports/', views.annual_reports_view, name='annual_reports'),
 ]

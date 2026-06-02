@@ -11,7 +11,7 @@ from django.test import TestCase, override_settings
 from django.core.management import call_command
 from io import BytesIO
 
-from core.models import Account, PdfStatement, PdfAccountBalance, PdfTransaction
+from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from imports.parsers_pdf import parse_rbc_pdf, _parse_rbc_date
 
 
@@ -318,8 +318,8 @@ class TestParseRbcPdf(TestCase):
         try:
             call_command('manage_pdf_import', pdf_path, '--dry-run')
 
-            # No PdfStatement should have been created
-            self.assertEqual(PdfStatement.objects.count(), 0)
+            # No RbcMonthly should have been created
+            self.assertEqual(RbcMonthly.objects.count(), 0)
         finally:
             os.unlink(pdf_path)
             account.delete()
@@ -337,11 +337,11 @@ class TestParseRbcPdf(TestCase):
         try:
             # First import
             call_command('manage_pdf_import', pdf_path)
-            self.assertEqual(PdfStatement.objects.count(), 1)
+            self.assertEqual(RbcMonthly.objects.count(), 1)
 
             # Second import - should be skipped
             call_command('manage_pdf_import', pdf_path)
-            self.assertEqual(PdfStatement.objects.count(), 1)
+            self.assertEqual(RbcMonthly.objects.count(), 1)
         finally:
             os.unlink(pdf_path)
             account.delete()

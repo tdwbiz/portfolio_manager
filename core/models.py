@@ -119,28 +119,35 @@ class Transaction(models.Model):
         return f"{self.type} {self.quantity} {self.symbol} on {self.date}"
 
 
-class PdfStatement(models.Model):
-    """A parsed RBC PDF statement — one per currency section per file.
+class RbcMonthly(models.Model):
+    """A parsed RBC PDF monthly statement — one row per currency section per file.
 
     RBC PDFs often contain both CAD and USD holdings. Each currency
-    section is stored as a separate PdfStatement so they can be
-    queried and displayed independently.
+    section is stored as a separate row so they can be queried independently.
+    Renamed from PdfStatement in migration 0016.
     """
     CURRENCY_CHOICES = [('CAD', 'CAD'), ('USD', 'USD')]
 
     account = models.ForeignKey(
         'Account',
         on_delete=models.CASCADE,
-        related_name='pdf_statements',
+        related_name='rbc_monthly_statements',
     )
     file_name = models.CharField(max_length=255)
     statement_date = models.DateField()
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='CAD', help_text='Currency of this statement section (CAD or USD)')
-    last_statement_date = models.DateField(null=True, blank=True, help_text='Date of previous statement')
-    account_number = models.CharField(max_length=50, blank=True, default='', help_text='RBC account number from PDF')
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='CAD',
+                                help_text='Currency of this statement section (CAD or USD)')
+    last_statement_date = models.DateField(null=True, blank=True,
+                                           help_text='Date of previous statement')
+    account_number = models.CharField(max_length=50, blank=True, default='',
+                                      help_text='RBC account number from PDF')
     fx_rate = models.DecimalField(
         max_digits=10, decimal_places=6, default=Decimal('1.000000'),
         help_text='USD to CAD exchange rate as of statement date',
+    )
+    total_market_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal('0.00'),
+        help_text='Total portfolio market value from statement footer (for cross-check vs annual)',
     )
     parsed_at = models.DateTimeField(auto_now_add=True)
 
@@ -148,24 +155,26 @@ class PdfStatement(models.Model):
         ordering = ['-statement_date', 'currency']
         unique_together = [('account', 'statement_date', 'currency', 'file_name')]
 
-    class Meta:
-        ordering = ['-statement_date']
-
     def __str__(self):
-        return f"PDF Statement {self.account} — {self.statement_date}"
+        return f"RBC Monthly {self.account} — {self.statement_date} [{self.currency}]"
 
 
-class PdfAccountBalance(models.Model):
-    """Snapshot of account balances at statement date — from the Asset Summary section."""
-    pdf_statement = models.ForeignKey(
-        PdfStatement,
+class RbcMonthlyBalance(models.Model):
+    """Asset summary balances from an RBC monthly statement.
+
+    One row per asset category (Cash, Mutual Funds, Common Shares, etc.) per statement.
+    Renamed from PdfAccountBalance in migration 0016.
+    """
+    rbc_monthly = models.ForeignKey(
+        RbcMonthly,
         on_delete=models.CASCADE,
         related_name='balances',
     )
-    currency = models.CharField(max_length=3, default='CAD', help_text='Currency of this balance (CAD or USD)')
+    currency = models.CharField(max_length=3, default='CAD',
+                                help_text='Currency of this balance row (CAD or USD)')
     account_type = models.CharField(
         max_length=50,
-        help_text='e.g. "Cash", "Mutual Funds", "Foreign Securities", "Preferred Shares", "Common Shares", "Fixed Income", "Other"',
+        help_text='e.g. "Cash", "Mutual Funds", "Foreign Securities", "Common Shares"',
     )
     opening_balance = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
@@ -186,27 +195,34 @@ class PdfAccountBalance(models.Model):
 
     class Meta:
         ordering = ['account_type']
-        unique_together = [('pdf_statement', 'account_type')]
+        unique_together = [('rbc_monthly', 'account_type')]
 
     def __str__(self):
-        return f"{self.pdf_statement} — {self.account_type}: ${self.market_value}"
+        return f"{self.rbc_monthly} — {self.account_type}: ${self.market_value}"
 
 
-class PdfTransaction(models.Model):
-    """Individual transaction from the Account Activity section of a PDF statement."""
-    pdf_statement = models.ForeignKey(
-        PdfStatement,
+class RbcMonthlyTransaction(models.Model):
+    """Individual transaction from an RBC monthly PDF statement.
+
+    Renamed from PdfTransaction in migration 0016.
+    """
+    rbc_monthly = models.ForeignKey(
+        RbcMonthly,
         on_delete=models.CASCADE,
         related_name='transactions',
     )
     date = models.DateField()
-    activity_type = models.CharField(max_length=50, help_text='e.g. "INTEREST", "BUY", "SELL", "DIVIDEND"')
-    description = models.CharField(max_length=500, blank=True, default='', help_text='Full activity description from PDF')
+    activity_type = models.CharField(max_length=50,
+                                     help_text='e.g. "INTEREST", "BUY", "SELL", "DIVIDEND"')
+    description = models.CharField(max_length=500, blank=True, default='',
+                                   help_text='Full activity description from PDF')
     symbol = models.CharField(max_length=50, blank=True, default='')
     quantity = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.0000'))
     price = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.0000'))
-    debit = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text='Amount debited (outflow)')
-    credit = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text='Amount credited (inflow)')
+    debit = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'),
+                                help_text='Amount debited (outflow)')
+    credit = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'),
+                                 help_text='Amount credited (inflow)')
     currency = models.CharField(max_length=3, default='CAD')
     commission = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal('0.00'))
     notes = models.TextField(blank=True, default='')
@@ -214,7 +230,7 @@ class PdfTransaction(models.Model):
     class Meta:
         ordering = ['date', 'id']
         indexes = [
-            models.Index(fields=['pdf_statement', 'date']),
+            models.Index(fields=['rbc_monthly', 'date']),
         ]
 
     def __str__(self):
@@ -279,216 +295,99 @@ class BrandingConfig(models.Model):
 from datetime import date
 
 
-class RbcAnnualReport(models.Model):
-    """A parsed RBC Annual Report PDF — one per PDF file.
+class RbcAnnual(models.Model):
+    """Flat table for RBC Annual Investment Performance Report data.
 
-    This model is RBC-specific. Other brokers (e.g., IB) have different
-    report structures and would use separate models in future specs.
+    One row per (account, report_year, currency). Both CAD and USD sections
+    of the same PDF produce separate rows so currency totals are unambiguous.
+
+    Replaces the six-table normalised hierarchy (RbcAnnualReport,
+    RbcAnnualBalances, RbcAnnualPerformance, RbcAnnualPerformanceReturn,
+    RbcAnnualCharges, RbcAnnualCompensation) from migration 0015.
+    Created in migration 0017.
+
+    Cross-check:
+      bal_ending_value == RbcMonthly.total_market_value for Dec of same year
+      bal_deposits_in  ~= sum(RbcMonthlyTransaction.credit) for DEP/TFR-IN same year
     """
-    BROKER_CHOICES = [('RBC', 'Royal Bank of Canada')]
+    CURRENCY_CHOICES = [('CAD', 'CAD'), ('USD', 'USD')]
 
+    # --- Header ---
     account = models.ForeignKey(
         'Account',
         on_delete=models.CASCADE,
-        related_name='rbc_annual_reports',
-    )
-    broker = models.CharField(
-        max_length=10, choices=BROKER_CHOICES, default='RBC',
-        help_text='Broker name — always RBC for annual reports',
+        related_name='rbc_annual_records',
     )
     file_name = models.CharField(max_length=255)
-    report_year = models.IntegerField(help_text='Calendar year the report covers')
-    report_period_start = models.DateField(
-        help_text='Start of reporting period, e.g. January 1, 2025',
-    )
-    report_period_end = models.DateField(
-        help_text='End of reporting period, e.g. December 31, 2025',
-    )
-    account_number = models.CharField(
-        max_length=50, blank=True, default='',
-        help_text='RBC account number from PDF (e.g. 900-00005)',
-    )
-    account_type_code = models.CharField(
-        max_length=10, blank=True, default='',
-        help_text='RBC account type code from PDF (e.g. RIF, LIF, RRSP, IF)',
-    )
+    report_year = models.IntegerField(help_text='Calendar year this report covers, e.g. 2017')
+    report_period_start = models.DateField(help_text='First day of period, e.g. 2017-01-01')
+    report_period_end = models.DateField(help_text='Last day of period, e.g. 2017-12-31')
+    account_number = models.CharField(max_length=50, blank=True, default='',
+                                      help_text='RBC account number from PDF, e.g. 900-00005')
+    account_type_code = models.CharField(max_length=10, blank=True, default='',
+                                         help_text='RRSP, RRIF, RIF, LIF, LIRA, TFSA, RESP')
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='CAD',
+                                help_text='Currency section this row describes')
     parsed_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        ordering = ['-report_year', 'account']
-        unique_together = [('account', 'report_year')]
-
-    def __str__(self):
-        return f"RBC Annual Report {self.account} — {self.report_year}"
-
-
-class RbcAnnualBalances(models.Model):
-    """Change in account value table from the RBC Annual Investment Performance Report.
-
-    One record per currency (CAD and/or USD) per annual report.
-    Captures the "Balances" section: beginning value, deposits, withdrawals,
-    net investment return, ending value, and amount invested.
-    """
-    rbc_annual_report = models.ForeignKey(
-        RbcAnnualReport,
-        on_delete=models.CASCADE,
-        related_name='balance_snapshots',
-    )
-    currency = models.CharField(
-        max_length=3, default='CAD',
-        help_text='CAD or USD — each account may have both currency sections',
-    )
-    beginning_market_value = models.DecimalField(
+    # --- Balances ("Change in account value") ---
+    bal_beginning_value = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Market value at start of period',
-    )
-    deposits_transfers_in = models.DecimalField(
+        help_text='Market value at start of period')
+    bal_deposits_in = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Total deposits and transfers into the account',
-    )
-    withdrawals_transfers_out = models.DecimalField(
+        help_text='Total deposits and transfers-in')
+    bal_withdrawals_out = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Total withdrawals and transfers out of the account',
-    )
-    net_investment_return = models.DecimalField(
+        help_text='Total withdrawals and transfers-out (stored as positive)')
+    bal_net_return = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Net investment return (gains/losses + income) for the period',
-    )
-    ending_market_value = models.DecimalField(
+        help_text='Net investment return for the period')
+    bal_ending_value = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Market value at end of period',
-    )
-    amount_invested = models.DecimalField(
+        help_text='Market value at end of period — cross-check vs Dec monthly')
+    bal_amount_invested = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Beginning value + deposits - withdrawals (total invested capital)',
-    )
+        help_text='Beginning value + deposits - withdrawals')
 
-    class Meta:
-        ordering = ['currency']
-        unique_together = [('rbc_annual_report', 'currency')]
+    # --- Performance ("Money-weighted rate of return") ---
+    perf_since_date = models.DateField(null=True, blank=True,
+                                       help_text='Reference date for since-inception return')
+    perf_1yr = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True,
+                                   help_text='Past 1 year return %')
+    perf_3yr = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True,
+                                   help_text='Past 3 year annualised return %')
+    perf_5yr = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True,
+                                   help_text='Past 5 year annualised return %')
+    perf_10yr = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True,
+                                    help_text='Past 10 year annualised return %')
+    perf_since = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True,
+                                     help_text='Return since perf_since_date %')
 
-    def __str__(self):
-        return f"RBC Balances {self.rbc_annual_report} — {self.currency}"
+    # --- Charges ---
+    chg_operating = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                        help_text='Operating charges')
+    chg_commissions = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                          help_text='Commissions — Equities/options')
+    chg_total_transaction = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                                help_text='Total transaction charges subtotal')
+    chg_total_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                         help_text='Total paid by you')
 
-
-class RbcAnnualPerformance(models.Model):
-    """Money-weighted rate of return at various time horizons from the RBC Annual Investment Performance Report.
-
-    One record per currency (CAD and/or USD) per annual report.
-    Captures the "Performance" section: returns at 1yr, 3yr, 5yr, 10yr, since-date.
-    """
-    rbc_annual_report = models.ForeignKey(
-        RbcAnnualReport,
-        on_delete=models.CASCADE,
-        related_name='performance_records',
-    )
-    currency = models.CharField(
-        max_length=3, default='CAD',
-        help_text='CAD or USD — each account may have both currency sections',
-    )
-    since_date = models.DateField(
-        null=True, blank=True,
-        help_text='Reference date for "since" returns (e.g. Jan 1, 2016)',
-    )
+    # --- Compensation (third-party) ---
+    comp_trailing = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                        help_text='Trailing commissions received by RBC')
+    comp_other = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                     help_text='Other third-party compensation')
+    comp_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
+                                     help_text='Total compensation from third parties')
 
     class Meta:
-        ordering = ['currency']
-        unique_together = [('rbc_annual_report', 'currency')]
+        ordering = ['-report_year', 'account', 'currency']
+        unique_together = [('account', 'report_year', 'currency')]
 
     def __str__(self):
-        return f"RBC Performance {self.rbc_annual_report} — {self.currency}"
-
-
-class RbcAnnualPerformanceReturn(models.Model):
-    """A single money-weighted return entry for one time horizon.
-
-    Child of RbcAnnualPerformance. One record per period_label (1_year, 3_years, etc.).
-    """
-    performance = models.ForeignKey(
-        RbcAnnualPerformance,
-        on_delete=models.CASCADE,
-        related_name='returns',
-    )
-    period_label = models.CharField(
-        max_length=20,
-        help_text='Time horizon: "1_year", "3_years", "5_years", "10_years", "since_date"',
-    )
-    return_pct = models.DecimalField(
-        max_digits=8, decimal_places=4,
-        help_text='Annualized money-weighted return as a percentage (e.g. 15.93 for 15.93%)',
-    )
-
-    class Meta:
-        ordering = ['period_label']
-        unique_together = [('performance', 'period_label')]
-
-    def __str__(self):
-        return f"{self.performance} — {self.period_label}: {self.return_pct}%"
-
-
-class RbcAnnualCharges(models.Model):
-    """Fee and compensation data from the RBC Annual Charges and Compensation Report.
-
-    One record per charge category per currency (CAD and/or USD) per annual report.
-    Captures operating charges, transaction charges, commissions, and total paid by you.
-    """
-    rbc_annual_report = models.ForeignKey(
-        RbcAnnualReport,
-        on_delete=models.CASCADE,
-        related_name='charge_records',
-    )
-    currency = models.CharField(
-        max_length=3, default='CAD',
-        help_text='CAD or USD — fees may be reported in both currencies',
-    )
-    charge_category = models.CharField(
-        max_length=80,
-        help_text='e.g. "Operating Charges", "Commissions - Equities/options", "Total transaction charges"',
-    )
-    amount = models.DecimalField(
-        max_digits=12, decimal_places=4, default=Decimal('0.0000'),
-        help_text='Amount in the reported currency',
-    )
-    is_subtotal = models.BooleanField(
-        default=False,
-        help_text='True for subtotal rows (e.g. "Total transaction charges"), False for line items',
-    )
-
-    class Meta:
-        ordering = ['currency', 'charge_category']
-        unique_together = [('rbc_annual_report', 'currency', 'charge_category')]
-
-    def __str__(self):
-        return f"RBC Charges {self.rbc_annual_report} — {self.currency}: {self.charge_category} = ${self.amount}"
-
-
-class RbcAnnualCompensation(models.Model):
-    """Third-party compensation received by RBC from the Annual Charges and Compensation Report.
-
-    One record per compensation type per currency (CAD and/or USD) per annual report.
-    Captures trailing commissions, other compensation, and total from third parties.
-    """
-    rbc_annual_report = models.ForeignKey(
-        RbcAnnualReport,
-        on_delete=models.CASCADE,
-        related_name='compensation_records',
-    )
-    currency = models.CharField(max_length=3, default='CAD')
-    compensation_type = models.CharField(
-        max_length=80,
-        help_text='e.g. "Trailing commission", "Other compensation", "Total compensation from third parties"',
-    )
-    amount = models.DecimalField(
-        max_digits=12, decimal_places=4, default=Decimal('0.0000'),
-        help_text='Amount in the reported currency',
-    )
-
-    class Meta:
-        ordering = ['currency', 'compensation_type']
-        unique_together = [('rbc_annual_report', 'currency', 'compensation_type')]
-
-    def __str__(self):
-        return f"RBC Compensation {self.rbc_annual_report} — {self.currency}: {self.compensation_type} = ${self.amount}"
+        return f"RBC Annual {self.account} — {self.report_year} [{self.currency}]"
 
 
 class HistoricalPrice(models.Model):
@@ -510,3 +409,4 @@ class HistoricalPrice(models.Model):
 
     def __str__(self):
         return f"{self.symbol} {self.date}: {self.close}"
+

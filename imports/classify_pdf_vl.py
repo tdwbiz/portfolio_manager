@@ -1,0 +1,114 @@
+"""PDF document-type classifier using Qwen2.5-VL.
+
+Renders only the first page of a PDF and asks the VL model whether the
+document is an RBC Annual Investment Performance Report or an RBC monthly
+account statement.
+
+Returns one of the three strings:  'annual' | 'monthly' | 'unknown'
+
+This module has no Django model imports — it is safe to call before the
+ORM is set up (e.g. during management command arg-parsing).
+"""
+import base64
+import logging
+
+import fitz  # PyMuPDF
+
+from django.conf import settings
+from imports.llm_client import VLClient, VLParseError
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Prompt
+# ---------------------------------------------------------------------------
+
+CLASSIFY_PROMPT = """\
+Look at the first page of this RBC Direct Investing (Royal Bank of Canada) PDF document.
+
+Determine which of the following document types it is:
+  - "annual"  — RBC Annual Investment Performance Report. Covers a full calendar
+                year, shows beginning/ending values, deposits, withdrawals, net
+                return, performance percentages, fees, and compensation.
+  - "monthly" — RBC monthly account statement for a single month. The account type
+                header on page 1 may say any of the following (all are monthly):
+                  "Cdn. Dollar Statement", "USD Dollar Statement",
+                  "RRSP Statement (CDN$)", "RRSP Statement (USD$)",
+                  "RRIF Statement (CDN$)", "RRIF Statement (USD$)",
+                  "RESP Statement", "TFSA Statement", or similar.
+                Key indicators: shows an address block, account number, date of
+                last statement, Asset Summary table with market values by category
+                (Cash, Common Shares, Mutual Funds, etc.), and Income Summary.
+  - "unknown" — Cannot be determined from this page.
+
+Return ONLY a JSON object with a single key — no markdown, no prose:
+{"doc_type": "annual" | "monthly" | "unknown"}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+def classify_pdf(file_path: str) -> str:
+    """Classify a PDF as 'annual', 'monthly', or 'unknown'.
+
+    Renders the first page at VL_PAGE_DPI and sends it to the VL model.
+    On any error, returns 'unknown' rather than raising — the caller can
+    decide how to handle unrecognised files.
+
+    Parameters
+    ----------
+    file_path:
+        Absolute path to the PDF file.
+
+    Returns
+    -------
+    str
+        One of: 'annual', 'monthly', 'unknown'.
+    """
+    base_url = getattr(settings, 'VL_MODEL_BASE_URL', 'http://localhost:11440/v1')
+    model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
+    dpi = getattr(settings, 'VL_PAGE_DPI', 150)
+    max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
+    timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
+
+    logger.info("classify_pdf: rendering page 1 of %s at %d DPI", file_path, dpi)
+    try:
+        pages_b64 = _render_first_page(file_path, dpi)
+    except Exception as exc:
+        logger.error("classify_pdf: failed to render %s — %s", file_path, exc)
+        return 'unknown'
+
+    client = VLClient(base_url=base_url, model=model, timeout=timeout, max_retries=max_retries)
+    try:
+        raw = client.extract_json(pages_b64, CLASSIFY_PROMPT)
+        doc_type = str(raw.get('doc_type', 'unknown')).lower().strip()
+        if doc_type not in ('annual', 'monthly'):
+            logger.warning(
+                "classify_pdf: unexpected doc_type %r from model for %s — treating as 'unknown'",
+                doc_type, file_path,
+            )
+            doc_type = 'unknown'
+        logger.info("classify_pdf: %s → %s", file_path, doc_type)
+        return doc_type
+    except (VLParseError, Exception) as exc:
+        logger.error("classify_pdf: classification failed for %s — %s", file_path, exc)
+        return 'unknown'
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _render_first_page(file_path: str, dpi: int) -> list[str]:
+    """Render the first page of a PDF as a base64-encoded PNG list."""
+    doc = fitz.open(file_path)
+    try:
+        page = doc[0]
+        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        png_bytes = pix.tobytes("png")
+        return [base64.b64encode(png_bytes).decode('ascii')]
+    finally:
+        doc.close()

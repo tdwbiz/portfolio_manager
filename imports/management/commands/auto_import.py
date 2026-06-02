@@ -14,12 +14,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
-from core.models import RbcAnnualReport, RbcAnnualBalances
-from core.models import RbcAnnualPerformance, RbcAnnualPerformanceReturn
-from core.models import RbcAnnualCharges, RbcAnnualCompensation
+from core.models import RbcAnnual
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 from imports.parsers_pdf import parse_rbc_pdf
-from imports.parsers_annual import parse_rbc_annual_report
+from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.rejection_log import rejection_from_trade, write_rejection_log
 
 logger = logging.getLogger(__name__)
@@ -269,30 +267,20 @@ class Command(BaseCommand):
 
                     if is_annual:
                         self.stdout.write(f"  Detected Annual Report: {filename}")
-                        parsed = parse_rbc_annual_report(file_path)
+                        parsed = parse_rbc_annual_report_vl(file_path)
 
                         if dry_run:
+                            currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
                             self.stdout.write(
                                 f"  [DRY RUN] {filename}: report_year={parsed.get('report_year')}, "
                                 f"account={parsed.get('account_number')}, "
-                                f"balances={len(parsed.get('balances', []))}, "
-                                f"performance={len(parsed.get('performance', []))}, "
-                                f"charges={len(parsed.get('charges', []))}, "
-                                f"compensation={len(parsed.get('compensation', []))}"
+                                f"currencies={currencies}"
                             )
                             continue
-
-                        # Import Annual Report data
-                        annual_statements_created = 0
-                        annual_balances_recorded = 0
-                        annual_performance_recorded = 0
-                        annual_charges_recorded = 0
-                        annual_compensation_recorded = 0
 
                         # Look up or create account
                         account_number = parsed.get('account_number', '')
                         account_type_code = parsed.get('account_type_code', '')
-                        account_name = parsed.get('account_name', '')
 
                         if account_number:
                             try:
@@ -307,7 +295,7 @@ class Command(BaseCommand):
                                 if account is None:
                                     account = Account.objects.create(
                                         account_id=account_number,
-                                        name=account_name or f'RBC {account_type_code} {account_number}',
+                                        name=f'RBC {account_type_code} {account_number}',
                                         broker='RBC',
                                     )
                         else:
@@ -316,98 +304,65 @@ class Command(BaseCommand):
                         if account is None:
                             raise ValueError(f'Could not find or create account for annual report: {filename}')
 
+                        records_saved = 0
                         with transaction.atomic():
-                            # Create RbcAnnualReport
-                            report = RbcAnnualReport.objects.create(
-                                account=account,
-                                file_name=filename,
-                                report_year=parsed.get('report_year'),
-                                account_number=account_number,
-                                account_type_code=account_type_code,
-                                account_name=account_name,
-                            )
-                            annual_statements_created = 1
-
-                            # Import balances
-                            for bal in parsed.get('balances', []):
-                                RbcAnnualBalances.objects.create(
-                                    rbc_annual_report=report,
-                                    currency=bal.get('currency', 'CAD'),
-                                    beginning_value=bal.get('beginning_value', Decimal('0.00')),
-                                    contributions=bal.get('contributions', Decimal('0.00')),
-                                    withdrawals=bal.get('withdrawals', Decimal('0.00')),
-                                    net_return=bal.get('net_return', Decimal('0.00')),
-                                    ending_value=bal.get('ending_value', Decimal('0.00')),
+                            for currency, cdata in [('CAD', parsed.get('cad')), ('USD', parsed.get('usd'))]:
+                                if cdata is None:
+                                    continue
+                                existing = RbcAnnual.objects.filter(
+                                    account=account,
+                                    report_year=parsed['report_year'],
+                                    currency=currency,
                                 )
-                                annual_balances_recorded += 1
-
-                            # Import performance returns
-                            for perf in parsed.get('performance', []):
-                                perf_return = RbcAnnualPerformanceReturn.objects.create(
-                                    rbc_annual_report=report,
-                                    period=perf.get('period', ''),
-                                    portfolio_return=perf.get('portfolio_return', Decimal('0.00')),
-                                    benchmark_return=perf.get('benchmark_return', Decimal('0.00')),
+                                if existing.exists():
+                                    logger.info(f"auto_import: skipping duplicate RbcAnnual {account} {parsed['report_year']} {currency}")
+                                    continue
+                                RbcAnnual.objects.create(
+                                    account=account,
+                                    file_name=filename,
+                                    report_year=parsed['report_year'],
+                                    report_period_start=parsed['report_period_start'],
+                                    report_period_end=parsed['report_period_end'],
+                                    account_number=account_number,
+                                    account_type_code=account_type_code,
+                                    currency=currency,
+                                    bal_beginning_value=cdata.get('bal_beginning_value', 0),
+                                    bal_deposits_in=cdata.get('bal_deposits_in', 0),
+                                    bal_withdrawals_out=cdata.get('bal_withdrawals_out', 0),
+                                    bal_net_return=cdata.get('bal_net_return', 0),
+                                    bal_ending_value=cdata.get('bal_ending_value', 0),
+                                    bal_amount_invested=cdata.get('bal_amount_invested', 0),
+                                    perf_since_date=cdata.get('perf_since_date'),
+                                    perf_1yr=cdata.get('perf_1yr'),
+                                    perf_3yr=cdata.get('perf_3yr'),
+                                    perf_5yr=cdata.get('perf_5yr'),
+                                    perf_10yr=cdata.get('perf_10yr'),
+                                    perf_since=cdata.get('perf_since'),
+                                    chg_operating=cdata.get('chg_operating', 0),
+                                    chg_commissions=cdata.get('chg_commissions', 0),
+                                    chg_total_transaction=cdata.get('chg_total_transaction', 0),
+                                    chg_total_paid=cdata.get('chg_total_paid', 0),
+                                    comp_trailing=cdata.get('comp_trailing', 0),
+                                    comp_other=cdata.get('comp_other', 0),
+                                    comp_total=cdata.get('comp_total', 0),
                                 )
-                                RbcAnnualPerformance.objects.create(
-                                    rbc_annual_report=report,
-                                    as_at_date=perf.get('as_at_date'),
-                                    one_year=perf.get('one_year', Decimal('0.00')),
-                                    three_year=perf.get('three_year', Decimal('0.00')),
-                                    five_year=perf.get('five_year', Decimal('0.00')),
-                                    ten_year=perf.get('ten_year', Decimal('0.00')),
-                                    since_inception=perf.get('since_inception', Decimal('0.00')),
-                                    performance_return=perf_return,
-                                )
-                                annual_performance_recorded += 1
+                                records_saved += 1
 
-                            # Import charges
-                            for charge in parsed.get('charges', []):
-                                RbcAnnualCharges.objects.create(
-                                    rbc_annual_report=report,
-                                    account_type=charge.get('account_type', ''),
-                                    management_fee=charge.get('management_fee', Decimal('0.00')),
-                                    other_fees=charge.get('other_fees', Decimal('0.00')),
-                                    total_charges=charge.get('total_charges', Decimal('0.00')),
-                                )
-                                annual_charges_recorded += 1
-
-                            # Import compensation
-                            for comp in parsed.get('compensation', []):
-                                RbcAnnualCompensation.objects.create(
-                                    rbc_annual_report=report,
-                                    role=comp.get('role', ''),
-                                    base_salary=comp.get('base_salary', Decimal('0.00')),
-                                    bonus=comp.get('bonus', Decimal('0.00')),
-                                    long_term_incentive=comp.get('long_term_incentive', Decimal('0.00')),
-                                    total_compensation=comp.get('total_compensation', Decimal('0.00')),
-                                )
-                                annual_compensation_recorded += 1
-
-                        status = 'success' if annual_statements_created > 0 else 'partial'
                         FileImportLog.objects.create(
                             filename=filename,
                             broker='RBC',
-                            records_imported=(annual_balances_recorded + annual_performance_recorded +
-                                              annual_charges_recorded + annual_compensation_recorded),
+                            records_imported=records_saved,
                             records_skipped=0,
-                            status=status,
+                            status='ok',
                             content_hash=content_hash,
                         )
 
                         if not dry_run:
                             self._move_file(file_path, processed_dir)
 
-                        total_imported += (annual_balances_recorded + annual_performance_recorded +
-                                           annual_charges_recorded + annual_compensation_recorded)
+                        total_imported += records_saved
 
-                        self.stdout.write(
-                            f"  {filename}: {annual_statements_created} report, "
-                            f"{annual_balances_recorded} balances, "
-                            f"{annual_performance_recorded} performance, "
-                            f"{annual_charges_recorded} charges, "
-                            f"{annual_compensation_recorded} compensation"
-                        )
+                        self.stdout.write(f"  {filename}: {records_saved} RbcAnnual record(s) created")
                         logger.info(
                             f"auto_import: {filename} (Annual Report) - "
                             f"{annual_balances_recorded} balances, {annual_performance_recorded} performance, "

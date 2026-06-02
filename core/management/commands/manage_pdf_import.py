@@ -14,7 +14,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 from decimal import Decimal
 
-from core.models import Account, FileImportLog, PdfStatement, PdfAccountBalance, PdfTransaction
+from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from imports.parsers_pdf import parse_rbc_pdf, parse_rbc_pdf_multi
 
 logger = logging.getLogger(__name__)
@@ -237,7 +237,7 @@ class Command(BaseCommand):
                     continue
 
                 # Check for duplicate (per currency)
-                existing = PdfStatement.objects.filter(
+                existing = RbcMonthly.objects.filter(
                     account=account,
                     statement_date=statement_date,
                     currency=currency,
@@ -256,7 +256,7 @@ class Command(BaseCommand):
                 if dry_run:
                     self.stdout.write(
                         self.style.SUCCESS(
-                            f'Would create PdfStatement [{currency}] for {account} on {statement_date} '
+                            f'Would create RbcMonthly [{currency}] for {account} on {statement_date} '
                             f'with {len(parsed["transactions"])} transactions '
                             f'and {len(parsed["balances"])} balances'
                         )
@@ -266,8 +266,8 @@ class Command(BaseCommand):
                     file_balances_total += len(parsed['balances'])
                     continue
 
-                # Create PdfStatement
-                pdf_statement = PdfStatement.objects.create(
+                # Create RbcMonthly
+                rbc_monthly = RbcMonthly.objects.create(
                     account=account,
                     file_name=pdf_file.name,
                     statement_date=statement_date,
@@ -277,10 +277,10 @@ class Command(BaseCommand):
                     fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
                 )
 
-                # Create PdfAccountBalance records
+                # Create RbcMonthlyBalance records
                 for bal in parsed.get('balances', []):
-                    PdfAccountBalance.objects.create(
-                        pdf_statement=pdf_statement,
+                    RbcMonthlyBalance.objects.create(
+                        rbc_monthly=rbc_monthly,
                         currency=currency,
                         account_type=bal['account_type'],
                         opening_balance=bal.get('opening', Decimal('0.00')),
@@ -290,10 +290,10 @@ class Command(BaseCommand):
                     )
                     file_balances_total += 1
 
-                # Create PdfTransaction records
+                # Create RbcMonthlyTransaction records
                 for tx in parsed.get('transactions', []):
-                    PdfTransaction.objects.create(
-                        pdf_statement=pdf_statement,
+                    RbcMonthlyTransaction.objects.create(
+                        rbc_monthly=rbc_monthly,
                         date=tx['date'],
                         activity_type=tx['activity_type'],
                         description=tx['description'],

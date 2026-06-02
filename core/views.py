@@ -66,7 +66,7 @@ def _validate_date_param(date_str):
         raise ValueError(f"Invalid date format: {date_str}")
     return parsed
 
-from core.models import Transaction, Account, BrokerStatement, FileImportLog, TransactionType, RbcAnnualReport, RbcAnnualBalances, RbcAnnualPerformance, RbcAnnualCharges, RbcAnnualCompensation
+from core.models import Transaction, Account, BrokerStatement, FileImportLog, TransactionType, RbcAnnual
 from core.utils import (
     compute_portfolio_value_series,
     compute_realised_pnl,
@@ -1152,35 +1152,28 @@ def fetch_prices_api(request):
 @login_required
 def annual_reports_view(request):
     """List all RBC Annual Reports for the user's accounts."""
-    reports = RbcAnnualReport.objects.select_related('account').order_by('-report_year')
+    records = RbcAnnual.objects.select_related('account').order_by('-report_year', 'account', 'currency')
 
-    # Enrich each report with summary data
+    # Group into per-report summaries (one per account+year, combining CAD and USD rows)
     report_summaries = []
-    for report in reports:
-        # Get total charges in CAD
-        total_charges_cad = RbcAnnualCharges.objects.filter(
-            rbc_annual_report=report, currency='CAD'
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-
-        # Get total compensation in CAD
-        total_compensation_cad = RbcAnnualCompensation.objects.filter(
-            rbc_annual_report=report, currency='CAD'
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-
-        # Get net investment return from balances in CAD
-        cad_balance = RbcAnnualBalances.objects.filter(
-            rbc_annual_report=report, currency='CAD'
-        ).first()
-        net_return = cad_balance.net_investment_return if cad_balance else Decimal('0')
-        ending_value = cad_balance.ending_market_value if cad_balance else Decimal('0')
-
-        report_summaries.append({
-            'report': report,
-            'total_charges_cad': total_charges_cad,
-            'total_compensation_cad': total_compensation_cad,
-            'net_return': net_return,
-            'ending_value': ending_value,
-        })
+    seen = set()
+    for rec in records:
+        key = (rec.account_id, rec.report_year)
+        if key not in seen:
+            seen.add(key)
+            cad = records.filter(account=rec.account, report_year=rec.report_year, currency='CAD').first()
+            usd = records.filter(account=rec.account, report_year=rec.report_year, currency='USD').first()
+            report_summaries.append({
+                'account': rec.account,
+                'report_year': rec.report_year,
+                'file_name': rec.file_name,
+                'cad': cad,
+                'usd': usd,
+                'total_charges_cad': (cad.chg_total_paid if cad else Decimal('0')),
+                'total_compensation_cad': (cad.comp_total if cad else Decimal('0')),
+                'net_return': (cad.bal_net_return if cad else Decimal('0')),
+                'ending_value': (cad.bal_ending_value if cad else Decimal('0')),
+            })
 
     return render(request, 'core/annual_reports.html', {
         'report_summaries': report_summaries,

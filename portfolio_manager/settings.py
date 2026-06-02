@@ -181,6 +181,15 @@ IMPORT_LOGS_DIR = Path(_logs_raw) if _logs_raw else BASE_DIR / 'logs'
 _json_raw = os.getenv('IMPORT_JSON_DIR', '').strip() or _cfg.get('import', 'json_dir', fallback='').strip()
 IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / 'processed' / 'json_logs'
 
+# Vision-language (VL) model settings — Qwen2.5-VL on port 11440 via llama.cpp
+VL_MODEL_BASE_URL = os.getenv('VL_MODEL_BASE_URL', 'http://localhost:11440/v1')
+VL_MODEL_NAME = os.getenv('VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
+VL_PAGE_DPI = int(os.getenv('VL_PAGE_DPI', '150'))
+VL_MAX_RETRIES = int(os.getenv('VL_MAX_RETRIES', '2'))
+VL_TIMEOUT_SECONDS = int(os.getenv('VL_TIMEOUT_SECONDS', '120'))
+VL_MAX_PAGES = int(os.getenv('VL_MAX_PAGES', '3'))
+VL_MONTHLY_MAX_PAGES = int(os.getenv('VL_MONTHLY_MAX_PAGES', '5'))  # monthly statements have more pages
+
 # UI configuration via environment variables
 IMPORT_INBOX_POLL_INTERVAL = int(os.getenv('IMPORT_INBOX_POLL_INTERVAL', _cfg.get('import', 'poll_interval', fallback='300')))
 TRANSACTIONS_PAGE_SIZE = int(os.getenv('TRANSACTIONS_PAGE_SIZE', _cfg.get('ui', 'transactions_page_size', fallback='50')))

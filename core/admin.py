@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import BrokerStatement, Transaction, Account, TransactionType, FileImportLog, BrandingConfig
+from .models import RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction, RbcAnnual
 
 
 @admin.register(BrandingConfig)
@@ -60,3 +61,19 @@ class FileImportLogAdmin(admin.ModelAdmin):
     list_filter = ['status', 'broker']
     search_fields = ['filename']
     readonly_fields = ['imported_at', 'records_imported', 'records_skipped', 'error_message']
+
+
+@admin.register(RbcMonthly)
+class RbcMonthlyAdmin(admin.ModelAdmin):
+    list_display = ['account', 'statement_date', 'account_number', 'total_market_value', 'file_name']
+    list_filter = ['account']
+    search_fields = ['account_number', 'file_name']
+    date_hierarchy = 'statement_date'
+
+
+@admin.register(RbcAnnual)
+class RbcAnnualAdmin(admin.ModelAdmin):
+    list_display = ['account', 'report_year', 'currency', 'bal_ending_value', 'bal_net_return', 'chg_total_paid']
+    list_filter = ['account', 'currency', 'report_year']
+    search_fields = ['account_number', 'file_name']
+    readonly_fields = ['parsed_at']

@@ -9,6 +9,7 @@ from .models import (
     AlternativeHolding,
     ScoringConfig,
     SecurityIndexExposure,
+    DataQualityLog,
 )
 
 
@@ -70,3 +71,15 @@ class SecurityIndexExposureAdmin(admin.ModelAdmin):
     list_display = ("symbol", "index_name", "exposure_weight")
     list_filter = ("index_name",)
     search_fields = ("symbol",)
+
+
+@admin.register(DataQualityLog)
+class DataQualityLogAdmin(admin.ModelAdmin):
+    list_display = ("symbol", "event_type", "severity", "logged_at", "resolved")
+    list_filter = ("severity", "resolved", "event_type")
+    search_fields = ("symbol", "description")
+    actions = ["mark_resolved"]
+
+    def mark_resolved(self, request, queryset):
+        queryset.update(resolved=True, resolved_at=admin.utils.now())
+    mark_resolved.short_description = "Mark selected as resolved"

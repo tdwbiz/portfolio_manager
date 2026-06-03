@@ -255,3 +255,16 @@ LOGGING = {
         'django': {'level': 'WARNING'},
     },
 }
+
+# Amibroker export watch folder
+AMIBROKER_WATCH_FOLDER = r'C:\AI-Workspace\amibroker_exports'
+
+# yFinance fetch settings
+YFINANCE_DEFAULT_HISTORY_YEARS = 10   # Full history on first fetch
+YFINANCE_RETRY_ATTEMPTS = 3
+YFINANCE_RETRY_DELAY_SECONDS = 5
+YFINANCE_REQUEST_TIMEOUT = 30
+
+# Gap detection threshold
+PRICE_GAP_WARNING_DAYS = 5    # Warn if gap > 5 business days
+PRICE_GAP_CRITICAL_DAYS = 10  # Critical if gap > 10 business days

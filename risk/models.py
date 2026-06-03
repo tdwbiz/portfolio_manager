@@ -168,3 +168,31 @@ class SecurityIndexExposure(models.Model):
 
     def __str__(self):
         return f"{self.symbol} - {self.index_name}"
+
+
+class DataQualityLog(models.Model):
+    """Records data quality events: gaps, fetch failures, symbol mismatches."""
+
+    logged_at = models.DateTimeField(auto_now_add=True)
+    symbol = models.CharField(max_length=20, blank=True)
+    event_type = models.CharField(max_length=30)
+    # Values: 'gap_detected', 'fetch_failed', 'symbol_not_in_universe',
+    #         'mutual_fund_skipped', 'ticker_mapping_applied', 'insufficient_history'
+    severity = models.CharField(max_length=10)  # 'info', 'warning', 'critical'
+    description = models.TextField()
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    gap_days = models.IntegerField(null=True, blank=True)
+    resolved = models.BooleanField(default=False)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'rm_data_quality_log'
+        indexes = [
+            models.Index(fields=['symbol', 'logged_at']),
+            models.Index(fields=['event_type', 'severity']),
+            models.Index(fields=['resolved']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.symbol} - {self.severity}"

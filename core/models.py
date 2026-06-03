@@ -71,9 +71,42 @@ class Account(models.Model):
     )
     starting_balance       = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     starting_balance_date = models.DateField(null=True, blank=True)
+    exclude_from_risk = models.BooleanField(
+        default=False,
+        help_text='When True, this account is excluded from risk calculations'
+    )
 
     def __str__(self):
         return f"{self.name} ({self.broker})"
+
+
+class PositionHistory(models.Model):
+    """Tracks historical positions for an account over time."""
+    owner = models.CharField(max_length=50)
+    account = models.ForeignKey(
+        'Account',
+        on_delete=models.PROTECT,
+        related_name='position_history'
+    )
+    symbol = models.CharField(max_length=50)
+    quantity = models.DecimalField(max_digits=12, decimal_places=4)
+    cost_basis_per_unit = models.DecimalField(max_digits=12, decimal_places=4)
+    total_cost_basis = models.DecimalField(max_digits=15, decimal_places=2)
+    currency = models.CharField(max_length=3, default='CAD')
+    date_from = models.DateField()
+    date_to = models.DateField(null=True, blank=True)
+    as_of_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'core_position_history'
+        indexes = [
+            models.Index(fields=['account', 'symbol', 'date_from', 'date_to']),
+            models.Index(fields=['owner', 'date_from', 'date_to']),
+            models.Index(fields=['symbol', 'date_from', 'date_to']),
+        ]
+
+    def __str__(self):
+        return f"{self.owner} - {self.symbol} - {self.date_from}"
 
 
 class BrokerStatement(models.Model):

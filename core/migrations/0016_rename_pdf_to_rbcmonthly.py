@@ -35,6 +35,12 @@ class Migration(migrations.Migration):
             new_name='RbcMonthlyTransaction',
         ),
 
+        # --- Drop index before renaming FK field (SQLite cannot handle index on renamed field) ---
+        migrations.RemoveIndex(
+            model_name='RbcMonthlyTransaction',
+            name='core_pdftra_pdf_sta_2117c5_idx',
+        ),
+
         # --- Rename FK fields on child tables ---
         migrations.RenameField(
             model_name='RbcMonthlyBalance',
@@ -45,6 +51,14 @@ class Migration(migrations.Migration):
             model_name='RbcMonthlyTransaction',
             old_name='pdf_statement',
             new_name='rbc_monthly',
+        ),
+
+        # --- Recreate index with new FK name ---
+        migrations.AddIndex(
+            model_name='RbcMonthlyTransaction',
+            index=models.Index(
+                fields=['rbc_monthly', 'date'], name='core_rbcmon_transact_rbc_mon_4f3a1e_idx'
+            ),
         ),
 
         # --- Rename related_name on Account FK ---

@@ -47,45 +47,51 @@ class DataSourceTests(TestCase):
             primary_currency='USD',
             is_active=True,
         )
-        # Seed 10 rows of price data
+        # Seed 10 rows of price data (yfinance)
         for i in range(10):
             d = date(2026, 1, 1) + timedelta(days=i)
-            MarketPriceHistory.objects.create(
+            MarketPriceHistory.objects.update_or_create(
                 symbol=self.symbol,
                 date=d,
-                open=100.0 + i,
-                high=102.0 + i,
-                low=99.0 + i,
-                close=100.5 + i,
-                adj_close=100.5 + i,
-                volume=1000000,
-                currency='USD',
-                data_source='yfinance',
+                defaults={
+                    'open': 100.0 + i,
+                    'high': 102.0 + i,
+                    'low': 99.0 + i,
+                    'close': 100.5 + i,
+                    'adj_close': 100.5 + i,
+                    'volume': 1000000,
+                    'currency': 'USD',
+                    'data_source': 'yfinance',
+                },
             )
         # Also seed amibroker data for some dates to test priority
-        MarketPriceHistory.objects.create(
+        MarketPriceHistory.objects.update_or_create(
             symbol=self.symbol,
             date=date(2026, 1, 3),
-            open=200.0,
-            high=202.0,
-            low=199.0,
-            close=200.5,
-            adj_close=200.5,
-            volume=2000000,
-            currency='USD',
-            data_source='amibroker',
+            defaults={
+                'open': 200.0,
+                'high': 202.0,
+                'low': 199.0,
+                'close': 200.5,
+                'adj_close': 200.5,
+                'volume': 2000000,
+                'currency': 'USD',
+                'data_source': 'amibroker',
+            },
         )
-        MarketPriceHistory.objects.create(
+        MarketPriceHistory.objects.update_or_create(
             symbol=self.symbol,
             date=date(2026, 1, 4),
-            open=201.0,
-            high=203.0,
-            low=200.0,
-            close=201.5,
-            adj_close=201.5,
-            volume=2000000,
-            currency='USD',
-            data_source='amibroker',
+            defaults={
+                'open': 201.0,
+                'high': 203.0,
+                'low': 200.0,
+                'close': 201.5,
+                'adj_close': 201.5,
+                'volume': 2000000,
+                'currency': 'USD',
+                'data_source': 'amibroker',
+            },
         )
 
     def test_get_price_series_returns_correct_dates(self):
@@ -353,7 +359,7 @@ class IncrementalFetchTests(TestCase):
         }, index=idx)
         return df
 
-    @patch('risk.services.yfinance_client.fetch_symbol')
+    @patch('risk.management.commands.fetch_yfinance_prices.fetch_symbol')
     def test_incremental_fetch_only_adds_missing_dates(self, mock_fetch):
         """Incremental fetch should only add rows after last existing date."""
         # Seed data up to 2026-05-01
@@ -393,7 +399,7 @@ class IncrementalFetchTests(TestCase):
         ).count()
         self.assertEqual(count, 30)
 
-    @patch('risk.services.yfinance_client.fetch_symbol')
+    @patch('risk.management.commands.fetch_yfinance_prices.fetch_symbol')
     def test_yfinance_does_not_overwrite_amibroker_rows(self, mock_fetch):
         """yFinance should not insert rows where amibroker already has data."""
         # Seed (AAPL, 2026-01-15) with amibroker
@@ -444,7 +450,7 @@ class IncrementalFetchTests(TestCase):
         )
         self.assertEqual(float(amibroker_row.close), 150.5)
 
-    @patch('risk.services.yfinance_client.fetch_symbol')
+    @patch('risk.management.commands.fetch_yfinance_prices.fetch_symbol')
     def test_force_full_refetches_entire_history(self, mock_fetch):
         """With --force-full, fetch should go back 10 years."""
         # Seed some rows
@@ -509,17 +515,19 @@ class GapDetectionTests(TestCase):
         for i in range(30):
             d = today - timedelta(days=29 - i)
             if d.weekday() < 5:  # Only weekdays
-                MarketPriceHistory.objects.create(
+                MarketPriceHistory.objects.update_or_create(
                     symbol=self.test_symbol,
                     date=d,
-                    open=100.0 + i,
-                    high=101.0 + i,
-                    low=99.0 + i,
-                    close=100.5 + i,
-                    adj_close=100.5 + i,
-                    volume=1000000,
-                    currency='USD',
-                    data_source='yfinance',
+                    defaults={
+                        'open': 100.0 + i,
+                        'high': 101.0 + i,
+                        'low': 99.0 + i,
+                        'close': 100.5 + i,
+                        'adj_close': 100.5 + i,
+                        'volume': 1000000,
+                        'currency': 'USD',
+                        'data_source': 'yfinance',
+                    },
                 )
 
         # Create a gap: skip 7 calendar days (around 5 business days)
@@ -527,17 +535,19 @@ class GapDetectionTests(TestCase):
         for i in range(20):
             d = today - timedelta(days=19 - i)
             if d.weekday() < 5:
-                MarketPriceHistory.objects.create(
+                MarketPriceHistory.objects.update_or_create(
                     symbol=self.test_symbol,
                     date=d,
-                    open=110.0 + i,
-                    high=111.0 + i,
-                    low=109.0 + i,
-                    close=110.5 + i,
-                    adj_close=110.5 + i,
-                    volume=1000000,
-                    currency='USD',
-                    data_source='yfinance',
+                    defaults={
+                        'open': 110.0 + i,
+                        'high': 111.0 + i,
+                        'low': 109.0 + i,
+                        'close': 110.5 + i,
+                        'adj_close': 110.5 + i,
+                        'volume': 1000000,
+                        'currency': 'USD',
+                        'data_source': 'yfinance',
+                    },
                 )
 
         reports = detect_price_gaps(symbols=[self.test_symbol])
@@ -555,31 +565,35 @@ class GapDetectionTests(TestCase):
         # Seed Friday
         friday = today - timedelta(days=today.weekday() + 2)  # Last Friday
         if friday.weekday() == 4:
-            MarketPriceHistory.objects.create(
+            MarketPriceHistory.objects.update_or_create(
                 symbol=self.test_symbol,
                 date=friday,
-                open=100.0,
-                high=101.0,
-                low=99.0,
-                close=100.5,
-                adj_close=100.5,
-                volume=1000000,
-                currency='USD',
-                data_source='yfinance',
+                defaults={
+                    'open': 100.0,
+                    'high': 101.0,
+                    'low': 99.0,
+                    'close': 100.5,
+                    'adj_close': 100.5,
+                    'volume': 1000000,
+                    'currency': 'USD',
+                    'data_source': 'yfinance',
+                },
             )
             # Seed Monday
             monday = friday + timedelta(days=2)
-            MarketPriceHistory.objects.create(
+            MarketPriceHistory.objects.update_or_create(
                 symbol=self.test_symbol,
                 date=monday,
-                open=101.0,
-                high=102.0,
-                low=100.0,
-                close=101.5,
-                adj_close=101.5,
-                volume=1000000,
-                currency='USD',
-                data_source='yfinance',
+                defaults={
+                    'open': 101.0,
+                    'high': 102.0,
+                    'low': 100.0,
+                    'close': 101.5,
+                    'adj_close': 101.5,
+                    'volume': 1000000,
+                    'currency': 'USD',
+                    'data_source': 'yfinance',
+                },
             )
 
         reports = detect_price_gaps(symbols=[self.test_symbol])
@@ -597,34 +611,38 @@ class GapDetectionTests(TestCase):
         for i in range(30):
             d = today - timedelta(days=29 - i)
             if d.weekday() < 5:
-                MarketPriceHistory.objects.create(
+                MarketPriceHistory.objects.update_or_create(
                     symbol=self.test_symbol,
                     date=d,
-                    open=100.0 + i,
-                    high=101.0 + i,
-                    low=99.0 + i,
-                    close=100.5 + i,
-                    adj_close=100.5 + i,
-                    volume=1000000,
-                    currency='USD',
-                    data_source='yfinance',
+                    defaults={
+                        'open': 100.0 + i,
+                        'high': 101.0 + i,
+                        'low': 99.0 + i,
+                        'close': 100.5 + i,
+                        'adj_close': 100.5 + i,
+                        'volume': 1000000,
+                        'currency': 'USD',
+                        'data_source': 'yfinance',
+                    },
                 )
 
         # Create a gap
         for i in range(20):
             d = today - timedelta(days=19 - i)
             if d.weekday() < 5:
-                MarketPriceHistory.objects.create(
+                MarketPriceHistory.objects.update_or_create(
                     symbol=self.test_symbol,
                     date=d,
-                    open=110.0 + i,
-                    high=111.0 + i,
-                    low=109.0 + i,
-                    close=110.5 + i,
-                    adj_close=110.5 + i,
-                    volume=1000000,
-                    currency='USD',
-                    data_source='yfinance',
+                    defaults={
+                        'open': 110.0 + i,
+                        'high': 111.0 + i,
+                        'low': 109.0 + i,
+                        'close': 110.5 + i,
+                        'adj_close': 110.5 + i,
+                        'volume': 1000000,
+                        'currency': 'USD',
+                        'data_source': 'yfinance',
+                    },
                 )
 
         detect_price_gaps(symbols=[self.test_symbol])

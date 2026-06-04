@@ -1,9 +1,11 @@
 # Feature Spec: M0-Spec-1 — Data Models, position_history, Views & Seed Data
 
-**Project name:** portfolio_manager
-**App:** `core` (Phase A extension) + new `risk` app
-**Customer:** tdwdev
-**Feature branch:** `feature/risk-m0-data-models`
+Project name: portfolio_manager
+Customer: tdwdev
+Feature branch: feature/risk-m0-data-models
+
+---
+
 **Architecture ref:** PM_PhaseB_Architecture_Final_v2.0.md
 
 ---

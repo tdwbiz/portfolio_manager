@@ -1,9 +1,12 @@
 # Feature Spec: M0-Spec-2 — Data Pipeline
 
-**Project name:** portfolio_manager
-**App:** `risk` (new management commands) + `core` (read-only)
-**Customer:** tdwdev
-**Feature branch:** `feature/risk-m0-pipeline`
+Project name: portfolio_manager
+Customer: tdwdev
+Feature branch: feature/risk-m0-pipeline
+
+---
+
+
 **Architecture ref:** PM_PhaseB_Architecture_Final_v2.0.md
 **Depends on:** M0-Spec-1 fully implemented and verified — all `rm_` tables exist, `core_position_history` is populated, seed data is loaded
 

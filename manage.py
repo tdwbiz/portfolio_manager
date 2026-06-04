@@ -6,6 +6,11 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    # Ensure the project root is in sys.path BEFORE importing Django
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
     try:
         from django.core.management import execute_from_command_line

@@ -1,9 +1,11 @@
 # Feature Spec: M1-Spec-1 — Security-Level Risk Metrics
 
-**Project name:** portfolio_manager
-**App:** `risk`
-**Customer:** tdwdev
-**Feature branch:** `feature/risk-m1-security-metrics`
+Project name: portfolio_manager
+Customer: tdwdev
+Feature branch: feature/risk-m1-security-metrics
+
+---
+
 **Architecture ref:** PM_PhaseB_Architecture_Final_v2.0.md
 **Depends on:** M0-Spec-2 fully implemented — `rm_market_price_history`, `rm_volatility_summary`, and `rm_fx_rates` populated for all held symbols with no critical gaps
 

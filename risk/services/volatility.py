@@ -71,8 +71,9 @@ def compute_volatility_summaries(
 
 def _compute_and_upsert(symbol: str, lookback_days: int, calc_date: date) -> None:
     """Compute volatility for a single symbol/window and upsert into DB."""
-    # Need at least (lookback_window + 2) price rows to compute log returns
-    required = lookback_days + 2
+    # Need at least (lookback_window + 1) price rows to compute log returns
+    # np.diff(n prices) = n-1 returns; we need `lookback_days` returns
+    required = lookback_days + 1
 
     prices = (
         MarketPriceHistory.objects.filter(symbol=symbol)

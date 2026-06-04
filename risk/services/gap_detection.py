@@ -114,8 +114,8 @@ def _detect_gaps_for_symbol(
         if (missing_days[i] - missing_days[i - 1]).days == 1:
             gap_end = missing_days[i]
         else:
-            # End current gap
-            gap_days = (gap_end - gap_start).days
+            # End current gap — count business days in the gap
+            gap_days = _count_business_days(gap_start, gap_end)
             severity = _classify_severity(gap_days)
             report = GapReport(symbol, gap_start, gap_end, gap_days, severity)
             reports.append(report)
@@ -125,13 +125,24 @@ def _detect_gaps_for_symbol(
             gap_end = missing_days[i]
 
     # Handle last gap
-    gap_days = (gap_end - gap_start).days
+    gap_days = _count_business_days(gap_start, gap_end)
     severity = _classify_severity(gap_days)
     report = GapReport(symbol, gap_start, gap_end, gap_days, severity)
     reports.append(report)
     _log_gap_to_quality_log(report)
 
     return reports
+
+
+def _count_business_days(start: date, end: date) -> int:
+    """Count the number of business days (Mon-Fri) in [start, end] inclusive."""
+    count = 0
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 def _get_trading_days(start: date, end: date) -> list[date]:

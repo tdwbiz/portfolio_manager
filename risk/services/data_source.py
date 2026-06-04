@@ -60,6 +60,8 @@ class DataSource:
                 f"{start_date} and {end_date}"
             )
         values = df[field].astype(float)
+        # Convert DatetimeIndex to date objects so callers can index with date()
+        values.index = values.index.date
         return values
 
     def get_ohlcv(

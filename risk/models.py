@@ -196,3 +196,128 @@ class DataQualityLog(models.Model):
 
     def __str__(self):
         return f"{self.event_type} - {self.symbol} - {self.severity}"
+
+
+class SecurityRiskMetrics(models.Model):
+    """
+    Security-level risk metrics computed daily per held symbol.
+    All monetary values in USD. CAD positions converted via rm_fx_rates.
+    """
+    symbol = models.CharField(max_length=20)
+    calc_date = models.DateField()
+    
+    # --- Volatility ---
+    vol_10d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    vol_21d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    vol_63d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    vol_252d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Annualised: std(daily log returns over window) * sqrt(252)
+    # NULL if insufficient price history for that window
+    
+    # --- Drawdown ---
+    max_drawdown_from_cost = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Maximum peak-to-trough drawdown since earliest holding date per position_history
+    max_drawdown_252d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Maximum peak-to-trough drawdown over last 252 trading days from rm_market_price_history
+    current_drawdown_from_252d_peak = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # (current_price - max_price_252d) / max_price_252d; negative if below peak
+    
+    # --- Value at Risk (1-day) ---
+    var_parametric_95 = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Parametric normal: -z_0.05 * vol_21d / sqrt(252). Stored as positive fraction (e.g. 0.0312 = 3.12% loss)
+    var_parametric_99 = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    var_historical_95 = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # 5th percentile of last 252 daily log returns. Stored as positive fraction.
+    var_cornish_fisher_95 = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Cornish-Fisher expansion adjusts for skewness and kurtosis. See §3.3.
+    
+    # --- CVaR / Expected Shortfall ---
+    cvar_95 = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Mean of daily returns below the 5th percentile of the 252-day return distribution.
+    # Stored as positive fraction (expected loss in tail events).
+    
+    # --- 10-day VaR ---
+    var_parametric_95_10d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # 1-day parametric 95% VaR scaled by sqrt(10). Square-root-of-time rule.
+    var_parametric_99_10d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    
+    # --- Beta ---
+    beta_spy = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # OLS regression of symbol daily returns vs SPY daily returns, 252-day window.
+    # USD-denominated positions use SPY directly.
+    # CAD-denominated positions: use CAD-adjusted SPY returns (SPY return + FX change).
+    beta_xiu = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # OLS regression vs XIU.TO daily returns, 252-day window.
+    # Computed for all symbols but most meaningful for CAD-denominated ones.
+    
+    # --- Risk-Adjusted Return ---
+    sharpe_ratio = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # (mean_daily_return - daily_risk_free) / std_daily_return * sqrt(252)
+    # daily_risk_free = annualised SGOV yield / 252, from rm_economic_indicators
+    # mean_daily_return: log return from cost_basis_per_unit to current price / holding_days
+    # If no position_history entry: use 252-day price return instead
+    sortino_ratio = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # Same as Sharpe but denominator uses downside deviation only (returns below risk-free)
+    
+    # --- Liquidity ---
+    liquidity_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    # 0–100 scale. See §3.7 for formula. 100 = highly liquid; 0 = illiquid.
+    avg_daily_volume_usd_30d = models.DecimalField(max_digits=20, decimal_places=2, null=True)
+    # Average (volume * close) over last 30 trading days from rm_market_price_history.
+    # USD equivalent. NULL for mutual funds with no volume data.
+    
+    # --- Unrealised Gain at Risk ---
+    ugl_at_risk_95_usd = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    # For the largest position in this symbol across all accounts:
+    # 1-day 95% parametric VaR applied to total market value in USD.
+    # = position_market_value_usd * var_parametric_95
+    ugl_at_risk_pct_of_ugl = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # ugl_at_risk_usd / total_unrealised_gain_usd (across all accounts for this symbol).
+    # NULL if total UGL <= 0.
+    
+    # --- Metadata ---
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+    price_data_source = models.CharField(max_length=20, blank=True)
+    # 'amibroker', 'yfinance', or 'mixed' — which source provided the price data used
+    price_rows_used = models.IntegerField(default=0)
+    # Number of price rows available for this symbol at calc time (for audit)
+    
+    class Meta:
+        db_table = 'rm_security_risk_metrics'
+        unique_together = [('symbol', 'calc_date')]
+        indexes = [
+            models.Index(fields=['symbol', 'calc_date']),
+            models.Index(fields=['calc_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.symbol} - {self.calc_date}"
+
+
+class CorrelationMatrix(models.Model):
+    """
+    Pairwise correlation between symbols.
+    Both (A, B) and (B, A) are stored for query convenience.
+    Diagonal (A, A) is stored as 1.0.
+    """
+    symbol_a = models.CharField(max_length=20)
+    symbol_b = models.CharField(max_length=20)
+    calc_date = models.DateField()
+    pearson_252d = models.DecimalField(max_digits=8, decimal_places=6)
+    # Pearson r of daily log returns over the last 252 trading days.
+    # Range: -1.0 to 1.0.
+    # Only computed where both symbols have >= 126 overlapping trading days.
+    price_rows_overlap = models.IntegerField()
+    # Number of dates where both symbols had price data (for quality assessment)
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_correlation_matrix'
+        unique_together = [('symbol_a', 'symbol_b', 'calc_date')]
+        indexes = [
+            models.Index(fields=['calc_date', 'symbol_a']),
+            models.Index(fields=['calc_date', 'symbol_b']),
+        ]
+
+    def __str__(self):
+        return f"{self.symbol_a} - {self.symbol_b} - {self.calc_date}"

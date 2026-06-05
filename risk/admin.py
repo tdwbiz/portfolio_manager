@@ -10,6 +10,8 @@ from .models import (
     ScoringConfig,
     SecurityIndexExposure,
     DataQualityLog,
+    SecurityRiskMetrics,
+    CorrelationMatrix,
 )
 
 
@@ -83,3 +85,22 @@ class DataQualityLogAdmin(admin.ModelAdmin):
     def mark_resolved(self, request, queryset):
         queryset.update(resolved=True, resolved_at=admin.utils.now())
     mark_resolved.short_description = "Mark selected as resolved"
+
+
+@admin.register(SecurityRiskMetrics)
+class SecurityRiskMetricsAdmin(admin.ModelAdmin):
+    list_display = ['symbol', 'calc_date', 'vol_21d', 'var_parametric_95', 
+                    'beta_spy', 'sharpe_ratio', 'liquidity_score', 'calc_timestamp']
+    list_filter = ['calc_date', 'symbol']
+    search_fields = ['symbol']
+    ordering = ['-calc_date', 'symbol']
+    readonly_fields = [f.name for f in SecurityRiskMetrics._meta.fields]  # Never edited manually
+
+
+@admin.register(CorrelationMatrix)
+class CorrelationMatrixAdmin(admin.ModelAdmin):
+    list_display = ['symbol_a', 'symbol_b', 'calc_date', 'pearson_252d', 'price_rows_overlap']
+    list_filter = ['calc_date']
+    search_fields = ['symbol_a', 'symbol_b']
+    ordering = ['-calc_date', 'symbol_a', 'symbol_b']
+    readonly_fields = [f.name for f in CorrelationMatrix._meta.fields]

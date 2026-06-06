@@ -548,3 +548,121 @@ class PortfolioRiskMetrics(models.Model):
 
     def __str__(self):
         return f"{self.entity_type} - {self.entity_id} - {self.calc_date}"
+
+
+class SecurityDriver(models.Model):
+    """
+    Static risk driver characteristics per symbol.
+    Updated by the developer as portfolio changes; not recomputed daily.
+    These values represent the inherent riskiness of the instrument itself,
+    independent of market conditions.
+    """
+    symbol = models.CharField(max_length=20, unique=True)
+
+    asset_class_baseline = models.DecimalField(max_digits=5, decimal_places=2)
+    # Baseline risk score 0–100 for this asset class. Higher = riskier.
+    # Reference baselines:
+    #   cash_equiv: 10    mutual_fund: 12    etf_bond: 25
+    #   etf_equity: 45    cef: 55            common_stock: 60
+    #   crypto_etf: 80
+
+    sector_cyclicality = models.DecimalField(max_digits=5, decimal_places=2)
+    # 0–100. Higher = more cyclical = more sensitive to economic regime.
+    # Reference:
+    #   Utilities/Consumer Staples: 20   Healthcare: 30
+    #   Financials/Dividend: 40          Broad Market: 45
+    #   Technology: 65                   Semiconductor: 75
+    #   Crypto: 85
+
+    liquidity_tier = models.DecimalField(max_digits=5, decimal_places=2)
+    # Risk score from liquidity profile. Higher = less liquid = more risky.
+    # cash_equiv/mutual_fund: 5    large ETF: 15    mid ETF: 25
+    #   CEF (ADX): 45              small-cap stock: 55
+
+    earnings_proximity_flag = models.BooleanField(default=False)
+    # True if earnings announcement is within 14 days (updated externally or manually)
+    # When True: add earnings_proximity_boost from rm_scoring_config to driver score
+
+    notes = models.CharField(max_length=200, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rm_security_driver'
+        ordering = ['symbol']
+
+    def __str__(self):
+        return self.symbol
+
+
+class UrgencyScore(models.Model):
+    """
+    Urgency score for a risk entity. Produced daily after M1 and M2-Spec-1 complete.
+    entity_type='security_in_account': per symbol per account (most granular)
+    entity_type='account': rolled-up per account
+    entity_type='owner': rolled-up per owner
+    entity_type='portfolio': whole portfolio
+    """
+    ENTITY_TYPES = [
+        ('security_in_account', 'Security in Account'),
+        ('account', 'Account'),
+        ('owner', 'Owner'),
+        ('portfolio', 'Portfolio'),
+    ]
+
+    URGENCY_LEVELS = [
+        ('Low', 'Low'),
+        ('Medium', 'Medium'),
+        ('High', 'High'),
+        ('Critical', 'Critical'),
+    ]
+
+    DOMINANT_COMPONENTS = [
+        ('m1_metrics', 'M1 Metrics'),
+        ('security_driver', 'Security Driver'),
+        ('regime', 'Regime'),
+        ('market_condition', 'Market Condition'),
+    ]
+
+    entity_type = models.CharField(max_length=20, choices=ENTITY_TYPES)
+    entity_id = models.CharField(max_length=100)
+    symbol = models.CharField(max_length=20, blank=True)
+    account_id = models.CharField(max_length=50, blank=True)
+    calc_date = models.DateField()
+
+    # --- Composite Score ---
+    score_raw = models.DecimalField(max_digits=6, decimal_places=2)
+    # Weighted composite 0.0–100.0
+
+    urgency_level = models.CharField(max_length=10, choices=URGENCY_LEVELS)
+    # Thresholds from rm_scoring_config:
+    #   Low: score < threshold_low (default 25)
+    #   Medium: threshold_low <= score < threshold_medium (default 50)
+    #   High: threshold_medium <= score < threshold_high (default 75)
+    #   Critical: score >= threshold_high
+
+    # --- Component Scores (0–100 each, before weighting) ---
+    component_m1_score = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+    component_driver_score = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+    component_regime_score = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+    component_market_score = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+
+    # --- Dominant Factor ---
+    dominant_component = models.CharField(max_length=20, blank=True, choices=DOMINANT_COMPONENTS)
+
+    component_scores_json = models.TextField()
+    # Full JSON snapshot for M8 audit trail
+
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_urgency_score'
+        unique_together = [('entity_type', 'entity_id', 'calc_date')]
+        indexes = [
+            models.Index(fields=['calc_date', 'entity_type']),
+            models.Index(fields=['entity_id', 'calc_date']),
+            models.Index(fields=['urgency_level', 'calc_date']),
+            models.Index(fields=['symbol', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_type} - {self.entity_id} - {self.urgency_level} ({self.calc_date})"

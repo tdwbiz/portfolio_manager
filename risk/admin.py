@@ -13,6 +13,9 @@ from .models import (
     SecurityRiskMetrics,
     CorrelationMatrix,
     PortfolioRiskMetrics,
+    RegimeState,
+    MarketCondition,
+    RegimeSensitivity,
 )
 
 
@@ -120,3 +123,35 @@ class PortfolioRiskMetricsAdmin(admin.ModelAdmin):
     search_fields = ['entity_id']
     ordering = ['-calc_date', 'entity_type', 'entity_id']
     readonly_fields = [f.name for f in PortfolioRiskMetrics._meta.fields]
+
+
+@admin.register(RegimeState)
+class RegimeStateAdmin(admin.ModelAdmin):
+    list_display = [
+        'calc_date', 'quadrant', 'confidence_score', 'transition_flag',
+        'prob_q1', 'prob_q2', 'prob_q3', 'prob_q4',
+        'yield_curve_score', 'vix_score'
+    ]
+    list_filter = ['quadrant', 'transition_flag']
+    ordering = ['-calc_date']
+    readonly_fields = [f.name for f in RegimeState._meta.fields]
+
+
+@admin.register(MarketCondition)
+class MarketConditionAdmin(admin.ModelAdmin):
+    list_display = [
+        'symbol', 'calc_date', 'market_phase',
+        'rsi_14', 'crossover_type', 'macd_histogram',
+        'bb_pct_b', 'obv_trend', 'pct_from_52w_high'
+    ]
+    list_filter = ['calc_date', 'market_phase', 'crossover_type', 'symbol']
+    search_fields = ['symbol']
+    ordering = ['-calc_date', 'symbol']
+    readonly_fields = [f.name for f in MarketCondition._meta.fields]
+
+
+@admin.register(RegimeSensitivity)
+class RegimeSensitivityAdmin(admin.ModelAdmin):
+    list_display = ['asset_class', 'regime_quadrant', 'sensitivity_multiplier', 'rationale']
+    list_filter = ['regime_quadrant']
+    ordering = ['asset_class', 'regime_quadrant']

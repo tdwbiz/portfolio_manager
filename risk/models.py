@@ -323,6 +323,125 @@ class CorrelationMatrix(models.Model):
         return f"{self.symbol_a} - {self.symbol_b} - {self.calc_date}"
 
 
+class RegimeState(models.Model):
+    """
+    Detected macroeconomic regime at each daily calculation.
+    Four-quadrant model: growth vs contraction, inflation vs deflation.
+    """
+    calc_date = models.DateField(unique=True)
+
+    quadrant = models.CharField(max_length=2)
+    # Q1: Growth + Low Inflation (risk-on, equities supported)
+    # Q2: Growth + High Inflation (reflation; commodities, real assets favoured)
+    # Q3: Contraction + Low Inflation (deflation/recession; defensive positioning)
+    # Q4: Contraction + High Inflation (stagflation; most adverse for equities and bonds)
+
+    confidence_score = models.DecimalField(max_digits=5, decimal_places=2)
+    # 0.0 to 100.0. Probability gap between highest and second-highest quadrant.
+
+    transition_flag = models.BooleanField(default=False)
+    # True if probability of quadrant change exceeds transition_threshold_pct
+
+    yield_curve_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    vix_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    cpi_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    pmi_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    gdp_score = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+
+    prob_q1 = models.DecimalField(max_digits=5, decimal_places=4)
+    prob_q2 = models.DecimalField(max_digits=5, decimal_places=4)
+    prob_q3 = models.DecimalField(max_digits=5, decimal_places=4)
+    prob_q4 = models.DecimalField(max_digits=5, decimal_places=4)
+
+    indicator_snapshot_json = models.TextField()
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_regime_state'
+        indexes = [models.Index(fields=['calc_date'])]
+
+    def __str__(self):
+        return f"{self.calc_date} - {self.quadrant}"
+
+
+class MarketCondition(models.Model):
+    """
+    Technical indicator values per symbol per calculation date.
+    Computed from rm_market_price_history OHLCV.
+    """
+    symbol = models.CharField(max_length=20)
+    calc_date = models.DateField()
+
+    # --- Trend: Moving Averages ---
+    sma_50 = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    sma_200 = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    price_vs_sma50_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    price_vs_sma200_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+
+    # --- Moving Average Crossover ---
+    crossover_type = models.CharField(max_length=10, blank=True)
+    crossover_date = models.DateField(null=True, blank=True)
+
+    # --- Momentum: RSI ---
+    rsi_14 = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+
+    # --- Momentum: MACD ---
+    macd_line = models.DecimalField(max_digits=12, decimal_places=6, null=True)
+    macd_signal = models.DecimalField(max_digits=12, decimal_places=6, null=True)
+    macd_histogram = models.DecimalField(max_digits=12, decimal_places=6, null=True)
+    macd_crossover = models.CharField(max_length=10, blank=True)
+
+    # --- Volatility: Bollinger Bands ---
+    bb_upper = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    bb_middle = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    bb_lower = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    bb_bandwidth = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    bb_pct_b = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+
+    # --- Volume: On-Balance Volume ---
+    obv = models.BigIntegerField(null=True)
+    obv_trend = models.CharField(max_length=10, blank=True)
+
+    # --- Market Phase Classification ---
+    market_phase = models.CharField(max_length=15)
+
+    high_52w = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    low_52w = models.DecimalField(max_digits=18, decimal_places=4, null=True)
+    pct_from_52w_high = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+
+    price_rows_used = models.IntegerField(default=0)
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_market_condition'
+        unique_together = [('symbol', 'calc_date')]
+        indexes = [
+            models.Index(fields=['symbol', 'calc_date']),
+            models.Index(fields=['calc_date']),
+            models.Index(fields=['market_phase', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.symbol} - {self.calc_date} - {self.market_phase}"
+
+
+class RegimeSensitivity(models.Model):
+    """
+    Sensitivity multiplier for each (asset_class, regime_quadrant) combination.
+    """
+    asset_class = models.CharField(max_length=50)
+    regime_quadrant = models.CharField(max_length=2)
+    sensitivity_multiplier = models.DecimalField(max_digits=5, decimal_places=2)
+    rationale = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        db_table = 'rm_regime_sensitivity'
+        unique_together = [('asset_class', 'regime_quadrant')]
+
+    def __str__(self):
+        return f"{self.asset_class} / {self.regime_quadrant}: {self.sensitivity_multiplier}"
+
+
 class PortfolioRiskMetrics(models.Model):
     """
     Aggregated risk metrics at account, owner, or portfolio level.

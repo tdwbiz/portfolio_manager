@@ -321,3 +321,111 @@ class CorrelationMatrix(models.Model):
 
     def __str__(self):
         return f"{self.symbol_a} - {self.symbol_b} - {self.calc_date}"
+
+
+class PortfolioRiskMetrics(models.Model):
+    """
+    Aggregated risk metrics at account, owner, or portfolio level.
+    All monetary values in USD. Computed from rm_security_risk_metrics
+    and rm_correlation_matrix using position weights from vw_current_portfolio.
+    """
+    entity_type = models.CharField(max_length=20)
+    # Values: 'account', 'owner', 'portfolio'
+    entity_id = models.CharField(max_length=50)
+    # account: core_account.account_id string (e.g. 'TAXABLE_TOM_SUSAN')
+    # owner: 'TOM' or 'SUSAN'
+    # portfolio: 'ALL'
+    calc_date = models.DateField()
+
+    # --- Aggregate VaR ---
+    var_portfolio_95_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Markowitz correlated VaR at 95% confidence, 1-day horizon, in USD.
+    # = sqrt(w^T * Sigma * w) * z_0.05
+    var_portfolio_99_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    var_portfolio_95_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # var_portfolio_95_usd / total_market_value_usd — fraction of portfolio at risk
+    var_undiversified_95_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Simple sum of individual VaRs (ignores correlation) — for comparison only
+    diversification_benefit_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # var_undiversified_95_usd - var_portfolio_95_usd — dollar value of diversification
+
+    # --- Portfolio Volatility ---
+    portfolio_vol_annualised = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # Annualised portfolio volatility = sqrt(w^T * Sigma_annual * w)
+    # where Sigma_annual uses 252d annualised vols on the diagonal
+    diversification_ratio = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # weighted_avg_individual_vol / portfolio_vol_annualised
+    # > 1.0 means diversification is reducing risk. The higher, the better.
+    weighted_avg_vol = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # sum(weight_i * vol_252d_i) — naive weighted average, ignoring correlations
+
+    # --- Beta ---
+    portfolio_beta_spy = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # Weighted average of individual beta_spy values using market value weights
+    portfolio_beta_xiu = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # Weighted average of individual beta_xiu values
+
+    # --- Risk-Adjusted Returns ---
+    portfolio_sharpe = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # Portfolio Sharpe: constructed from daily portfolio return series
+    # (sum of weight_i * return_i each day over 252-day window), then standard Sharpe formula
+    portfolio_sortino = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+
+    # --- Concentration Metrics ---
+    top1_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # Weight of largest single position as fraction of entity total MV
+    top3_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    top5_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    top1_symbol = models.CharField(max_length=20, blank=True)
+    # Symbol name of largest single position (for display)
+
+    # --- HHI Concentration ---
+    hhi_symbol = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # Herfindahl-Hirschman Index by symbol weight. sum(weight_i^2). Range 0–1.
+    # 1.0 = single position; ~0.04 = perfectly equal 25-position portfolio
+    hhi_sector = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # HHI computed on sector weights (from rm_security_universe.sector)
+    hhi_asset_class = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # HHI computed on asset_class weights
+
+    # --- Effective Index Concentration ---
+    # Derived from rm_security_index_exposure × position weights
+    # E.g. VFV(13.5% of portfolio) × SP500 exposure(1.0) + SPY(3.4%) × 1.0 + VOO(2.9%) × 1.0 = 19.8% effective SP500
+    effective_sp500_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    effective_nasdaq100_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    effective_tsx_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    effective_semiconductor_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    effective_technology_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    effective_dividend_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # effective_DIVIDEND_CA + effective_DIVIDEND_US combined
+
+    # --- Tax Risk Flag ---
+    taxable_ugl_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Total unrealised gain in USD across all taxable accounts in this entity
+    # Only populated for entity_type='account' (taxable) and owner/portfolio roll-up
+    tax_risk_flag = models.BooleanField(default=False)
+    # True if taxable_ugl_usd > threshold from rm_scoring_config ('taxable_ugl_alert_usd')
+
+    # --- Portfolio Size ---
+    total_market_value_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    total_market_value_cad = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    position_count = models.IntegerField(default=0)
+    # Number of distinct symbol positions in this entity
+
+    # --- Metadata ---
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+    positions_used = models.IntegerField(default=0)
+    # Positions for which security-level metrics were available
+    positions_skipped = models.IntegerField(default=0)
+    # Positions where M1 metrics were NULL (insufficient data) — excluded from VaR calc
+
+    class Meta:
+        db_table = 'rm_portfolio_risk_metrics'
+        unique_together = [('entity_type', 'entity_id', 'calc_date')]
+        indexes = [
+            models.Index(fields=['calc_date', 'entity_type']),
+            models.Index(fields=['entity_id', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_type} - {self.entity_id} - {self.calc_date}"

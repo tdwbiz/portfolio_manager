@@ -12,6 +12,7 @@ from .models import (
     DataQualityLog,
     SecurityRiskMetrics,
     CorrelationMatrix,
+    PortfolioRiskMetrics,
 )
 
 
@@ -104,3 +105,18 @@ class CorrelationMatrixAdmin(admin.ModelAdmin):
     search_fields = ['symbol_a', 'symbol_b']
     ordering = ['-calc_date', 'symbol_a', 'symbol_b']
     readonly_fields = [f.name for f in CorrelationMatrix._meta.fields]
+
+
+@admin.register(PortfolioRiskMetrics)
+class PortfolioRiskMetricsAdmin(admin.ModelAdmin):
+    list_display = [
+        'entity_type', 'entity_id', 'calc_date',
+        'var_portfolio_95_usd', 'var_portfolio_95_pct',
+        'diversification_ratio', 'hhi_symbol',
+        'effective_sp500_weight', 'portfolio_beta_spy',
+        'tax_risk_flag', 'total_market_value_usd'
+    ]
+    list_filter = ['calc_date', 'entity_type', 'tax_risk_flag']
+    search_fields = ['entity_id']
+    ordering = ['-calc_date', 'entity_type', 'entity_id']
+    readonly_fields = [f.name for f in PortfolioRiskMetrics._meta.fields]

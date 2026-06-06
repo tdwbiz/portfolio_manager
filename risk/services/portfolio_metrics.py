@@ -95,7 +95,7 @@ def build_covariance_matrix(
     (indicates data quality issue — log the symbols involved).
     """
     n = len(symbols)
-    vols = np.array([security_metrics[s]['vol_252d'] for s in symbols])
+    vols = np.array([float(security_metrics[s]['vol_252d']) for s in symbols])
     cov = np.zeros((n, n))
 
     for i in range(n):

@@ -844,3 +844,151 @@ class UrgencyScore(models.Model):
 
     def __str__(self):
         return f"{self.entity_type} - {self.entity_id} - {self.urgency_level} ({self.calc_date})"
+
+
+class OwnerConfig(models.Model):
+    """
+    Owner-level configuration for tax rates and strategy preferences.
+    Populated manually via Django admin — NOT computed by the system.
+    """
+    owner = models.CharField(max_length=50, unique=True)
+    # 'TOM' or 'SUSAN'
+
+    marginal_tax_rate_ca = models.DecimalField(max_digits=5, decimal_places=4)
+    # Canadian marginal income tax rate (federal + provincial combined).
+    # Used for: capital gains tax = 0.5 * unrealised_gain * marginal_tax_rate_ca
+    # (Canada taxes 50% of capital gains as income for gains up to $250K annually;
+    #  66.67% inclusion for gains above $250K — store both rates if needed)
+    # Example: 0.4326 = 43.26% combined marginal rate
+
+    capital_gains_inclusion_rate = models.DecimalField(max_digits=4, decimal_places=4, default=0.5000)
+    # Fraction of capital gain included in income for tax purposes.
+    # Canada 2024+: 0.5000 for first $250K annually; 0.6667 above $250K.
+    # Default 0.5000. Set to 0.6667 if owner's annual gains exceed $250K threshold.
+
+    cost_tolerance_pct = models.DecimalField(max_digits=5, decimal_places=4, default=0.0200)
+    # Maximum acceptable hedging cost as a fraction of position market value.
+    # Example: 0.0200 = willing to spend up to 2% of position value on hedging annually.
+    # M4 uses this to filter out strategies that are too expensive.
+
+    preferences_json = models.TextField(default='{}')
+    # JSON blob for any additional owner preferences.
+    # E.g. {"max_option_expiry_months": 6, "preferred_trail_pct": 0.10,
+    #        "avoid_inverse_etf": false, "max_annual_gain_realisation_usd": 50000}
+
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True)
+    # Who last updated these rates — for audit trail.
+
+    class Meta:
+        db_table = 'rm_owner_config'
+
+    def __str__(self):
+        return f"{self.owner} — {self.marginal_tax_rate_ca * 100:.2f}% marginal tax"
+
+
+class StrategyRecommendation(models.Model):
+    """
+    A ranked strategy recommendation for a specific position in a specific account.
+    Produced by calc_strategy_recommendations management command.
+    All monetary values in USD.
+    """
+    # --- Entity identification ---
+    symbol = models.CharField(max_length=20)
+    account_id = models.CharField(max_length=50)
+    # core_account.account_id string (e.g. 'IB_SUSAN')
+    owner = models.CharField(max_length=50)
+    calc_date = models.DateField()
+
+    # --- Linked objects ---
+    strategy_template = models.ForeignKey(
+        'StrategyTemplate', on_delete=models.PROTECT, related_name='recommendations'
+    )
+    rank = models.IntegerField()
+    # 1 = best recommendation for this position on this date. Lower is better.
+
+    # --- Input context (snapshot at time of calculation) ---
+    urgency_level = models.CharField(max_length=10)
+    # Urgency level that triggered this recommendation run
+    urgency_score = models.DecimalField(max_digits=6, decimal_places=2)
+    regime_quadrant = models.CharField(max_length=2)
+    position_quantity = models.DecimalField(max_digits=12, decimal_places=4)
+    position_market_value_usd = models.DecimalField(max_digits=15, decimal_places=2)
+    position_unrealised_gain_usd = models.DecimalField(max_digits=15, decimal_places=2)
+    cost_basis_per_unit_usd = models.DecimalField(max_digits=12, decimal_places=4)
+    current_price_usd = models.DecimalField(max_digits=12, decimal_places=4)
+    vol_63d = models.DecimalField(max_digits=10, decimal_places=6, null=True)
+    # 63-day volatility used for option pricing
+
+    # --- Cost estimates ---
+    estimated_strategy_cost_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    # Total estimated cost to implement this strategy:
+    # For options: Black-Scholes premium + commission + bid-ask
+    # For trailing stop: commission only (no premium)
+    # For inverse ETF: estimated annual decay cost
+    estimated_strategy_cost_pct = models.DecimalField(max_digits=8, decimal_places=4)
+    # estimated_strategy_cost_usd / position_market_value_usd
+
+    tax_cost_estimate_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    # Estimated capital gains tax if this strategy triggers a taxable sale.
+    # = unrealised_gain_usd_sold * inclusion_rate * marginal_tax_rate
+    # 0 for strategies that do not require a sale (protective_put, collar, inverse_etf)
+    # 0 for tax-free accounts (TFSA, RRSP, RRIF)
+
+    tax_impact_note = models.CharField(max_length=300, blank=True)
+    # Plain English tax impact description.
+    # E.g. "Triggering this stop would crystallise ~$331K USD gain. Estimated tax: ~$71K USD."
+    # E.g. "No taxable event unless call is exercised (VFV called away at strike price)."
+    # E.g. "No tax consequence — TFSA account."
+
+    is_tax_triggering = models.BooleanField(default=False)
+    # True if this recommendation will definitely trigger a taxable event on execution.
+    # Drives M8 tax acknowledgement workflow.
+
+    # --- Risk reduction estimates ---
+    estimated_var_reduction_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    # Estimated reduction in 1-day 95% VaR in USD if this strategy is applied.
+    estimated_var_reduction_pct = models.DecimalField(max_digits=8, decimal_places=4)
+    # As fraction of position_market_value_usd
+
+    estimated_urgency_delta = models.DecimalField(max_digits=6, decimal_places=2, null=True)
+    # Estimated change in urgency score if strategy is applied. Negative = score decreases.
+
+    # --- Ranking metric ---
+    cost_per_var_reduction_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True)
+    # (estimated_strategy_cost_usd + tax_cost_estimate_usd * tax_penalty_multiplier)
+    #   / estimated_var_reduction_usd
+    # Lower is better — more risk reduction per dollar spent.
+    # NULL if estimated_var_reduction_usd is zero.
+
+    # --- Constraint audit ---
+    constraints_applied_json = models.TextField()
+    # JSON list of constraints that filtered the candidate set.
+    # E.g. ["options_not_available: removed protective_put, collar, covered_call",
+    #        "cef: removed all options templates",
+    #        "lif_restriction: removed partial_liquidation"]
+    # Stored for M8 explainability.
+
+    # --- Status ---
+    status = models.CharField(max_length=20, default='active')
+    # 'active': current recommendation
+    # 'actioned': user has marked this as implemented
+    # 'superseded': a newer recommendation replaced this one
+    # 'acknowledged': user acknowledged but did not act
+
+    actioned_at = models.DateTimeField(null=True, blank=True)
+    actioned_by = models.CharField(max_length=100, blank=True)
+
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_strategy_recommendation'
+        indexes = [
+            models.Index(fields=['symbol', 'account_id', 'calc_date']),
+            models.Index(fields=['calc_date', 'urgency_level']),
+            models.Index(fields=['status', 'calc_date']),
+            models.Index(fields=['is_tax_triggering', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.symbol} ({self.account_id}) — {self.strategy_template.code} — rank {self.rank} ({self.calc_date})"

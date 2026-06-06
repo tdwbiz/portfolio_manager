@@ -21,6 +21,8 @@ from .models import (
     InstrumentType,
     StrategyTemplate,
     StrategyInstrumentLink,
+    OwnerConfig,
+    StrategyRecommendation,
 )
 
 
@@ -251,3 +253,39 @@ class SecurityDriverAdmin(admin.ModelAdmin):
     search_fields = ['symbol']
     ordering = ['symbol']
     # Editable — developer updates these as portfolio changes
+
+
+@admin.register(OwnerConfig)
+class OwnerConfigAdmin(admin.ModelAdmin):
+    list_display = ['owner', 'marginal_tax_rate_ca', 'capital_gains_inclusion_rate',
+                    'cost_tolerance_pct', 'updated_at', 'updated_by']
+    fields = ['owner', 'marginal_tax_rate_ca', 'capital_gains_inclusion_rate',
+              'cost_tolerance_pct', 'preferences_json', 'updated_by']
+    # NOTE: marginal_tax_rate_ca and capital_gains_inclusion_rate are sensitive.
+    # These are user-supplied; the system only displays and uses them.
+
+
+@admin.register(StrategyRecommendation)
+class StrategyRecommendationAdmin(admin.ModelAdmin):
+    list_display = [
+        'symbol', 'account_id', 'calc_date', 'rank',
+        'strategy_template', 'urgency_level',
+        'estimated_strategy_cost_usd', 'tax_cost_estimate_usd',
+        'estimated_var_reduction_usd', 'cost_per_var_reduction_usd',
+        'is_tax_triggering', 'status'
+    ]
+    list_filter = ['calc_date', 'urgency_level', 'status', 'is_tax_triggering', 'account_id']
+    search_fields = ['symbol', 'account_id', 'tax_impact_note']
+    ordering = ['-calc_date', 'symbol', 'rank']
+    readonly_fields = [
+        'symbol', 'account_id', 'owner', 'calc_date', 'strategy_template', 'rank',
+        'urgency_level', 'urgency_score', 'regime_quadrant',
+        'position_quantity', 'position_market_value_usd', 'position_unrealised_gain_usd',
+        'cost_basis_per_unit_usd', 'current_price_usd', 'vol_63d',
+        'estimated_strategy_cost_usd', 'estimated_strategy_cost_pct',
+        'tax_cost_estimate_usd', 'tax_impact_note', 'is_tax_triggering',
+        'estimated_var_reduction_usd', 'estimated_var_reduction_pct',
+        'estimated_urgency_delta', 'cost_per_var_reduction_usd',
+        'constraints_applied_json', 'calc_timestamp'
+    ]
+    # status, actioned_at, actioned_by are editable (user can mark as actioned)

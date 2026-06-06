@@ -18,7 +18,74 @@ from .models import (
     RegimeSensitivity,
     SecurityDriver,
     UrgencyScore,
+    InstrumentType,
+    StrategyTemplate,
+    StrategyInstrumentLink,
 )
+
+
+class StrategyInstrumentLinkInline(admin.TabularInline):
+    model = StrategyInstrumentLink
+    extra = 1
+    fields = ['instrument', 'role', 'sort_order']
+
+
+@admin.register(InstrumentType)
+class InstrumentTypeAdmin(admin.ModelAdmin):
+    list_display = [
+        'code', 'name',
+        'eligible_tfsa', 'eligible_rrsp', 'eligible_lif', 'eligible_rrif', 'eligible_taxable',
+        'requires_options_availability', 'wash_sale_applicable', 'is_active'
+    ]
+    list_filter = [
+        'eligible_tfsa', 'eligible_taxable',
+        'requires_options_availability', 'wash_sale_applicable', 'is_active'
+    ]
+    search_fields = ['code', 'name']
+    ordering = ['sort_order', 'name']
+    readonly_fields = ['created_at', 'updated_at']
+    fieldsets = [
+        ('Identity', {'fields': ['code', 'name', 'sort_order', 'is_active']}),
+        ('Description', {'fields': ['mechanics_description', 'use_cases_json']}),
+        ('Cost & Tax', {'fields': ['cost_structure_json', 'tax_treatment_json']}),
+        ('Eligibility', {'fields': [
+            'eligible_tfsa', 'eligible_rrsp', 'eligible_lif', 'eligible_rrif', 'eligible_taxable',
+            'requires_options_availability', 'wash_sale_applicable'
+        ]}),
+        ('Metadata', {'fields': ['created_at', 'updated_at'], 'classes': ['collapse']}),
+    ]
+
+
+@admin.register(StrategyTemplate)
+class StrategyTemplateAdmin(admin.ModelAdmin):
+    list_display = [
+        'code', 'name',
+        'applicable_urgency_levels', 'applicable_regime_quadrants',
+        'requires_options', 'cef_eligible', 'lif_rrif_eligible',
+        'is_tax_triggering', 'is_active'
+    ]
+    list_filter = [
+        'applicable_urgency_levels', 'applicable_regime_quadrants',
+        'requires_options', 'cef_eligible', 'lif_rrif_eligible',
+        'is_tax_triggering', 'is_active'
+    ]
+    search_fields = ['code', 'name', 'description']
+    ordering = ['sort_order', 'name']
+    readonly_fields = ['created_at', 'updated_at']
+    inlines = [StrategyInstrumentLinkInline]
+    fieldsets = [
+        ('Identity', {'fields': ['code', 'name', 'sort_order', 'is_active']}),
+        ('Description', {'fields': ['description']}),
+        ('Applicability Tags', {'fields': [
+            'applicable_urgency_levels', 'applicable_regime_quadrants',
+            'applicable_asset_types', 'applicable_account_categories',
+            'min_unrealised_gain_usd'
+        ]}),
+        ('Constraints', {'fields': [
+            'requires_options', 'cef_eligible', 'lif_rrif_eligible', 'is_tax_triggering'
+        ]}),
+        ('Metadata', {'fields': ['created_at', 'updated_at'], 'classes': ['collapse']}),
+    ]
 
 
 class AlternativeHoldingInline(admin.TabularInline):

@@ -594,6 +594,184 @@ class SecurityDriver(models.Model):
         return self.symbol
 
 
+class InstrumentType(models.Model):
+    """
+    A category of risk management instrument.
+    Defines mechanics, cost structure, and eligibility rules.
+    This is reference data — edited via Django admin, not by application logic.
+    """
+    code = models.CharField(max_length=30, unique=True)
+    # Machine-readable identifier used by M4 engine.
+    # Values: 'protective_put', 'collar', 'covered_call', 'trailing_stop',
+    #         'inverse_etf', 'sector_rotation', 'partial_liquidation', 'cash_raise',
+    #         'diversification'
+
+    name = models.CharField(max_length=100)
+    # Human-readable name. E.g. "Protective Put Option"
+
+    mechanics_description = models.TextField()
+    # Plain English: what this instrument is and how it works.
+    # Written for a knowledgeable investor, not a finance textbook.
+
+    use_cases_json = models.TextField()
+    # JSON list of strings. When is this instrument appropriate?
+    # E.g. ["High urgency single stock", "Pre-earnings risk reduction",
+    #        "Taxable position where sale is not desirable"]
+
+    cost_structure_json = models.TextField()
+    # JSON object. How does this instrument cost money?
+    # E.g. {"type": "premium", "typical_pct_of_notional": 0.02,
+    #        "bid_ask_spread_pct": 0.003, "commission_per_contract": 1.50}
+    # For trailing_stop: {"type": "friction_only", "bid_ask_spread_pct": 0.001,
+    #                     "commission_per_trade": 1.00}
+
+    tax_treatment_json = models.TextField()
+    # JSON object keyed by account_category.
+    # E.g. {
+    #   "TFSA": {"tax_cost_on_exercise": false, "wash_sale_applicable": false, "notes": "No tax consequence"},
+    #   "RRSP": {"tax_cost_on_exercise": false, "wash_sale_applicable": false, "notes": "Sheltered"},
+    #   "LIF":  {"tax_cost_on_exercise": false, "wash_sale_applicable": false, "notes": "Sheltered; locked-in"},
+    #   "RRIF": {"tax_cost_on_exercise": false, "wash_sale_applicable": false, "notes": "Sheltered; mandatory drawdown"},
+    #   "Taxable": {"tax_cost_on_exercise": true, "wash_sale_applicable": true,
+    #               "notes": "Exercise triggers capital gain; wash sale if repurchase within 30 days"}
+    # }
+
+    # Account type eligibility flags
+    eligible_tfsa = models.BooleanField(default=True)
+    eligible_rrsp = models.BooleanField(default=True)
+    eligible_lif = models.BooleanField(default=True)
+    eligible_rrif = models.BooleanField(default=True)
+    eligible_taxable = models.BooleanField(default=True)
+    # False means this instrument CANNOT be used in that account type.
+    # E.g. options strategies are generally not available in registered accounts at most brokers.
+    # For this portfolio (IB accounts): options ARE available in IB_SUSAN, IB_TOM, IB_JOINT.
+    # For registered accounts (RRSP, TFSA, etc.): options are NOT available — set to False.
+
+    requires_options_availability = models.BooleanField(default=False)
+    # True for protective_put, collar, covered_call.
+    # M4 checks rm_security_universe.options_available before recommending these.
+
+    wash_sale_applicable = models.BooleanField(default=False)
+    # True if this instrument can trigger wash sale rules (US tax law).
+    # Applies to: partial_liquidation followed by repurchase.
+    # Relevant for IB_SUSAN, IB_TOM, IB_JOINT (US-listed securities in taxable accounts).
+
+    sort_order = models.IntegerField(default=0)
+    # Display ordering in admin and UI. Lower = shown first.
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rm_instrument_type'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class StrategyTemplate(models.Model):
+    """
+    A named, scenario-specific risk management strategy.
+    Combines one or more instrument types into an actionable playbook.
+    M4 queries this table to find candidates for a given position/urgency/regime.
+    """
+    code = models.CharField(max_length=50, unique=True)
+    # Machine-readable identifier. E.g. 'collar_high_gain_taxable_stock'
+
+    name = models.CharField(max_length=150)
+    # Human-readable name shown in reports and dashboard.
+
+    description = models.TextField()
+    # Plain English explanation of the strategy: what it does, why it works,
+    # and what the investor gives up. Written for an informed investor.
+
+    # --- Tagging — used by M4 for candidate filtering ---
+
+    applicable_urgency_levels = models.CharField(max_length=50)
+    # Comma-separated list of urgency levels where this template is relevant.
+    # Values: 'Low', 'Medium', 'High', 'Critical'
+    # E.g. 'High,Critical' — only recommend this template for High or Critical urgency.
+
+    applicable_regime_quadrants = models.CharField(max_length=20)
+    # Comma-separated list of regime quadrants. 'ALL' means regime-agnostic.
+    # E.g. 'Q3,Q4' — only recommend in contraction/stagflation regimes.
+    # E.g. 'ALL' — recommend regardless of regime.
+
+    applicable_asset_types = models.CharField(max_length=100)
+    # Comma-separated list of asset_class values from rm_security_universe.
+    # E.g. 'common_stock,etf_equity' — applies to stocks and equity ETFs.
+    # E.g. 'common_stock' — stocks only (e.g. options-based strategies).
+
+    applicable_account_categories = models.CharField(max_length=100)
+    # Comma-separated list of account categories where this template is valid.
+    # Values match core_account.category: 'Investment', 'Investment Joint',
+    #   'TFSA', 'RRSP', 'LIF', 'RRIF'
+    # E.g. 'Investment,Investment Joint' — taxable accounts only.
+    # E.g. 'ALL' — any account type.
+
+    min_unrealised_gain_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # Minimum UGL in USD for this template to be applicable.
+    # E.g. 50000 — only recommend partial liquidation if gain > $50K USD.
+    # 0 = no minimum (applicable at any gain level, including losses).
+
+    requires_options = models.BooleanField(default=False)
+    # True if any instrument in this template requires options availability.
+    # M4 checks rm_security_universe.options_available and skips if False.
+
+    cef_eligible = models.BooleanField(default=True)
+    # False if this template cannot be used for closed-end funds (e.g. ADX).
+    # Options-based templates must have cef_eligible=False.
+
+    lif_rrif_eligible = models.BooleanField(default=True)
+    # False if withdrawal restrictions make this template impractical for LIF/RRIF.
+    # Partial liquidation in a LIF triggers locked-in pension rules — flag it.
+
+    is_tax_triggering = models.BooleanField(default=False)
+    # True if applying this strategy will crystallise a taxable gain.
+    # Drives M8 tax acknowledgement workflow when recommendation is marked actioned.
+    # True for: partial_liquidation in taxable accounts, covered_call (premium is income),
+    #           inverse_etf (when closed at a gain).
+
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rm_strategy_template'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class StrategyInstrumentLink(models.Model):
+    """
+    Links a strategy template to the instrument types it uses.
+    role describes how the instrument functions within the strategy.
+    """
+    strategy = models.ForeignKey(
+        StrategyTemplate, on_delete=models.CASCADE, related_name='instrument_links'
+    )
+    instrument = models.ForeignKey(
+        InstrumentType, on_delete=models.CASCADE, related_name='strategy_links'
+    )
+    role = models.CharField(max_length=50)
+    # How this instrument is used in the strategy.
+    # E.g. 'primary_hedge', 'income_offset', 'exit_trigger'
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'rm_strategy_instrument_link'
+        unique_together = [('strategy', 'instrument')]
+        ordering = ['sort_order']
+
+    def __str__(self):
+        return f"{self.strategy.code} -> {self.instrument.code} ({self.role})"
+
+
 class UrgencyScore(models.Model):
     """
     Urgency score for a risk entity. Produced daily after M1 and M2-Spec-1 complete.

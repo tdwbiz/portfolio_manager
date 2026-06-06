@@ -16,6 +16,8 @@ from .models import (
     RegimeState,
     MarketCondition,
     RegimeSensitivity,
+    SecurityDriver,
+    UrgencyScore,
 )
 
 
@@ -155,3 +157,30 @@ class RegimeSensitivityAdmin(admin.ModelAdmin):
     list_display = ['asset_class', 'regime_quadrant', 'sensitivity_multiplier', 'rationale']
     list_filter = ['regime_quadrant']
     ordering = ['asset_class', 'regime_quadrant']
+
+
+@admin.register(UrgencyScore)
+class UrgencyScoreAdmin(admin.ModelAdmin):
+    list_display = [
+        'entity_type', 'entity_id', 'symbol', 'calc_date',
+        'urgency_level', 'score_raw',
+        'component_m1_score', 'component_driver_score',
+        'component_regime_score', 'component_market_score',
+        'dominant_component'
+    ]
+    list_filter = ['calc_date', 'entity_type', 'urgency_level', 'dominant_component']
+    search_fields = ['entity_id', 'symbol']
+    ordering = ['-calc_date', '-score_raw']
+    readonly_fields = [f.name for f in UrgencyScore._meta.fields]
+
+
+@admin.register(SecurityDriver)
+class SecurityDriverAdmin(admin.ModelAdmin):
+    list_display = [
+        'symbol', 'asset_class_baseline', 'sector_cyclicality',
+        'liquidity_tier', 'earnings_proximity_flag', 'updated_at'
+    ]
+    list_filter = ['earnings_proximity_flag']
+    search_fields = ['symbol']
+    ordering = ['symbol']
+    # Editable — developer updates these as portfolio changes

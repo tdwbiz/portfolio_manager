@@ -992,3 +992,176 @@ class StrategyRecommendation(models.Model):
 
     def __str__(self):
         return f"{self.symbol} ({self.account_id}) — {self.strategy_template.code} — rank {self.rank} ({self.calc_date})"
+
+
+class HistoricalScenario(models.Model):
+    """
+    A historical market scenario with predefined asset-class and benchmark returns.
+    Used by the backtesting engine to simulate portfolio performance under
+    known historical conditions (e.g., 2022 rate shock, 2020 COVID crash).
+    """
+    name = models.CharField(max_length=100, unique=True)
+    # Machine-readable name, e.g. '2022_rate_shock', '2020_covid_crash'
+
+    display_name = models.CharField(max_length=200)
+    # Human-readable name, e.g. '2022 Rate Shock (Bank of Canada 425bp hikes)'
+
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    description = models.TextField(blank=True)
+    # Longer description of the scenario context
+
+    asset_class_returns_json = models.TextField()
+    # JSON object mapping asset class codes to total returns.
+    # E.g. {"equity_ca": -0.18, "equity_us": -0.05, "fixed_income_ca": -0.12,
+    #       "commodities": 0.02, "real_estate": -0.20, "cash": 0.04}
+    # These are applied in stress-test mode when no price history exists.
+
+    benchmark_spy_return = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    # S&P 500 ETF (SPY) total return during the scenario period.
+    # Used as a US equity benchmark for comparison.
+
+    benchmark_qqq_return = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    # NASDAQ-100 ETF (QQQ) total return during the scenario period.
+    # Used as a tech-heavy benchmark.
+
+    benchmark_vdy_return = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    # Canadian broad-market ETF (VDY) total return during the scenario period.
+    # Used as a Canadian equity benchmark.
+
+    is_active = models.BooleanField(default=True)
+    # Only active scenarios are available for backtesting
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_historical_scenario'
+        ordering = ['start_date']
+
+    def __str__(self):
+        return f"{self.display_name} ({self.start_date} → {self.end_date})"
+
+
+class BacktestRun(models.Model):
+    """
+    A single backtest execution record. Append-only — never updated or deleted.
+    Links a position, strategy, and historical scenario to produce a BacktestResult.
+    """
+    symbol = models.CharField(max_length=20)
+    account_id = models.CharField(max_length=50)
+    owner = models.CharField(max_length=50)
+    strategy_template = models.ForeignKey(
+        'StrategyTemplate', on_delete=models.PROTECT, related_name='backtest_runs'
+    )
+    scenario = models.ForeignKey(
+        'HistoricalScenario', on_delete=models.PROTECT, related_name='backtest_runs'
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+    quantity = models.DecimalField(max_digits=12, decimal_places=4)
+    cost_basis_per_unit_usd = models.DecimalField(max_digits=12, decimal_places=4)
+    start_price_usd = models.DecimalField(max_digits=12, decimal_places=4)
+    currency = models.CharField(max_length=3, default='CAD')
+    # CAD or USD
+
+    strategy_params_json = models.TextField(default='{}')
+    # JSON blob of strategy-specific parameters used in this run.
+    # E.g. {"trail_pct": 0.10} for trailing stop,
+    #      {"hedge_ratio": 0.50, "option_expiry_months": 3} for protective put,
+    #      {"put_strike_pct": 0.85, "call_strike_pct": 1.12} for collar
+
+    run_timestamp = models.DateTimeField(auto_now_add=True)
+    run_by = models.CharField(max_length=100, blank=True)
+    # 'system' or the username of the person who triggered the run
+
+    class Meta:
+        db_table = 'rm_backtest_run'
+        indexes = [
+            models.Index(fields=['symbol', 'account_id']),
+            models.Index(fields=['scenario', 'run_timestamp']),
+            models.Index(fields=['strategy_template', 'run_timestamp']),
+        ]
+
+    def __str__(self):
+        return f"{self.symbol} ({self.account_id}) — {self.strategy_template.code} — {self.scenario.name}"
+
+
+class BacktestResult(models.Model):
+    """
+    Computed results from a single backtest run. One-to-one with BacktestRun.
+    All monetary values in USD. Append-only.
+    """
+    run = models.OneToOneField(
+        BacktestRun, on_delete=models.CASCADE, related_name='result'
+    )
+
+    # --- Total Returns ---
+    total_return_unhedged_pct = models.DecimalField(max_digits=8, decimal_places=6)
+    # Total return of unhedged position over the period (e.g. -0.18 = -18%)
+
+    total_return_hedged_pct = models.DecimalField(max_digits=8, decimal_places=6)
+    # Total return of hedged position including hedge P&L
+
+    return_improvement_pct = models.DecimalField(max_digits=8, decimal_places=6)
+    # total_return_hedged_pct - total_return_unhedged_pct
+
+    # --- Drawdown ---
+    max_drawdown_unhedged = models.DecimalField(max_digits=8, decimal_places=6)
+    # Peak-to-trough drawdown of unhedged position (negative value)
+
+    max_drawdown_hedged = models.DecimalField(max_digits=8, decimal_places=6)
+    # Peak-to-trough drawdown of hedged position
+
+    drawdown_reduction_pct = models.DecimalField(max_digits=8, decimal_places=6)
+    # max_drawdown_unhedged - max_drawdown_hedged (positive = reduction)
+
+    # --- Hedge Cost ---
+    hedge_cost_total_usd = models.DecimalField(max_digits=12, decimal_places=2)
+    # Total cost of the hedge over the period (premium + commission)
+
+    hedge_cost_pct_of_position = models.DecimalField(max_digits=8, decimal_places=6)
+    # hedge_cost_total_usd / position_value_start_usd
+
+    # --- Hedge Effectiveness ---
+    hedge_effectiveness_ratio = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    # (drawdown_unhedged - drawdown_hedged) / hedge_cost_pct_of_position
+    # Positive = hedge reduced drawdown more than its cost. NULL if cost is zero.
+
+    breakeven_annual_cost_pct = models.DecimalField(max_digits=8, decimal_places=6, null=True, blank=True)
+    # Annualized cost percentage at which hedge breaks even vs. unhedged drawdown.
+    # Used to assess whether the hedge cost was justified.
+
+    # --- Strategy-specific outcomes ---
+    stop_triggered = models.BooleanField(null=True, blank=True, default=None)
+    # True if trailing stop was triggered during the period
+    stop_trigger_date = models.DateField(null=True, blank=True)
+    stop_trigger_price_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+
+    option_expired_worthless = models.BooleanField(null=True, blank=True, default=None)
+    # True if put/call options expired without being exercised
+    option_payoff_usd = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    # Net payoff from options (positive = gain, negative = loss)
+
+    # --- Position values ---
+    position_value_start_usd = models.DecimalField(max_digits=15, decimal_places=2)
+    # quantity * start_price_usd
+
+    position_value_end_unhedged_usd = models.DecimalField(max_digits=15, decimal_places=2)
+    # Final unhedged position value
+
+    position_value_end_hedged_usd = models.DecimalField(max_digits=15, decimal_places=2)
+    # Final hedged position value + hedge P&L
+
+    # --- Regime split ---
+    regime_split_json = models.TextField(default='{}')
+    # JSON object mapping regime quadrants to sub-period returns.
+    # E.g. {"bull_bear": {"unhedged": -0.05, "hedged": -0.02, "days": 45}, ...}
+
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_backtest_result'
+
+    def __str__(self):
+        return f"{self.run.symbol} — {self.run.strategy_template.code} — {self.run.scenario.name}"

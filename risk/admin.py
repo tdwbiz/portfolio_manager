@@ -23,6 +23,9 @@ from .models import (
     StrategyInstrumentLink,
     OwnerConfig,
     StrategyRecommendation,
+    HistoricalScenario,
+    BacktestRun,
+    BacktestResult,
 )
 
 
@@ -289,3 +292,103 @@ class StrategyRecommendationAdmin(admin.ModelAdmin):
         'constraints_applied_json', 'calc_timestamp'
     ]
     # status, actioned_at, actioned_by are editable (user can mark as actioned)
+
+
+@admin.register(HistoricalScenario)
+class HistoricalScenarioAdmin(admin.ModelAdmin):
+    list_display = ['display_name', 'start_date', 'end_date', 'is_active', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['name', 'display_name']
+    readonly_fields = ['created_at']
+    fieldsets = [
+        ('Identity', {'fields': ['name', 'display_name', 'is_active']}),
+        ('Date Range', {'fields': ['start_date', 'end_date']}),
+        ('Description', {'fields': ['description']}),
+        ('Asset Class Returns', {'fields': ['asset_class_returns_json']}),
+        ('Benchmark Returns', {
+            'fields': [
+                'benchmark_spy_return', 'benchmark_qqq_return', 'benchmark_vdy_return'
+            ]
+        }),
+        ('Audit', {'fields': ['created_at']}),
+    ]
+
+
+@admin.register(BacktestRun)
+class BacktestRunAdmin(admin.ModelAdmin):
+    list_display = ['symbol', 'account_id', 'strategy_template', 'scenario',
+                    'start_date', 'end_date', 'run_timestamp']
+    list_filter = ['run_timestamp', 'symbol', 'account_id']
+    search_fields = ['symbol', 'account_id']
+    readonly_fields = [
+        'symbol', 'account_id', 'owner', 'strategy_template', 'scenario',
+        'start_date', 'end_date', 'quantity', 'cost_basis_per_unit_usd',
+        'start_price_usd', 'currency', 'strategy_params_json', 'run_timestamp', 'run_by'
+    ]
+    fieldsets = [
+        ('Position', {'fields': ['symbol', 'account_id', 'owner', 'quantity',
+                                 'cost_basis_per_unit_usd', 'start_price_usd', 'currency']}),
+        ('Strategy & Scenario', {'fields': ['strategy_template', 'scenario']}),
+        ('Date Range', {'fields': ['start_date', 'end_date']}),
+        ('Strategy Params', {'fields': ['strategy_params_json']}),
+        ('Audit', {'fields': ['run_timestamp', 'run_by']}),
+    ]
+
+
+@admin.register(BacktestResult)
+class BacktestResultAdmin(admin.ModelAdmin):
+    list_display = [
+        'run_symbol', 'run_account_id', 'run_scenario',
+        'total_return_unhedged_pct', 'total_return_hedged_pct',
+        'hedge_effectiveness_ratio', 'calc_timestamp'
+    ]
+    list_filter = ['calc_timestamp']
+    search_fields = ['run__symbol', 'run__account_id']
+    readonly_fields = [
+        'run', 'total_return_unhedged_pct', 'total_return_hedged_pct',
+        'return_improvement_pct', 'max_drawdown_unhedged', 'max_drawdown_hedged',
+        'drawdown_reduction_pct', 'hedge_cost_total_usd', 'hedge_cost_pct_of_position',
+        'hedge_effectiveness_ratio', 'breakeven_annual_cost_pct',
+        'stop_triggered', 'stop_trigger_date', 'stop_trigger_price_usd',
+        'option_expired_worthless', 'option_payoff_usd',
+        'position_value_start_usd', 'position_value_end_unhedged_usd',
+        'position_value_end_hedged_usd', 'regime_split_json', 'calc_timestamp'
+    ]
+    fieldsets = [
+        ('Run', {'fields': ['run']}),
+        ('Returns', {'fields': [
+            'total_return_unhedged_pct', 'total_return_hedged_pct', 'return_improvement_pct'
+        ]}),
+        ('Drawdown', {'fields': [
+            'max_drawdown_unhedged', 'max_drawdown_hedged', 'drawdown_reduction_pct'
+        ]}),
+        ('Hedge Cost', {'fields': [
+            'hedge_cost_total_usd', 'hedge_cost_pct_of_position',
+            'hedge_effectiveness_ratio', 'breakeven_annual_cost_pct'
+        ]}),
+        ('Strategy Outcomes', {'fields': [
+            'stop_triggered', 'stop_trigger_date', 'stop_trigger_price_usd',
+            'option_expired_worthless', 'option_payoff_usd'
+        ]}),
+        ('Position Values', {'fields': [
+            'position_value_start_usd', 'position_value_end_unhedged_usd',
+            'position_value_end_hedged_usd'
+        ]}),
+        ('Regime Split', {'fields': ['regime_split_json']}),
+        ('Audit', {'fields': ['calc_timestamp']}),
+    ]
+
+    def run_symbol(self, obj):
+        return obj.run.symbol
+    run_symbol.short_description = 'Symbol'
+    run_symbol.admin_order_field = 'run__symbol'
+
+    def run_account_id(self, obj):
+        return obj.run.account_id
+    run_account_id.short_description = 'Account'
+    run_account_id.admin_order_field = 'run__account_id'
+
+    def run_scenario(self, obj):
+        return obj.run.scenario.display_name if obj.run.scenario else None
+    run_scenario.short_description = 'Scenario'
+    run_scenario.admin_order_field = 'run__scenario__display_name'

@@ -1,0 +1,88 @@
+{% extends "core/base.html" %}
+{% load static %}
+{% load risk_tags %}
+{% load humanize %}
+
+{% block title %}Risk Heat Map - {{ block.super }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'risk/css/risk.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Risk Heat Map</h1>
+    <div>
+        <a href="?show_excluded={% if show_excluded %}false{% else %}true{% endif %}"
+           class="btn btn-sm btn-outline-secondary">
+            {% if show_excluded %}Hide TAXABLE_CAR{% else %}Show All Accounts{% endif %}
+        </a>
+    </div>
+</div>
+
+{% if not calc_date %}
+<div class="alert alert-warning" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>No risk data available.</strong> The daily risk calculation pipeline has not been run yet.
+</div>
+{% else %}
+<div class="text-muted mb-4">Data as of {{ calc_date }}</div>
+{% endif %}
+
+<!-- Legend -->
+<div class="mb-3">
+    <span class="badge urgency-critical">C = Critical</span>
+    <span class="badge urgency-high">H = High</span>
+    <span class="badge urgency-medium">M = Medium</span>
+    <span class="badge urgency-low">L = Low</span>
+</div>
+
+<!-- Heat Map Table -->
+{% if grid %}
+<div class="table-responsive">
+    <table class="table table-sm table-bordered mb-0 risk-heatmap">
+        <thead class="table-light">
+            <tr>
+                <th style="min-width:120px;">Account \ Symbol</th>
+                {% for sym in sorted_symbols %}
+                <th>
+                    <a href="https://finance.yahoo.com/quote/{{ sym }}" target="_blank" rel="noopener">
+                        {{ sym }}
+                    </a>
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for account_id, row in grid.items %}
+            <tr>
+                <td class="fw-bold">{{ account_id }}</td>
+                {% for sym in sorted_symbols %}
+                <td class="text-center">
+                    {% with cell=row|get_item:sym %}
+                        {% if cell %}
+                            {% if cell.urgency_level %}
+                            <span class="badge urgency-{{ cell.urgency_level|lower }} p-2">
+                                {{ cell.urgency_level }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    {% endwith %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="alert alert-info" role="alert">
+    <i class="bi bi-info-circle-fill me-2"></i>
+    No holdings data available for the heat map.
+</div>
+{% endif %}
+{% endblock %}

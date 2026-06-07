@@ -834,12 +834,16 @@ class UrgencyScore(models.Model):
 
     class Meta:
         db_table = 'rm_urgency_score'
-        unique_together = [('entity_type', 'entity_id', 'calc_date')]
+        # Note: Removed unique_together to allow multiple security_in_account entries per account
+        # Each (entity_type, entity_id, calc_date) should be unique EXCEPT for security_in_account
+        # where multiple symbols per account are expected
         indexes = [
             models.Index(fields=['calc_date', 'entity_type']),
             models.Index(fields=['entity_id', 'calc_date']),
             models.Index(fields=['urgency_level', 'calc_date']),
             models.Index(fields=['symbol', 'calc_date']),
+            # Composite index for security_in_account queries
+            models.Index(fields=['entity_type', 'entity_id', 'symbol', 'calc_date'], name='idx_urgency_sec_account'),
         ]
 
     def __str__(self):

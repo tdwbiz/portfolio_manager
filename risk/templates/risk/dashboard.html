@@ -1,0 +1,259 @@
+{% extends "core/base.html" %}
+{% load static %}
+{% load risk_tags %}
+{% load humanize %}
+
+{% block title %}Portfolio Risk Dashboard - {{ block.super }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'risk/css/risk.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Portfolio Risk Dashboard</h1>
+    <div>
+        <a href="?show_excluded={% if show_excluded %}false{% else %}true{% endif %}"
+           class="btn btn-sm btn-outline-secondary">
+            {% if show_excluded %}Hide TAXABLE_CAR{% else %}Show All Accounts{% endif %}
+        </a>
+    </div>
+</div>
+
+{% if not calc_date %}
+<div class="alert alert-warning" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>No risk data available.</strong> The daily risk calculation pipeline has not been run yet.
+    Run the management commands to populate the risk tables before using these views.
+</div>
+{% else %}
+<div class="text-muted mb-4">Data as of {{ calc_date }}</div>
+{% endif %}
+
+<!-- Section 1: Header strip with key metrics -->
+<div class="row g-3 mb-4">
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">Portfolio Urgency</h6>
+                {% if portfolio_score %}
+                <span class="badge bg-{{ portfolio_score.urgency_level|default:'Medium'|urgency_colour }} fs-4 mt-2">
+                    {{ portfolio_score.urgency_level|default:"—" }}
+                </span>
+                <div class="small text-muted mt-1">Score: {{ portfolio_score.score_raw|floatformat:1|default:"—" }}</div>
+                {% else %}
+                <div class="text-muted mt-2">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">Macro Regime</h6>
+                {% if regime %}
+                <span class="badge bg-secondary fs-5 mt-2">{{ regime.quadrant|default:"—" }}</span>
+                <div class="small text-muted mt-1">
+                    Confidence: {{ regime.confidence_score|floatformat:0|default:"0" }}%
+                    {% if regime.transition_flag %}
+                    <span class="badge bg-warning text-dark ms-1">Transition</span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="text-muted mt-2">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">1-Day VaR 95%</h6>
+                {% if portfolio_metrics %}
+                <div class="fs-5 fw-bold mt-2">
+                    ${{ portfolio_metrics.var_portfolio_95_usd|floatformat:0|default:"0"|intcomma }} USD
+                </div>
+                <div class="small text-muted">
+                    {{ portfolio_metrics.var_portfolio_95_pct|floatformat:2|default:"0.00" }}% of portfolio
+                </div>
+                {% else %}
+                <div class="text-muted mt-2">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">Beta vs SPY</h6>
+                {% if portfolio_metrics %}
+                <div class="fs-5 fw-bold mt-2">{{ portfolio_metrics.portfolio_beta_spy|floatformat:2|default:"—" }}</div>
+                {% else %}
+                <div class="text-muted mt-2">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">Diversification</h6>
+                {% if portfolio_metrics %}
+                <div class="fs-5 fw-bold mt-2">{{ portfolio_metrics.diversification_ratio|floatformat:2|default:"—" }}x</div>
+                <div class="small text-muted">ratio</div>
+                {% else %}
+                <div class="text-muted mt-2">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-center h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle text-muted">Market Signals</h6>
+                <div class="small mt-2">
+                    {% if death_cross_count > 0 %}
+                    <span class="badge bg-danger">{{ death_cross_count }} Death Cross</span>
+                    {% endif %}
+                    {% if oversold_count > 0 %}
+                    <span class="badge bg-warning text-dark">{{ oversold_count }} Oversold</span>
+                    {% endif %}
+                    {% if overbought_count > 0 %}
+                    <span class="badge bg-info">{{ overbought_count }} Overbought</span>
+                    {% endif %}
+                    {% if not death_cross_count and not oversold_count and not overbought_count %}
+                    <span class="text-muted">No extremes</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Section 2: Effective Index Concentration -->
+{% if portfolio_metrics %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Effective Index Concentration</span>
+        <small class="text-muted">Accounts for underlying index weights in ETFs</small>
+    </div>
+    <div class="card-body">
+        <canvas id="indexConcentrationChart" height="100"></canvas>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const ctx = document.getElementById('indexConcentrationChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['S&P 500', 'Nasdaq 100', 'TSX', 'Semiconductor', 'Technology', 'Dividend'],
+            datasets: [{
+                label: '% Exposure',
+                data: [
+                    {{ index_concentration.SP500|floatformat:1 }},
+                    {{ index_concentration.NASDAQ100|floatformat:1 }},
+                    {{ index_concentration.TSX|floatformat:1 }},
+                    {{ index_concentration.Semiconductor|floatformat:1 }},
+                    {{ index_concentration.Technology|floatformat:1 }},
+                    {{ index_concentration.Dividend|floatformat:1 }},
+                ],
+                backgroundColor: ['#0d6efd','#6f42c1','#dc3545','#fd7e14','#20c997','#ffc107'],
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false } },
+            scales: { x: { min: 0, max: 60, ticks: { callback: v => v + '%' } } }
+        }
+    });
+});
+</script>
+{% endif %}
+
+<!-- Section 3: Top Unrealised Gains with Tax Flag -->
+{% if top_ugl_positions %}
+<div class="card mb-4">
+    <div class="card-header">Largest Unrealised Gains</div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Symbol</th><th>Account</th><th>Owner</th>
+                    <th class="text-end">MV (USD)</th>
+                    <th class="text-end">UGL (USD)</th>
+                    <th class="text-end">UGL (CAD)</th>
+                    <th>Tax Sensitive</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in top_ugl_positions %}
+                <tr>
+                    <td>{{ pos.symbol }}</td>
+                    <td><a href="{% url 'risk:account_summary' pos.account_id %}">{{ pos.account_id }}</a></td>
+                    <td>{{ pos.owner }}</td>
+                    <td class="text-end">${{ pos.market_value_usd|floatformat:0|intcomma }}</td>
+                    <td class="text-end fw-bold {% if pos.unrealised_gain_usd > 0 %}text-success{% else %}text-danger{% endif %}">
+                        ${{ pos.unrealised_gain_usd|floatformat:0|intcomma }}
+                    </td>
+                    <td class="text-end">${{ pos.unrealised_gain_cad|floatformat:0|intcomma }}</td>
+                    <td>
+                        {% if pos.is_tax_sensitive %}
+                        <span class="badge bg-danger">Taxable</span>
+                        {% else %}
+                        <span class="badge bg-success">Sheltered</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Section 4: Account Urgency Summary Strip -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between">
+        <span>Account Urgency Overview</span>
+        <a href="?show_excluded={% if show_excluded %}false{% else %}true{% endif %}"
+           class="btn btn-sm btn-outline-secondary">
+            {% if show_excluded %}Hide TAXABLE_CAR{% else %}Show All Accounts{% endif %}
+        </a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Account</th><th>Owner</th><th>Type</th>
+                    <th>Urgency</th><th class="text-end">Score</th>
+                    <th class="text-end">VaR 95% (USD)</th>
+                    <th class="text-end">Total MV</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for score in account_scores %}
+                <tr>
+                    <td><a href="{% url 'risk:account_summary' score.entity_id %}">{{ score.entity_id }}</a></td>
+                    <td>{{ score.account.owner|default:"—" }}</td>
+                    <td><span class="badge bg-secondary">{{ score.account.category|default:"—" }}</span></td>
+                    <td>
+                        <span class="badge urgency-{{ score.urgency_level|lower }}">
+                            {{ score.urgency_level }}
+                        </span>
+                    </td>
+                    <td class="text-end">{{ score.score_raw|floatformat:1 }}</td>
+                    <td class="text-end">—</td>
+                    <td class="text-end">—</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted">No account data available</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

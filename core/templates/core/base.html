@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,7 +7,6 @@
     <title>{% block title %}{{ branding.company_name }}{% endblock %}</title>
     
     <!-- Favicon -->
-    {% load static %}
     <link rel="icon" type="image/jpeg" href="{% static 'core/img/tsmoney_icon.jpg' %}">
 
     <!-- Bootstrap 5 CSS -->
@@ -92,6 +92,18 @@
                         <a class="nav-link {% if request.resolver_match.url_name == 'annual_reports' %}active{% endif %}" href="{% url 'annual_reports' %}">
                             <i class="bi bi-file-earmark-text"></i> Annual Reports
                         </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="riskDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-exclamation-triangle"></i> Risk
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="riskDropdown">
+                            <li><a class="dropdown-item" href="{% url 'risk:dashboard' %}"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
+                            <li><a class="dropdown-item" href="{% url 'risk:heatmap' %}"><i class="bi bi-grid-3x3"></i> Heat Map</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{% url 'risk:owner_summary' 'TOM' %}"><i class="bi bi-person"></i> TOM Summary</a></li>
+                            <li><a class="dropdown-item" href="{% url 'risk:owner_summary' 'SUSAN' %}"><i class="bi bi-person"></i> SUSAN Summary</a></li>
+                        </ul>
                     </li>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">

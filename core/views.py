@@ -1149,7 +1149,58 @@ def fetch_prices_api(request):
     return JsonResponse({})
 
 
-@login_required
+class _ReportSummaryRow:
+    """Fake object to bridge RbcAnnual flat table to the template that expects a report object.
+    
+    The template expects: summary.report.report_year, summary.report.account.name,
+    summary.report.id, summary.report.balance_snapshots, summary.report.account_type_code.
+    """
+    def __init__(self, cad_record):
+        self._cad = cad_record
+        # The template accesses summary.report.* — expose the RbcAnnual as .report
+        self.report = cad_record  # RbcAnnual instance
+
+    @property
+    def ending_value(self):
+        return self._cad.bal_ending_value if self._cad else Decimal('0')
+
+    @property
+    def net_return(self):
+        return self._cad.bal_net_return if self._cad else Decimal('0')
+
+    @property
+    def total_charges_cad(self):
+        return self._cad.chg_total_paid if self._cad else Decimal('0')
+
+    @property
+    def total_compensation_cad(self):
+        return self._cad.comp_total if self._cad else Decimal('0')
+
+    @property
+    def balance_snapshots(self):
+        """Return a simple queryset-like object with balance data from the CAD record."""
+        if not self._cad:
+            return _EmptyQuerySet([])
+        return _EmptyQuerySet([{
+            'currency': 'CAD',
+            'beginning_market_value': self._cad.bal_beginning_value,
+            'ending_market_value': self._cad.bal_ending_value,
+            'net_investment_return': self._cad.bal_net_return,
+        }])
+
+
+class _EmptyQuerySet:
+    """Minimal queryset-like wrapper for template rendering."""
+    def __init__(self, items):
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def exists(self):
+        return bool(self._items)
+
+
 def annual_reports_view(request):
     """List all RBC Annual Reports for the user's accounts."""
     records = RbcAnnual.objects.select_related('account').order_by('-report_year', 'account', 'currency')
@@ -1163,17 +1214,8 @@ def annual_reports_view(request):
             seen.add(key)
             cad = records.filter(account=rec.account, report_year=rec.report_year, currency='CAD').first()
             usd = records.filter(account=rec.account, report_year=rec.report_year, currency='USD').first()
-            report_summaries.append({
-                'account': rec.account,
-                'report_year': rec.report_year,
-                'file_name': rec.file_name,
-                'cad': cad,
-                'usd': usd,
-                'total_charges_cad': (cad.chg_total_paid if cad else Decimal('0')),
-                'total_compensation_cad': (cad.comp_total if cad else Decimal('0')),
-                'net_return': (cad.bal_net_return if cad else Decimal('0')),
-                'ending_value': (cad.bal_ending_value if cad else Decimal('0')),
-            })
+            summary = _ReportSummaryRow(cad)
+            report_summaries.append(summary)
 
     return render(request, 'core/annual_reports.html', {
         'report_summaries': report_summaries,

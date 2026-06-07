@@ -11,9 +11,7 @@ from django.test import TestCase, override_settings
 from django.core.management import call_command
 from io import BytesIO
 
-from core.models import Account, RbcAnnualReport, RbcAnnualBalances
-from core.models import RbcAnnualPerformance, RbcAnnualPerformanceReturn
-from core.models import RbcAnnualCharges, RbcAnnualCompensation
+from core.models import Account, RbcAnnual
 from imports.parsers_annual import (
     parse_rbc_annual_report,
     _clean_rbc_text,
@@ -210,54 +208,24 @@ class TestParseAnnualReport6Page(TestCase):
             self.assertEqual(result['report_period_start'], date(2025, 1, 1))
             self.assertEqual(result['report_period_end'], date(2025, 12, 31))
 
-            # Balances: should have CAD and USD
-            balances = result['balances']
-            self.assertEqual(len(balances), 2)
+            # CAD data (VL-compatible flat dict)
+            cad = result['cad']
+            self.assertIsNotNone(cad)
+            self.assertEqual(cad['bal_beginning_value'], Decimal('80000.00'))
+            self.assertEqual(cad['bal_deposits_in'], Decimal('10000.00'))
+            self.assertEqual(cad['bal_withdrawals_out'], Decimal('5000.00'))
+            self.assertEqual(cad['bal_net_return'], Decimal('15000.34'))
+            self.assertEqual(cad['bal_ending_value'], Decimal('100000.34'))
+            self.assertEqual(cad['bal_amount_invested'], Decimal('85000.00'))
+            self.assertEqual(cad['chg_total_paid'], Decimal('49.75'))
+            self.assertEqual(cad['comp_total'], Decimal('8.42'))
+            self.assertEqual(cad['perf_1yr'], Decimal('20.37'))
+            self.assertEqual(cad['perf_3yr'], Decimal('15.93'))
 
-            cad_bal = next((b for b in balances if b['currency'] == 'CAD'), None)
-            self.assertIsNotNone(cad_bal)
-            self.assertEqual(cad_bal['beginning_market_value'], Decimal('80000.00'))
-            self.assertEqual(cad_bal['deposits_transfers_in'], Decimal('10000.00'))
-            self.assertEqual(cad_bal['withdrawals_transfers_out'], Decimal('5000.00'))
-            self.assertEqual(cad_bal['net_investment_return'], Decimal('15000.34'))
-            self.assertEqual(cad_bal['ending_market_value'], Decimal('100000.34'))
-            self.assertEqual(cad_bal['amount_invested'], Decimal('85000.00'))
-
-            usd_bal = next((b for b in balances if b['currency'] == 'USD'), None)
-            self.assertIsNotNone(usd_bal)
-            self.assertEqual(usd_bal['ending_market_value'], Decimal('76000.50'))
-
-            # Performance: should have CAD and USD
-            performance = result['performance']
-            self.assertEqual(len(performance), 2)
-
-            cad_perf = next((p for p in performance if p['currency'] == 'CAD'), None)
-            self.assertIsNotNone(cad_perf)
-            returns = cad_perf['returns']
-            self.assertEqual(len(returns), 5)
-
-            one_year = next((r for r in returns if r['period_label'] == '1_year'), None)
-            self.assertIsNotNone(one_year)
-            self.assertEqual(one_year['return_pct'], Decimal('20.37'))
-
-            three_years = next((r for r in returns if r['period_label'] == '3_years'), None)
-            self.assertIsNotNone(three_years)
-            self.assertEqual(three_years['return_pct'], Decimal('15.93'))
-
-            # Charges
-            charges = result['charges']
-            cad_charges = [c for c in charges if c['currency'] == 'CAD']
-            total_tx = next((c for c in cad_charges if c['category'] == 'Total transaction charges'), None)
-            self.assertIsNotNone(total_tx)
-            self.assertEqual(total_tx['amount'], Decimal('49.75'))
-            self.assertTrue(total_tx['is_subtotal'])
-
-            # Compensation
-            compensation = result['compensation']
-            cad_comp = [c for c in compensation if c['currency'] == 'CAD']
-            trailing = next((c for c in cad_comp if c['type'] == 'Trailing commission'), None)
-            self.assertIsNotNone(trailing)
-            self.assertEqual(trailing['amount'], Decimal('6.42'))
+            # USD data
+            usd = result['usd']
+            self.assertIsNotNone(usd)
+            self.assertEqual(usd['bal_ending_value'], Decimal('76000.50'))
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -285,31 +253,17 @@ class TestParseAnnualReport4Page(TestCase):
             self.assertEqual(result['account_number'], '900-00008')
             self.assertEqual(result['account_type_code'], 'LIF')
 
-            # Balances: only CAD
-            balances = result['balances']
-            self.assertEqual(len(balances), 1)
-            self.assertEqual(balances[0]['currency'], 'CAD')
-            self.assertEqual(balances[0]['ending_market_value'], Decimal('205722.34'))
+            # CAD data (VL-compatible flat dict)
+            cad = result['cad']
+            self.assertIsNotNone(cad)
+            self.assertEqual(cad['bal_ending_value'], Decimal('205722.34'))
+            self.assertEqual(cad['perf_1yr'], Decimal('18.72'))
 
-            # Performance: only CAD
-            performance = result['performance']
-            self.assertEqual(len(performance), 1)
-            self.assertEqual(performance[0]['currency'], 'CAD')
+            # USD should be None for CAD-only report
+            self.assertIsNone(result['usd'])
 
-            returns = performance[0]['returns']
-            one_year = next((r for r in returns if r['period_label'] == '1_year'), None)
-            self.assertIsNotNone(one_year)
-            self.assertEqual(one_year['return_pct'], Decimal('18.72'))
-
-            # Charges: only CAD
-            charges = result['charges']
-            cad_charges = [c for c in charges if c['currency'] == 'CAD']
-            self.assertEqual(len(cad_charges), 4)
-
-            # Compensation: only CAD
-            compensation = result['compensation']
-            cad_comp = [c for c in compensation if c['currency'] == 'CAD']
-            self.assertEqual(len(cad_comp), 3)
+            # Charges: CAD total paid (sample data shows Total paid by you $30.00)
+            self.assertEqual(cad['chg_total_paid'], Decimal('30.00'))
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -318,9 +272,22 @@ class TestParseAnnualReport4Page(TestCase):
 class TestDuplicateAnnualReportSkipped(TestCase):
     """Test that duplicate annual reports are skipped."""
 
-    def test_duplicate_annual_report_skipped(self):
+    @patch('imports.parsers_annual_vl.parse_rbc_annual_report_vl')
+    def test_duplicate_annual_report_skipped(self, mock_vl):
         """Test 3: Import the same annual report twice.
-        Verify the second import is skipped with a warning."""
+        Verify the second import is skipped with a warning.
+
+        We mock the VL parser to use the text parser so the test works
+        with text files (not real PDFs).
+        """
+        from imports.parsers_annual import parse_rbc_annual_report
+
+        def mock_parse(filepath):
+            # The text parser also takes a file path — call it directly
+            return parse_rbc_annual_report(filepath)
+
+        mock_vl.side_effect = mock_parse
+
         account = Account.objects.create(
             account_id="900-00005",
             name="Test RIF Account",
@@ -334,13 +301,18 @@ class TestDuplicateAnnualReportSkipped(TestCase):
         with open(report_file, 'w') as f:
             f.write(SAMPLE_2259_6PAGE)
         try:
-            # First import
+            # First import - creates CAD + USD records = 2 records
             call_command('manage_annual_report_import', tmpdir)
-            self.assertEqual(RbcAnnualReport.objects.count(), 1)
+            self.assertEqual(RbcAnnual.objects.count(), 2)
 
-            # Second import - should be skipped
+            # Second import: the file was moved to processed/ by the first import,
+            # so create a fresh copy to test duplicate detection
+            report_file2 = os.path.join(tmpdir, 'Annual Report-2259 2025-12-31.pdf')
+            with open(report_file2, 'w') as f:
+                f.write(SAMPLE_2259_6PAGE)
+            # Second import - should be skipped (both CAD and USD already exist)
             call_command('manage_annual_report_import', tmpdir)
-            self.assertEqual(RbcAnnualReport.objects.count(), 1)
+            self.assertEqual(RbcAnnual.objects.count(), 2)
         finally:
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -362,15 +334,15 @@ class TestAnnualReportView(TestCase):
             broker="RBC",
         )
 
-        report = RbcAnnualReport.objects.create(
+        report = RbcAnnual.objects.create(
             account=account,
-            broker='RBC',
             file_name='Annual Report-2259 2025-12-31.pdf',
             report_year=2025,
             report_period_start=date(2025, 1, 1),
             report_period_end=date(2025, 12, 31),
             account_number='900-00005',
             account_type_code='RIF',
+            currency='CAD',
         )
 
         response = self.client.get('/annual-reports/')

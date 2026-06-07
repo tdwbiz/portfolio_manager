@@ -495,9 +495,18 @@ def parse_rbc_annual_report(file_path: str) -> dict[str, Any]:
     # First, try the "Account" pattern with possible line breaks.
     for acct_match in re.finditer(r'A[\s\n]*c[\s\n]*c[\s\n]*o[\s\n]*u[\s\n]*n[\s\n]*t', cleaned_text):
         acct_pos = acct_match.start()
-        # Look ahead up to 50 chars (may span multiple lines)
-        window = cleaned_text[acct_pos:acct_pos + 50]
-        digit_groups = re.findall(r'\d+', window)
+        # Look ahead up to 80 chars (may span multiple lines with split text)
+        window = cleaned_text[acct_pos:acct_pos + 80]
+        # Stop at the first line break to avoid capturing digits from later lines
+        first_line = window.split('\n')[0]
+        # Also check the next line (account number is often on the line after "Account")
+        lines_in_window = window.split('\n')
+        if len(lines_in_window) > 1:
+            search_text = first_line + lines_in_window[1]
+        else:
+            search_text = first_line
+        # Extract digit groups from the account number area
+        digit_groups = re.findall(r'\d+', search_text)
         if digit_groups:
             prefix = digit_groups[0]
             suffix = ''.join(digit_groups[1:])
@@ -565,55 +574,108 @@ def parse_rbc_annual_report(file_path: str) -> dict[str, Any]:
         cad_section_text = ''
     usd_section_text = '\n'.join(_perf_lines[_usd_start:]) if _usd_start is not None else ''
 
-    # --- Balances ---
-    balances: list[dict[str, Any]] = []
-    if cad_section_text:
-        cad_bal = _parse_balances_section(cad_section_text, 'CAD')
-        if cad_bal:
-            balances.append(cad_bal)
-    if usd_section_text:
-        usd_bal = _parse_balances_section(usd_section_text, 'USD')
-        if usd_bal:
-            balances.append(usd_bal)
+    # --- Build per-currency flat dicts matching VL parser output ---
+    def _build_currency_data(section_text, charges_text_for_curr):
+        """Build a flat dict for one currency matching the VL parser schema."""
+        if not section_text:
+            return None
+        bal = _parse_balances_section(section_text, 'CAD')  # currency arg unused in flat output
+        cad_bal_data = {}
+        if bal:
+            cad_bal_data = {
+                'bal_beginning_value': bal.get('beginning_market_value', Decimal('0')),
+                'bal_deposits_in': bal.get('deposits_transfers_in', Decimal('0')),
+                'bal_withdrawals_out': bal.get('withdrawals_transfers_out', Decimal('0')),
+                'bal_net_return': bal.get('net_investment_return', Decimal('0')),
+                'bal_ending_value': bal.get('ending_market_value', Decimal('0')),
+                'bal_amount_invested': bal.get('amount_invested', Decimal('0')),
+            }
 
-    # --- Performance ---
-    performance: list[dict[str, Any]] = []
-    if cad_section_text:
-        cad_perf = _parse_performance_section(cad_section_text, 'CAD')
-        if cad_perf:
-            performance.append(cad_perf)
-    if usd_section_text:
-        usd_perf = _parse_performance_section(usd_section_text, 'USD')
-        if usd_perf:
-            performance.append(usd_perf)
+        perf = _parse_performance_section(section_text, 'CAD')
+        perf_data = {}
+        if perf and perf.get('returns'):
+            for r in perf['returns']:
+                if r['period_label'] == '1_year':
+                    perf_data['perf_1yr'] = r.get('return_pct')
+                elif r['period_label'] == '3_years':
+                    perf_data['perf_3yr'] = r.get('return_pct')
+                elif r['period_label'] == '5_years':
+                    perf_data['perf_5yr'] = r.get('return_pct')
+                elif r['period_label'] == '10_years':
+                    perf_data['perf_10yr'] = r.get('return_pct')
+                elif r['period_label'] == 'since_date':
+                    perf_data['perf_since'] = r.get('return_pct')
+            perf_data['perf_since_date'] = perf.get('since_date')
 
-    # --- Charges ---
-    charges: list[dict[str, Any]] = []
-    if charges_text:
-        # Only parse CAD charges if CAD section exists
-        if re.search(r'Paid\s+by\s+you\s*\(CAD\)', charges_text, re.IGNORECASE):
-            cad_charges = _parse_charges_section(charges_text, 'CAD')
-            if cad_charges:
-                charges.extend(cad_charges)
-        # Only parse USD charges if USD section exists
-        if re.search(r'Paid\s+by\s+you\s*\(USD\)', charges_text, re.IGNORECASE):
-            usd_charges = _parse_charges_section(charges_text, 'USD')
-            if usd_charges:
-                charges.extend(usd_charges)
+        charges_list = []
+        if charges_text_for_curr:
+            charges_list = _parse_charges_section(charges_text_for_curr, 'CAD')
+        comp_list = []
+        if charges_text_for_curr:
+            comp_list = _parse_compensation_section(charges_text_for_curr, 'CAD')
 
-    # --- Compensation ---
-    compensation: list[dict[str, Any]] = []
-    if charges_text:
-        # Only parse CAD compensation if CAD section exists
-        if re.search(r'Third-party\s+compensation\s*\(CAD\)', charges_text, re.IGNORECASE):
-            cad_comp = _parse_compensation_section(charges_text, 'CAD')
-            if cad_comp:
-                compensation.extend(cad_comp)
-        # Only parse USD compensation if USD section exists
-        if re.search(r'Third-party\s+compensation\s*\(USD\)', charges_text, re.IGNORECASE):
-            usd_comp = _parse_compensation_section(charges_text, 'USD')
-            if usd_comp:
-                compensation.extend(usd_comp)
+        # Extract charge totals
+        chg_operating = Decimal('0')
+        chg_commissions = Decimal('0')
+        chg_total_transaction = Decimal('0')
+        chg_total_paid = Decimal('0')
+        for c in charges_list:
+            cat = c.get('category', '')
+            amt = c.get('amount', Decimal('0'))
+            if cat == 'Operating Charges':
+                chg_operating = amt
+            elif cat == 'Commissions - Equities/options':
+                chg_commissions = amt
+            elif cat == 'Total transaction charges':
+                chg_total_transaction = amt
+            elif cat == 'Total paid by you':
+                chg_total_paid = amt
+
+        comp_trailing = Decimal('0')
+        comp_other = Decimal('0')
+        comp_total = Decimal('0')
+        for c in comp_list:
+            ctype = c.get('type', '')
+            amt = c.get('amount', Decimal('0'))
+            if ctype == 'Trailing commission':
+                comp_trailing = amt
+            elif ctype == 'Other compensation':
+                comp_other = amt
+            elif ctype == 'Total compensation from third parties':
+                comp_total = amt
+
+        return {
+            'bal_beginning_value': cad_bal_data.get('bal_beginning_value', Decimal('0')),
+            'bal_deposits_in': cad_bal_data.get('bal_deposits_in', Decimal('0')),
+            'bal_withdrawals_out': cad_bal_data.get('bal_withdrawals_out', Decimal('0')),
+            'bal_net_return': cad_bal_data.get('bal_net_return', Decimal('0')),
+            'bal_ending_value': cad_bal_data.get('bal_ending_value', Decimal('0')),
+            'bal_amount_invested': cad_bal_data.get('bal_amount_invested', Decimal('0')),
+            'perf_since_date': perf_data.get('perf_since_date'),
+            'perf_1yr': perf_data.get('perf_1yr'),
+            'perf_3yr': perf_data.get('perf_3yr'),
+            'perf_5yr': perf_data.get('perf_5yr'),
+            'perf_10yr': perf_data.get('perf_10yr'),
+            'perf_since': perf_data.get('perf_since'),
+            'chg_operating': chg_operating,
+            'chg_commissions': chg_commissions,
+            'chg_total_transaction': chg_total_transaction,
+            'chg_total_paid': chg_total_paid,
+            'comp_trailing': comp_trailing,
+            'comp_other': comp_other,
+            'comp_total': comp_total,
+        }
+
+    # CAD charges/compensation text
+    cad_charges_text = ''
+    if charges_text and re.search(r'Paid\s+by\s+you\s*\(CAD\)', charges_text, re.IGNORECASE):
+        cad_charges_text = charges_text
+    usd_charges_text = ''
+    if charges_text and re.search(r'Paid\s+by\s+you\s*\(USD\)', charges_text, re.IGNORECASE):
+        usd_charges_text = charges_text
+
+    cad_data = _build_currency_data(cad_section_text, cad_charges_text)
+    usd_data = _build_currency_data(usd_section_text, usd_charges_text) if usd_section_text else None
 
     return {
         'broker': 'RBC',
@@ -622,8 +684,6 @@ def parse_rbc_annual_report(file_path: str) -> dict[str, Any]:
         'report_period_end': report_period_end or date(2025, 12, 31),
         'account_number': account_number,
         'account_type_code': account_type_code,
-        'balances': balances,
-        'performance': performance,
-        'charges': charges,
-        'compensation': compensation,
+        'cad': cad_data,
+        'usd': usd_data,
     }

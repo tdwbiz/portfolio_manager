@@ -1165,3 +1165,165 @@ class BacktestResult(models.Model):
 
     def __str__(self):
         return f"{self.run.symbol} — {self.run.strategy_template.code} — {self.run.scenario.name}"
+
+
+class SimulationRun(models.Model):
+    """
+    Input parameters for a Monte Carlo or stress test run.
+    Append-only — no modification after creation.
+    """
+    SIMULATION_TYPES = [
+        ('montecarlo', 'Monte Carlo'),
+        ('stress_test', 'Stress Test'),
+        ('custom_stress', 'Custom Stress'),
+    ]
+
+    simulation_type = models.CharField(max_length=20, choices=SIMULATION_TYPES)
+
+    # --- Scope ---
+    entity_type = models.CharField(max_length=20)
+    # 'portfolio' | 'account' | 'symbol'
+    entity_id = models.CharField(max_length=50)
+    # portfolio: 'ALL', account: account_id string, symbol: ticker
+
+    # --- Monte Carlo parameters (null for stress tests) ---
+    n_paths = models.IntegerField(null=True, blank=True)
+    # Number of simulated paths. Default 10,000.
+    horizon_days = models.IntegerField(null=True, blank=True)
+    # Simulation horizon in trading days. Default 252 (1 year).
+    use_jump_diffusion = models.BooleanField(default=False)
+    # If True: apply Merton jump-diffusion for symbols flagged in rm_security_universe
+    random_seed = models.IntegerField(null=True, blank=True)
+    # If set: reproducible results. NULL = random seed each run.
+
+    # --- Strategy overlay (optional) ---
+    recommendation_id = models.IntegerField(null=True, blank=True)
+    # FK to rm_strategy_recommendation (nullable FK — store id only to avoid circular imports)
+    # If set: apply this strategy to the simulated paths and compare hedged vs unhedged.
+
+    # --- Stress test parameters (null for Monte Carlo) ---
+    scenario_name = models.CharField(max_length=100, blank=True)
+    # Named scenario from rm_historical_scenario, or 'custom'
+    custom_shocks_json = models.TextField(blank=True)
+    # For custom stress: JSON {symbol: shock_pct} e.g. {"SOXX": -0.30, "SMH": -0.28, "NVDA": -0.35}
+
+    # --- Metadata ---
+    calc_date = models.DateField()
+    # Position weights and prices as of this date
+    run_timestamp = models.DateTimeField(auto_now_add=True)
+    run_by = models.CharField(max_length=100, blank=True)
+    # 'system' or username
+    duration_seconds = models.DecimalField(max_digits=8, decimal_places=2, null=True)
+    # Wall-clock time for this run — useful for performance monitoring
+
+    class Meta:
+        db_table = 'rm_simulation_run'
+        indexes = [
+            models.Index(fields=['entity_type', 'entity_id', 'calc_date']),
+            models.Index(fields=['simulation_type', 'run_timestamp']),
+        ]
+
+    def __str__(self):
+        return f"{self.simulation_type} — {self.entity_type} {self.entity_id} — {self.calc_date}"
+
+
+class SimulationResult(models.Model):
+    """
+    Output metrics for a completed simulation run.
+    All monetary values in USD.
+    """
+    run = models.OneToOneField(
+        SimulationRun, on_delete=models.CASCADE, related_name='result'
+    )
+
+    # --- Portfolio value at start ---
+    portfolio_value_start_usd = models.DecimalField(max_digits=18, decimal_places=2)
+    # Total market value of positions in scope at calc_date
+
+    # --- Monte Carlo outcome distribution (unhedged) ---
+    pct5_outcome_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # 5th percentile of final portfolio value across all paths — worst 5% of outcomes
+    pct25_outcome_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    pct50_outcome_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Median outcome
+    pct75_outcome_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    pct95_outcome_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # 95th percentile — best 5% of outcomes
+
+    # --- Loss probability thresholds ---
+    prob_loss_5pct = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # Fraction of paths where final value < start * 0.95 (>5% loss)
+    prob_loss_10pct = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # Fraction of paths where final value < start * 0.90
+    prob_loss_20pct = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # Fraction of paths where final value < start * 0.80
+    prob_loss_50pct = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    # Fraction of paths where final value < start * 0.50
+
+    # --- Expected Shortfall (tail risk) ---
+    expected_shortfall_5pct_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Mean portfolio value across the worst 5% of paths (CVaR at 95%)
+    expected_shortfall_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    # (portfolio_value_start - expected_shortfall_5pct) / portfolio_value_start
+
+    # --- Hedged comparison (populated only if recommendation_id was set) ---
+    pct5_outcome_hedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    pct50_outcome_hedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    pct95_outcome_hedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    prob_loss_10pct_hedged = models.DecimalField(max_digits=6, decimal_places=4, null=True)
+    expected_shortfall_5pct_hedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    hedge_cost_total_usd = models.DecimalField(max_digits=12, decimal_places=2, null=True)
+    # Upfront cost of the hedge strategy (option premium or friction)
+
+    # --- Stress test results (populated only for stress_test runs) ---
+    stress_loss_unhedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Total dollar loss if scenario shocks applied instantaneously
+    stress_loss_unhedged_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    stress_loss_hedged_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True)
+    # Loss after applying the strategy overlay
+    stress_loss_hedged_pct = models.DecimalField(max_digits=8, decimal_places=4, null=True)
+    stress_per_position_json = models.TextField(blank=True)
+    # JSON: per-symbol contribution to total stress loss
+    # [{"symbol": "SOXX", "account": "TFSA_TOM", "loss_usd": -11500, "loss_pct": -0.302}, ...]
+
+    # --- Full path distribution (for charting in M6) ---
+    percentile_series_json = models.TextField(blank=True)
+    # JSON: time-series of percentile bands for charting.
+    # {"days": [0,21,63,126,252],
+    #  "p5":  [100000, 95000, 88000, 83000, 79000],
+    #  "p25": [100000, 98000, 96000, 95000, 94000],
+    #  "p50": [100000, 101000, 103000, 105000, 107000],
+    #  "p75": [100000, 104000, 110000, 116000, 122000],
+    #  "p95": [100000, 108000, 119000, 131000, 144000]}
+    # Sampled at 5 time points to keep storage manageable.
+
+    calc_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'rm_simulation_result'
+
+    def __str__(self):
+        return f"SimulationResult — {self.run} — {self.calc_timestamp}"
+
+
+class CustomStressScenario(models.Model):
+    """
+    User-defined instantaneous shock scenario for stress testing.
+    """
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    owner = models.CharField(max_length=50, blank=True)
+    # TOM, SUSAN, or blank (shared)
+    shocks_json = models.TextField()
+    # JSON: {symbol: shock_fraction}
+    # E.g. {"SOXX": -0.30, "SMH": -0.28, "NVDA": -0.35, "DRAM": -0.32}
+    # Positive values = price increase. Negative = price drop.
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'rm_custom_stress_scenario'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name

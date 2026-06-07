@@ -26,6 +26,9 @@ from .models import (
     HistoricalScenario,
     BacktestRun,
     BacktestResult,
+    SimulationRun,
+    SimulationResult,
+    CustomStressScenario,
 )
 
 
@@ -392,3 +395,91 @@ class BacktestResultAdmin(admin.ModelAdmin):
         return obj.run.scenario.display_name if obj.run.scenario else None
     run_scenario.short_description = 'Scenario'
     run_scenario.admin_order_field = 'run__scenario__display_name'
+
+
+@admin.register(SimulationRun)
+class SimulationRunAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'simulation_type', 'entity_type', 'entity_id',
+        'horizon_days', 'n_paths', 'calc_date', 'run_timestamp',
+        'duration_seconds',
+    ]
+    list_filter = ['simulation_type', 'entity_type', 'use_jump_diffusion', 'calc_date']
+    search_fields = ['entity_id', 'scenario_name']
+    readonly_fields = [
+        'run_timestamp', 'duration_seconds',
+    ]
+    fieldsets = [
+        ('Simulation Type', {'fields': [
+            'simulation_type', 'entity_type', 'entity_id', 'scenario_name'
+        ]}),
+        ('Parameters', {'fields': [
+            'n_paths', 'horizon_days', 'use_jump_diffusion', 'random_seed',
+            'recommendation_id', 'custom_shocks_json'
+        ]}),
+        ('Audit', {'fields': [
+            'calc_date', 'run_timestamp', 'run_by', 'duration_seconds'
+        ]}),
+    ]
+
+
+@admin.register(SimulationResult)
+class SimulationResultAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'run', 'portfolio_value_start_usd',
+        'pct50_outcome_usd', 'pct5_outcome_usd', 'pct95_outcome_usd',
+        'prob_loss_10pct', 'expected_shortfall_5pct_usd',
+    ]
+    list_filter = ['run__simulation_type', 'run__calc_date']
+    search_fields = ['run__entity_id']
+    readonly_fields = [
+        'pct5_outcome_usd', 'pct25_outcome_usd', 'pct50_outcome_usd',
+        'pct75_outcome_usd', 'pct95_outcome_usd',
+        'prob_loss_5pct', 'prob_loss_10pct', 'prob_loss_20pct', 'prob_loss_50pct',
+        'expected_shortfall_5pct_usd', 'expected_shortfall_pct',
+        'percentile_series_json',
+        'pct5_outcome_hedged_usd', 'pct50_outcome_hedged_usd', 'pct95_outcome_hedged_usd',
+        'prob_loss_10pct_hedged', 'expected_shortfall_5pct_hedged_usd',
+        'hedge_cost_total_usd',
+        'stress_loss_unhedged_usd', 'stress_loss_unhedged_pct',
+        'stress_loss_hedged_usd', 'stress_loss_hedged_pct',
+        'stress_per_position_json',
+    ]
+    fieldsets = [
+        ('Run', {'fields': ['run']}),
+        ('Portfolio Value', {'fields': ['portfolio_value_start_usd']}),
+        ('Unhedged Percentiles', {'fields': [
+            'pct5_outcome_usd', 'pct25_outcome_usd', 'pct50_outcome_usd',
+            'pct75_outcome_usd', 'pct95_outcome_usd'
+        ]}),
+        ('Loss Probabilities', {'fields': [
+            'prob_loss_5pct', 'prob_loss_10pct', 'prob_loss_20pct', 'prob_loss_50pct'
+        ]}),
+        ('Expected Shortfall', {'fields': [
+            'expected_shortfall_5pct_usd', 'expected_shortfall_pct'
+        ]}),
+        ('Percentile Series', {'fields': ['percentile_series_json']}),
+        ('Hedged Outcomes', {'fields': [
+            'pct5_outcome_hedged_usd', 'pct50_outcome_hedged_usd', 'pct95_outcome_hedged_usd',
+            'prob_loss_10pct_hedged', 'expected_shortfall_5pct_hedged_usd',
+            'hedge_cost_total_usd'
+        ]}),
+        ('Stress Test Results', {'fields': [
+            'stress_loss_unhedged_usd', 'stress_loss_unhedged_pct',
+            'stress_loss_hedged_usd', 'stress_loss_hedged_pct',
+            'stress_per_position_json'
+        ]}),
+    ]
+
+
+@admin.register(CustomStressScenario)
+class CustomStressScenarioAdmin(admin.ModelAdmin):
+    list_display = ['name', 'owner', 'is_active', 'created_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['name', 'owner']
+    readonly_fields = ['created_at']
+    fieldsets = [
+        ('Scenario', {'fields': ['name', 'description', 'owner', 'is_active']}),
+        ('Shocks', {'fields': ['shocks_json']}),
+        ('Audit', {'fields': ['created_at']}),
+    ]

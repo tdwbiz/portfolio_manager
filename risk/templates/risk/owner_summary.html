@@ -1,0 +1,130 @@
+{% extends "core/base.html" %}
+{% load static %}
+{% load risk_tags %}
+{% load humanize %}
+
+{% block title %}{{ owner }} Summary - {{ block.super }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'risk/css/risk.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>{{ owner }} Summary</h1>
+    <a href="{% url 'risk:dashboard' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+    </a>
+</div>
+
+{% if not calc_date %}
+<div class="alert alert-warning" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>No risk data available.</strong> The daily risk calculation pipeline has not been run yet.
+</div>
+{% else %}
+<div class="text-muted mb-4">Data as of {{ calc_date }}</div>
+{% endif %}
+
+<!-- Section 1: Owner header with urgency badge -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-3">
+                <h5 class="mb-1">{{ owner }}</h5>
+            </div>
+            <div class="col-md-2">
+                <h6 class="text-muted mb-1">Urgency Level</h6>
+                {% if owner_score %}
+                <span class="badge urgency-{{ owner_score.urgency_level|lower }} fs-5">
+                    {{ owner_score.urgency_level|default:"—" }}
+                </span>
+                <div class="small text-muted">Score: {{ owner_score.score_raw|floatformat:1|default:"—" }}</div>
+                {% else %}
+                <div class="text-muted">No data</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Section 2: Owner Comparison Panel -->
+{% if other_owner and comparison %}
+<div class="card mb-4">
+    <div class="card-header">Owner Comparison: {{ owner }} vs {{ other_owner }}</div>
+    <div class="card-body">
+        <div class="row g-4">
+            <div class="col-md-6">
+                <h6 class="text-primary">{{ owner }}</h6>
+                <dl class="row mb-0">
+                    <dt class="col-sm-5">VaR 95%</dt>
+                    <dd class="col-sm-7 fw-bold">${{ comparison.var_current|floatformat:0|intcomma }} USD</dd>
+
+                    <dt class="col-sm-5">Taxable UGL</dt>
+                    <dd class="col-sm-7 fw-bold">${{ comparison.taxable_ugl_current|floatformat:0|intcomma }} USD</dd>
+
+                    <dt class="col-sm-5">Diversification</dt>
+                    <dd class="col-sm-7">{{ comparison.diversification_current|floatformat:2|default:"—" }}x</dd>
+
+                    <dt class="col-sm-5">Beta</dt>
+                    <dd class="col-sm-7">{{ comparison.beta_current|floatformat:2|default:"—" }}</dd>
+
+                    <dt class="col-sm-5">Top Holding</dt>
+                    <dd class="col-sm-7">{{ comparison.top_holding_current|default:"—" }}</dd>
+                </dl>
+            </div>
+            <div class="col-md-6">
+                <h6 class="text-success">{{ other_owner }}</h6>
+                <dl class="row mb-0">
+                    <dt class="col-sm-5">VaR 95%</dt>
+                    <dd class="col-sm-7 fw-bold">${{ comparison.var_other|floatformat:0|intcomma }} USD</dd>
+
+                    <dt class="col-sm-5">Taxable UGL</dt>
+                    <dd class="col-sm-7 fw-bold">${{ comparison.taxable_ugl_other|floatformat:0|intcomma }} USD</dd>
+
+                    <dt class="col-sm-5">Diversification</dt>
+                    <dd class="col-sm-7">{{ comparison.diversification_other|floatformat:2|default:"—" }}x</dd>
+
+                    <dt class="col-sm-5">Beta</dt>
+                    <dd class="col-sm-7">{{ comparison.beta_other|floatformat:2|default:"—" }}</dd>
+
+                    <dt class="col-sm-5">Top Holding</dt>
+                    <dd class="col-sm-7">{{ comparison.top_holding_other|default:"—" }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Section 3: Account Urgency Strip -->
+{% if account_scores %}
+<div class="card mb-4">
+    <div class="card-header">{{ owner }} — Account Urgency</div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Account</th><th>Type</th><th>Urgency</th>
+                    <th class="text-end">Score</th>
+                    <th class="text-end">VaR 95% (USD)</th>
+                    <th class="text-end">Total MV</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for score in account_scores %}
+                <tr>
+                    <td><a href="{% url 'risk:account_summary' score.entity_id %}">{{ score.entity_id }}</a></td>
+                    <td><span class="badge bg-secondary">{{ score.account.category|default:"—" }}</span></td>
+                    <td><span class="badge urgency-{{ score.urgency_level|lower }}">{{ score.urgency_level }}</span></td>
+                    <td class="text-end">{{ score.score_raw|floatformat:1 }}</td>
+                    <td class="text-end">—</td>
+                    <td class="text-end">—</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+/* Urgency badge colours */
+.urgency-critical, .badge.urgency-critical { background-color: #dc3545; color: #fff; }
+.urgency-high,     .badge.urgency-high     { background-color: #fd7e14; color: #fff; }
+.urgency-medium,   .badge.urgency-medium   { background-color: #ffc107; color: #000; }
+.urgency-low,      .badge.urgency-low      { background-color: #198754; color: #fff; }
+
+/* Heat map cell backgrounds */
+.urgency-bg-critical { background-color: #f8d7da !important; }
+.urgency-bg-high     { background-color: #ffe5d0 !important; }
+.urgency-bg-medium   { background-color: #fff3cd !important; }
+.urgency-bg-low      { background-color: #d1e7dd !important; }
+
+/* Heat map cell sizing */
+.heatmap-table td, .heatmap-table th { padding: 0.25rem 0.3rem; }
+.heatmap-cell { cursor: pointer; transition: opacity 0.15s; }
+.heatmap-cell:hover { opacity: 0.75; }

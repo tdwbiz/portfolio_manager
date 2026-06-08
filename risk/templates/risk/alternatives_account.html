@@ -1,0 +1,42 @@
+{% extends "core/base.html" %}
+
+{% block title %}Alternatives for {{ account.account_id }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4>Alternatives for {{ account.account_id }}</h4>
+    <a href="{% url 'risk:alternatives_create' %}" class="btn btn-primary">
+      <i class="bi bi-plus-circle"></i> Create New
+    </a>
+  </div>
+
+  {% for portfolio in portfolios %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <h5>{{ portfolio.name }}</h5>
+          <p class="text-muted small">{{ portfolio.description }}</p>
+        </div>
+        <div class="col-md-6">
+          <table class="table table-sm">
+            {% for holding in portfolio.holdings.all %}
+            <tr>
+              <td>{{ holding.symbol }}</td>
+              <td class="text-end">{{ holding.target_weight|floatformat:0 }}%</td>
+            </tr>
+            {% endfor %}
+          </table>
+        </div>
+      </div>
+      <a href="{% url 'risk:alternatives_edit' portfolio.id %}" class="btn btn-sm btn-outline-primary">
+        Edit
+      </a>
+    </div>
+  </div>
+  {% empty %}
+  <div class="alert alert-info">No alternative portfolios for this account.</div>
+  {% endfor %}
+</div>
+{% endblock %}

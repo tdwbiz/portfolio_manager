@@ -1,0 +1,146 @@
+{% extends "core/base.html" %}
+{% load risk_tags %}
+
+{% block title %}Portfolio Comparison{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <h4 class="mb-3">Portfolio Comparison</h4>
+
+  <!-- Filters -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="get" class="row g-3">
+        <div class="col-md-4">
+          <label for="as_of_date" class="form-label">Historical Date</label>
+          <input type="date" class="form-control" id="as_of_date" name="as_of_date"
+                 value="{{ as_of_date|date:'Y-m-d'|default:'' }}">
+        </div>
+        <div class="col-md-4">
+          <label for="alt_portfolio_id" class="form-label">Alternative Portfolio</label>
+          <select class="form-select" id="alt_portfolio_id" name="alt_portfolio_id">
+            <option value="">None</option>
+            {% for alt in all_alternatives %}
+            <option value="{{ alt.id }}" {% if alt.id|add:"0" == alt_portfolio_id|add:"0" %}selected{% endif %}>
+              {{ alt.account.account_id }} - {{ alt.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-search"></i> Compare
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Current Portfolio -->
+  <div class="card mb-4">
+    <div class="card-header">Current Portfolio ({{ calc_date }})</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="small text-muted">Urgency Score</div>
+          {% if current_score %}
+            <div class="fs-4 fw-bold">{{ current_score.score_raw|floatformat:0 }}</div>
+            <span class="badge bg-{{ current_score.urgency_level|default:'Medium'|urgency_colour }}">
+              {{ current_score.urgency_level|default:'Medium' }}
+            </span>
+          {% else %}
+            <div class="text-muted">No data</div>
+          {% endif %}
+        </div>
+        <div class="col-md-4">
+          <div class="small text-muted">VaR 95%</div>
+          {% if current_metrics %}
+            <div class="fs-4 fw-bold">{{ current_metrics.var_portfolio_95_pct|floatformat:2|pct:"2" }}</div>
+          {% else %}
+            <div class="text-muted">No data</div>
+          {% endif %}
+        </div>
+        <div class="col-md-4">
+          <div class="small text-muted">Beta vs SPY</div>
+          {% if current_metrics %}
+            <div class="fs-4 fw-bold">{{ current_metrics.beta_spy|floatformat:2|default:'\u2014' }}</div>
+          {% else %}
+            <div class="text-muted">No data</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Historical Snapshot -->
+  {% if historical_metrics or historical_score %}
+  <div class="card mb-4">
+    <div class="card-header">Historical Snapshot ({{ as_of_date|date:"Y-m-d" }})</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="small text-muted">Urgency Score</div>
+          {% if historical_score %}
+            <div class="fs-4 fw-bold">{{ historical_score.score_raw|floatformat:0 }}</div>
+            <span class="badge bg-{{ historical_score.urgency_level|default:'Medium'|urgency_colour }}">
+              {{ historical_score.urgency_level|default:'Medium' }}
+            </span>
+          {% else %}
+            <div class="text-muted">No data</div>
+          {% endif %}
+        </div>
+        <div class="col-md-4">
+          <div class="small text-muted">VaR 95%</div>
+          {% if historical_metrics %}
+            <div class="fs-4 fw-bold">{{ historical_metrics.var_portfolio_95_pct|floatformat:2|pct:"2" }}</div>
+          {% else %}
+            <div class="text-muted">No data</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Alternative Portfolio -->
+  {% if alt_portfolio %}
+  <div class="card mb-4">
+    <div class="card-header">{{ alt_portfolio.name }} ({{ alt_portfolio.account.account_id }})</div>
+    <div class="card-body">
+      {% if alt_risk_preview %}
+      <div class="row g-3">
+        <div class="col-md-3">
+          <div class="small text-muted">Weighted VaR 95%</div>
+          <div class="fs-4 fw-bold">{{ alt_risk_preview.weighted_var_95_pct|floatformat:2|pct:"2" }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Weighted Beta</div>
+          <div class="fs-4 fw-bold">{{ alt_risk_preview.weighted_beta_spy|floatformat:2 }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">HHI Concentration</div>
+          <div class="fs-4 fw-bold">{{ alt_risk_preview.hhi_symbol|floatformat:4 }}</div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Positions</div>
+          <div class="fs-4 fw-bold">{{ alt_risk_preview.position_count }}</div>
+        </div>
+      </div>
+      <hr>
+      <h6>Holdings</h6>
+      <table class="table table-sm">
+        {% for holding in alt_portfolio.holdings.all %}
+        <tr>
+          <td>{{ holding.symbol }}</td>
+          <td class="text-end">{{ holding.target_weight|floatformat:0 }}%</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="text-muted">No risk preview available for this alternative portfolio.</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "core/base.html" %}
+
+{% block title %}Edit {{ portfolio.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h4>Edit: {{ portfolio.name }}</h4>
+
+  <form method="post" id="portfolioForm">
+    {% csrf_token %}
+
+    <div class="mb-3">
+      <label for="name" class="form-label">Name</label>
+      <input type="text" class="form-control" id="name" name="name" value="{{ portfolio.name }}">
+    </div>
+
+    <div class="mb-3">
+      <label for="description" class="form-label">Description</label>
+      <textarea class="form-control" id="description" name="description" rows="2">{{ portfolio.description }}</textarea>
+    </div>
+
+    <h5>Holdings</h5>
+    <div id="holdings-container">
+      {% for holding in holdings %}
+      <div class="row g-2 mb-2 holding-row">
+        <div class="col-md-6">
+          <select class="form-select holding-symbol" name="symbol_{{ forloop.counter0 }}">
+            <option value="">Select symbol...</option>
+            {% for sym in symbols_available %}
+              <option value="{{ sym.symbol }}" {% if sym.symbol == holding.symbol %}selected{% endif %}>
+                {{ sym.symbol }} - {{ sym.name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <input type="number" class="form-control holding-weight" name="weight_{{ forloop.counter0 }}"
+                 value="{{ holding.target_weight|floatformat:0 }}" min="0" max="100" step="1"
+                 placeholder="Weight %">
+        </div>
+        <div class="col-md-2">
+          <button type="button" class="btn btn-outline-danger remove-row" title="Remove">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-row">
+      <i class="bi bi-plus"></i> Add Holding
+    </button>
+
+    <div class="mb-3">
+      <span>Weight Total: </span>
+      <span id="weight-total" class="fw-bold text-danger">0.00%</span>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="save-btn" disabled>
+      <i class="bi bi-save"></i> Save
+    </button>
+    <a href="{% url 'risk:alternatives_account' portfolio.account.account_id %}" class="btn btn-secondary">
+      Cancel
+    </a>
+  </form>
+</div>
+
+<script>
+// Add new holding row
+document.getElementById('add-row').addEventListener('click', function() {
+    const container = document.getElementById('holdings-container');
+    const rowCount = container.querySelectorAll('.holding-row').length;
+    const row = document.createElement('div');
+    row.className = 'row g-2 mb-2 holding-row';
+    row.innerHTML = `
+        <div class="col-md-6">
+            <select class="form-select holding-symbol" name="symbol_${rowCount}">
+                <option value="">Select symbol...</option>
+                {% for sym in symbols_available %}
+                <option value="{{ sym.symbol }}">{{ sym.symbol }} - {{ sym.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4">
+            <input type="number" class="form-control holding-weight" name="weight_${rowCount}"
+                   min="0" max="100" step="1" placeholder="Weight %">
+        </div>
+        <div class="col-md-2">
+            <button type="button" class="btn btn-outline-danger remove-row" title="Remove">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+    `;
+    container.appendChild(row);
+    updateWeightTotal();
+});
+
+// Remove holding row
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.remove-row')) {
+        e.target.closest('.holding-row').remove();
+        updateWeightTotal();
+    }
+});
+
+// Real-time weight total validation
+function updateWeightTotal() {
+    let total = 0;
+    document.querySelectorAll('.holding-weight').forEach(input => {
+        total += parseFloat(input.value) || 0;
+    });
+    const totalEl = document.getElementById('weight-total');
+    totalEl.textContent = total.toFixed(2) + '%';
+    totalEl.className = Math.abs(total - 100) < 0.1
+        ? 'fw-bold text-success'
+        : 'fw-bold text-danger';
+    document.getElementById('save-btn').disabled = Math.abs(total - 100) >= 0.1;
+}
+document.querySelectorAll('.holding-weight').forEach(el =>
+    el.addEventListener('input', updateWeightTotal));
+</script>
+{% endblock %}

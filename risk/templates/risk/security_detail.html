@@ -1,0 +1,342 @@
+{% extends "core/base.html" %}
+{% load risk_tags %}
+
+{% block title %}Security Risk Card — {{ security.symbol }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <!-- Section 1: Hero Header -->
+  <div class="card mb-4">
+    <div class="card-body d-flex justify-content-between align-items-center">
+      <div>
+        <h4 class="mb-0">
+          {{ security.symbol }}
+          <small class="text-muted">{{ security.name }}</small>
+        </h4>
+        <div class="text-muted small">
+          {{ security.asset_class }} · {{ security.sector }} · {{ security.primary_currency }}
+          {% if urgency %}
+            · Urgency: <span class="badge bg-{{ urgency|urgency_colour }}">{{ urgency.urgency_level }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <a href="{% url 'risk:security_export' security.symbol 'pdf' %}"
+           class="btn btn-outline-secondary btn-sm me-1">
+          <i class="bi bi-file-pdf"></i> PDF
+        </a>
+        <a href="{% url 'risk:security_export' security.symbol 'csv' %}"
+           class="btn btn-outline-secondary btn-sm">
+          <i class="bi bi-download"></i> CSV
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2: M1 Metrics Panels (3-column grid) -->
+  <div class="row g-3 mb-4">
+    <!-- Volatility panel -->
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header">Volatility (Annualised)</div>
+        <div class="card-body">
+          <table class="table table-sm mb-0">
+            <tr><td>10-day</td><td class="text-end fw-bold">{{ security_metrics.vol_10d|floatformat:1|pct:"1" }}%</td></tr>
+            <tr><td>21-day</td><td class="text-end fw-bold">{{ security_metrics.vol_21d|floatformat:1|pct:"1" }}%</td></tr>
+            <tr><td>63-day</td><td class="text-end fw-bold">{{ security_metrics.vol_63d|floatformat:1|pct:"1" }}%</td></tr>
+            <tr><td>252-day</td><td class="text-end fw-bold">{{ security_metrics.vol_252d|floatformat:1|pct:"1" }}%</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- VaR panel -->
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header">Value at Risk (1-day, 95%)</div>
+        <div class="card-body">
+          <table class="table table-sm mb-0">
+            <tr><td>Parametric</td><td class="text-end fw-bold">{{ security_metrics.var_parametric_95|floatformat:2|pct:"2" }}%</td></tr>
+            <tr><td>Historical</td><td class="text-end fw-bold">{{ security_metrics.var_historical_95|floatformat:2|pct:"2" }}%</td></tr>
+            <tr><td>Cornish-Fisher</td><td class="text-end fw-bold">{{ security_metrics.var_cornish_fisher_95|floatformat:2|pct:"2" }}%</td></tr>
+            <tr><td>CVaR (ES)</td><td class="text-end fw-bold text-danger">{{ security_metrics.cvar_95|floatformat:2|pct:"2" }}%</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+    <!-- Risk ratios panel -->
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-header">Risk Ratios</div>
+        <div class="card-body">
+          <table class="table table-sm mb-0">
+            <tr><td>Beta vs SPY</td><td class="text-end fw-bold">{{ security_metrics.beta_spy|floatformat:2|default:"\u2014" }}</td></tr>
+            <tr><td>Beta vs XIU</td><td class="text-end fw-bold">{{ security_metrics.beta_xiu|floatformat:2|default:"\u2014" }}</td></tr>
+            <tr><td>Sharpe Ratio</td><td class="text-end fw-bold">{{ security_metrics.sharpe_ratio|floatformat:2|default:"\u2014" }}</td></tr>
+            <tr><td>Sortino Ratio</td><td class="text-end fw-bold">{{ security_metrics.sortino_ratio|floatformat:2|default:"\u2014" }}</td></tr>
+            <tr><td>Liquidity Score</td><td class="text-end fw-bold">{{ security_metrics.liquidity_score|floatformat:0|default:"\u2014" }}/100</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3: Drawdown and UGL at Risk -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">Drawdown</div>
+        <div class="card-body">
+          <dl class="row mb-0 small">
+            <dt class="col-8">Max Drawdown (holding period)</dt>
+            <dd class="col-4 text-end text-danger fw-bold">{{ security_metrics.max_drawdown_from_cost|floatformat:1 }}%</dd>
+            <dt class="col-8">Max Drawdown (252d)</dt>
+            <dd class="col-4 text-end text-danger fw-bold">{{ security_metrics.max_drawdown_252d|floatformat:1 }}%</dd>
+            <dt class="col-8">Current Drawdown from Peak</dt>
+            <dd class="col-4 text-end fw-bold {% if security_metrics.current_drawdown_from_252d_peak|default:0 < -0.1 %}text-danger{% endif %}">
+              {{ security_metrics.current_drawdown_from_252d_peak|floatformat:1|default:"\u2014" }}%
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">Unrealised Gain at Risk</div>
+        <div class="card-body">
+          <dl class="row mb-0 small">
+            <dt class="col-8">1-day VaR on Position (USD)</dt>
+            <dd class="col-4 text-end fw-bold">${{ security_metrics.ugl_at_risk_95_usd|floatformat:0|intcomma|default:"\u2014" }}</dd>
+            <dt class="col-8">% of Total Unrealised Gain</dt>
+            <dd class="col-4 text-end fw-bold {% if security_metrics.ugl_at_risk_pct_of_ugl|default:0 > 0.05 %}text-warning{% endif %}">
+              {{ security_metrics.ugl_at_risk_pct_of_ugl|floatformat:1|default:"\u2014" }}%
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 4: Market Condition Indicators -->
+  {% if market_condition %}
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between">
+      <span>Market Condition Indicators</span>
+      <span class="badge bg-{% if market_condition.market_phase == 'bear' %}danger{% elif market_condition.market_phase == 'correction' %}warning{% elif market_condition.market_phase == 'uptrend' %}success{% else %}info{% endif %}">
+        {{ market_condition.market_phase|title }}
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <h6 class="text-muted small">RSI (14-period)</h6>
+          <div class="fs-3 fw-bold {% if market_condition.rsi_14 < 30 %}text-danger{% elif market_condition.rsi_14 > 70 %}text-warning{% else %}text-success{% endif %}">
+            {{ market_condition.rsi_14|floatformat:1|default:"\u2014" }}
+          </div>
+          <div class="small text-muted">
+            {% if market_condition.rsi_14 < 30 %}Oversold
+            {% elif market_condition.rsi_14 > 70 %}Overbought
+            {% else %}Neutral{% endif %}
+          </div>
+        </div>
+        <div class="col-md-3">
+          <h6 class="text-muted small">Moving Averages</h6>
+          <div class="small">
+            <div>vs 50d SMA: <strong class="{% if market_condition.price_vs_sma50_pct|default:0 > 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if market_condition.price_vs_sma50_pct|default:0 > 0 %}+{% endif %}{{ market_condition.price_vs_sma50_pct|floatformat:1|default:"\u2014" }}%
+            </strong></div>
+            <div>vs 200d SMA: <strong class="{% if market_condition.price_vs_sma200_pct|default:0 > 0 %}text-success{% else %}text-danger{% endif %}">
+              {% if market_condition.price_vs_sma200_pct|default:0 > 0 %}+{% endif %}{{ market_condition.price_vs_sma200_pct|floatformat:1|default:"\u2014" }}%
+            </strong></div>
+          </div>
+          {% if market_condition.crossover_type == 'death' %}
+            <span class="badge bg-danger mt-1">Death Cross {{ market_condition.crossover_date }}</span>
+          {% elif market_condition.crossover_type == 'golden' %}
+            <span class="badge bg-success mt-1">Golden Cross {{ market_condition.crossover_date }}</span>
+          {% endif %}
+        </div>
+        <div class="col-md-3">
+          <h6 class="text-muted small">Bollinger Bands</h6>
+          <div class="small">
+            <div>%B: <strong>{{ market_condition.bb_pct_b|floatformat:2|default:"\u2014" }}</strong></div>
+            <div>Bandwidth: <strong>{{ market_condition.bb_bandwidth|floatformat:3|default:"\u2014" }}</strong></div>
+          </div>
+          <div class="small text-muted">
+            {% if market_condition.bb_pct_b|default:0 > 0.8 %}Near upper band
+            {% elif market_condition.bb_pct_b|default:0 < 0.2 %}Near lower band
+            {% else %}Within bands{% endif %}
+          </div>
+        </div>
+        <div class="col-md-3">
+          <h6 class="text-muted small">MACD & Volume</h6>
+          <div class="small">
+            <div>Histogram: <strong class="{% if market_condition.macd_histogram|default:0 > 0 %}text-success{% else %}text-danger{% endif %}">
+              {{ market_condition.macd_histogram|floatformat:4|default:"\u2014" }}
+            </strong></div>
+            <div>OBV Trend: <strong>{{ market_condition.obv_trend|default:"\u2014" }}</strong></div>
+            <div>52w High: <strong class="{% if market_condition.pct_from_52w_high|default:0 < -0.15 %}text-danger{% endif %}">
+              {{ market_condition.pct_from_52w_high|floatformat:1|default:"\u2014" }}%
+            </strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Section 5: Regime Sensitivity Table -->
+  <div class="card mb-4">
+    <div class="card-header">Regime Sensitivity \u2014 {{ security.asset_class }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Quadrant</th><th>Description</th>
+            <th class="text-center">Multiplier</th><th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rs in regime_sensitivities %}
+          <tr {% if rs.regime_quadrant == current_regime.quadrant %}class="table-warning"{% endif %}>
+            <td><strong>{{ rs.regime_quadrant }}</strong></td>
+            <td>{{ rs.regime_quadrant|quadrant_description }}</td>
+            <td class="text-center">
+              <span class="badge {% if rs.sensitivity_multiplier > 1.0 %}bg-danger{% elif rs.sensitivity_multiplier < 1.0 %}bg-success{% else %}bg-secondary{% endif %}">
+                {{ rs.sensitivity_multiplier }}x
+              </span>
+            </td>
+            <td class="small text-muted">{{ rs.rationale }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-center text-muted">No regime sensitivity data available</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Section 6: Top Strategy Recommendations -->
+  {% if top_recommendations %}
+  <div class="card mb-4">
+    <div class="card-header">Strategy Recommendations</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Rank</th><th>Account</th><th>Strategy</th>
+            <th class="text-end">Cost (USD)</th>
+            <th class="text-end">Tax Cost</th>
+            <th class="text-end">VaR Reduction</th>
+            <th>Tax Sensitive</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rec in top_recommendations %}
+          <tr>
+            <td>{{ rec.rank }}</td>
+            <td>{{ rec.account_id }}</td>
+            <td>{{ rec.strategy_template.name }}</td>
+            <td class="text-end">${{ rec.estimated_strategy_cost_usd|floatformat:0|intcomma|default:"\u2014" }}</td>
+            <td class="text-end {% if rec.tax_cost_estimate_usd|default:0 > 0 %}text-danger fw-bold{% endif %}">
+              {% if rec.tax_cost_estimate_usd|default:0 > 0 %}
+                ${{ rec.tax_cost_estimate_usd|floatformat:0|intcomma }}
+              {% else %}\u2014{% endif %}
+            </td>
+            <td class="text-end text-success">${{ rec.estimated_var_reduction_usd|floatformat:0|intcomma|default:"\u2014" }}</td>
+            <td>
+              {% if rec.is_tax_triggering %}
+                <span class="badge bg-warning text-dark">Tax Event</span>
+              {% else %}
+                <span class="badge bg-success">No Tax</span>
+              {% endif %}
+            </td>
+            <td>
+              <a href="{% url 'risk:strategy_report' rec.id %}" class="btn btn-xs btn-outline-primary">
+                Detail
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Section 7: Urgency History Sparkline -->
+  <div class="card mb-4">
+    <div class="card-header">Urgency Score History (90 days)</div>
+    <div class="card-body">
+      <canvas id="urgencyHistoryChart" height="80"></canvas>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <script>
+  new Chart(document.getElementById('urgencyHistoryChart'), {
+    type: 'line',
+    data: {
+      labels: {{ history_labels_json|safe }},
+      datasets: [{
+        label: 'Urgency Score',
+        data: {{ history_values_json|safe }},
+        borderColor: '#0d6efd',
+        backgroundColor: 'rgba(13,110,253,0.08)',
+        fill: true, tension: 0.3, pointRadius: 2,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { min: 0, max: 100 }
+      }
+    }
+  });
+  </script>
+
+  <!-- Section 8: Most Recent Backtest Summary -->
+  {% if recent_backtest %}
+  <div class="card mb-4">
+    <div class="card-header">
+      Most Recent Backtest \u2014
+      {{ recent_backtest.run.strategy_template.name }}
+      {% if recent_backtest.run.scenario %}
+        / {{ recent_backtest.run.scenario.display_name }}
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col">
+          <div class="small text-muted">Return (Unhedged)</div>
+          <div class="fs-5 fw-bold {% if recent_backtest.total_return_unhedged_pct < 0 %}text-danger{% else %}text-success{% endif %}">
+            {{ recent_backtest.total_return_unhedged_pct|floatformat:1 }}%
+          </div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Return (Hedged)</div>
+          <div class="fs-5 fw-bold {% if recent_backtest.total_return_hedged_pct < 0 %}text-danger{% else %}text-success{% endif %}">
+            {{ recent_backtest.total_return_hedged_pct|floatformat:1 }}%
+          </div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Max Drawdown (Unhedged)</div>
+          <div class="fs-5 fw-bold text-danger">{{ recent_backtest.max_drawdown_unhedged|floatformat:1 }}%</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Max Drawdown (Hedged)</div>
+          <div class="fs-5 fw-bold">{{ recent_backtest.max_drawdown_hedged|floatformat:1 }}%</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Hedge Effectiveness</div>
+          <div class="fs-5 fw-bold text-primary">{{ recent_backtest.hedge_effectiveness_ratio|floatformat:2|default:"\u2014" }}x</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Stop Triggered</div>
+          <div class="fs-5">{% if recent_backtest.stop_triggered %}<span class="badge bg-warning">Yes</span>{% else %}<span class="badge bg-success">No</span>{% endif %}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

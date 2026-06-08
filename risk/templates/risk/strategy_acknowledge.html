@@ -1,0 +1,41 @@
+{% extends "core/base.html" %}
+
+{% block title %}Acknowledge Tax Impact{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="card">
+    <div class="card-header">
+      <h5 class="mb-0">Acknowledge Tax Impact</h5>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-danger">
+        <h5 class="alert-heading">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          Tax-Triggering Strategy
+        </h5>
+        <p>{{ recommendation.tax_impact_note|default:"This strategy may trigger a taxable event." }}</p>
+        <p>
+          <strong>Estimated Tax Cost: </strong>
+          ${{ recommendation.tax_cost_estimate_usd|floatformat:0|intcomma }}
+        </p>
+      </div>
+
+      <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label for="user_notes" class="form-label">Notes (optional)</label>
+          <textarea class="form-control" id="user_notes" name="user_notes" rows="3"
+                    placeholder="Add any notes about your tax decision..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-danger">
+          <i class="bi bi-check-circle"></i> Acknowledge and Continue
+        </button>
+        <a href="{% url 'risk:strategy_report' recommendation.id %}" class="btn btn-secondary">
+          Cancel
+        </a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

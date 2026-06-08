@@ -1,0 +1,156 @@
+{% extends "core/base.html" %}
+{% load risk_tags %}
+
+{% block title %}Stress Test Results{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <h4 class="mb-3">
+    {{ sim_run.scenario_name }}
+    <small class="text-muted">({{ sim_run.simulation_type }})</small>
+  </h4>
+
+  <!-- Summary Metrics -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">Portfolio Value (Start)</div>
+        <div class="card-body">
+          <div class="fs-4 fw-bold">${{ sim_result.portfolio_value_start_usd|floatformat:0|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">Stress Loss (Unhedged)</div>
+        <div class="card-body">
+          <div class="fs-4 fw-bold text-danger">
+            ${{ sim_result.stress_loss_unhedged_usd|floatformat:0|intcomma }}
+            ({{ sim_result.stress_loss_unhedged_pct|floatformat:1|pct:"1" }})
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if sim_result.stress_loss_hedged_usd %}
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-header">Stress Loss (Hedged)</div>
+        <div class="card-body">
+          <div class="fs-4 fw-bold text-warning">
+            ${{ sim_result.stress_loss_hedged_usd|floatformat:0|intcomma }}
+            ({{ sim_result.stress_loss_hedged_pct|floatformat:1|pct:"1" }})
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Per-Position Breakdown (Stress Tests) -->
+  {% if per_position %}
+  <div class="card mb-4">
+    <div class="card-header">Per-Position Loss Breakdown</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Symbol</th><th>Account</th>
+            <th class="text-end">Loss (USD)</th>
+            <th class="text-end">Loss (%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pos in per_position %}
+          <tr>
+            <td>{{ pos.symbol }}</td>
+            <td>{{ pos.account }}</td>
+            <td class="text-end text-danger fw-bold">${{ pos.loss_usd|floatformat:0|intcomma }}</td>
+            <td class="text-end text-danger">{{ pos.loss_pct|floatformat:1|pct:"1" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Monte Carlo Percentiles -->
+  {% if sim_result.pct5_outcome_usd %}
+  <div class="card mb-4">
+    <div class="card-header">Monte Carlo Outcome Distribution</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col">
+          <div class="small text-muted">5th Percentile</div>
+          <div class="fs-5 fw-bold text-danger">${{ sim_result.pct5_outcome_usd|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">25th Percentile</div>
+          <div class="fs-5 fw-bold">${{ sim_result.pct25_outcome_usd|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Median (50th)</div>
+          <div class="fs-5 fw-bold text-success">${{ sim_result.pct50_outcome_usd|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">75th Percentile</div>
+          <div class="fs-5 fw-bold">${{ sim_result.pct75_outcome_usd|floatformat:0|intcomma }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">95th Percentile</div>
+          <div class="fs-5 fw-bold text-success">${{ sim_result.pct95_outcome_usd|floatformat:0|intcomma }}</div>
+        </div>
+      </div>
+      <hr>
+      <div class="row g-3 text-center">
+        <div class="col">
+          <div class="small text-muted">Prob Loss >5%</div>
+          <div class="fs-5 fw-bold">{{ sim_result.prob_loss_5pct|floatformat:1|pct:"1" }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Prob Loss >10%</div>
+          <div class="fs-5 fw-bold">{{ sim_result.prob_loss_10pct|floatformat:1|pct:"1" }}</div>
+        </div>
+        <div class="col">
+          <div class="small text-muted">Expected Shortfall</div>
+          <div class="fs-5 fw-bold text-danger">${{ sim_result.expected_shortfall_5pct_usd|floatformat:0|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monte Carlo Chart -->
+  {% if percentile_series %}
+  <div class="card mb-4">
+    <div class="card-header">Monte Carlo Path Distribution</div>
+    <div class="card-body">
+      <canvas id="monteCarloChart" height="100"></canvas>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script>
+  const data = {{ percentile_json|safe }};
+  if (data.days && data.p5) {
+    new Chart(document.getElementById('monteCarloChart'), {
+      type: 'line',
+      data: {
+        labels: data.days,
+        datasets: [
+          { label: 'P95', data: data.p95, borderColor: '#198754', backgroundColor: 'transparent', fill: false },
+          { label: 'P75', data: data.p75, borderColor: '#0dcaf0', backgroundColor: 'transparent', fill: '-1' },
+          { label: 'P50', data: data.p50, borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)', fill: '-2' },
+          { label: 'P25', data: data.p25, borderColor: '#ffc107', backgroundColor: 'transparent', fill: '-3' },
+          { label: 'P5', data: data.p5, borderColor: '#dc3545', backgroundColor: 'transparent', fill: false },
+        ]
+      },
+      options: {
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { title: { display: true, text: 'Portfolio Value (USD)' } } }
+      }
+    });
+  }
+  </script>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

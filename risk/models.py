@@ -1310,6 +1310,36 @@ class SimulationResult(models.Model):
         return f"SimulationResult — {self.run} — {self.calc_timestamp}"
 
 
+class TaxDecisionAcknowledgement(models.Model):
+    """
+    Records when a user has been presented with the tax impact of a
+    strategy recommendation and acknowledged it.
+
+    Write path triggered by M6-Spec-2 strategy_acknowledge view;
+    table definition from M8-Spec-1.
+    """
+    recommendation = models.ForeignKey(
+        StrategyRecommendation, on_delete=models.CASCADE, related_name='tax_acknowledgements'
+    )
+    presented_to_user = models.CharField(max_length=50, blank=True)
+    # Owner who was presented the recommendation (TOM, SUSAN, etc.)
+    presented_at = models.DateTimeField(null=True, blank=True)
+    # Original calc_timestamp from StrategyRecommendation
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_by = models.CharField(max_length=100, blank=True)
+    # Username or 'anonymous'
+    tax_cost_estimate_presented = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    # Tax cost shown to user at acknowledgement time
+    user_notes = models.TextField(blank=True)
+    # Optional user-entered notes
+
+    class Meta:
+        db_table = 'rm_tax_decision_acknowledgement'
+
+    def __str__(self):
+        return f"TaxAck — {self.recommendation_id} — {self.acknowledged_by}"
+
+
 class CustomStressScenario(models.Model):
     """
     User-defined instantaneous shock scenario for stress testing.

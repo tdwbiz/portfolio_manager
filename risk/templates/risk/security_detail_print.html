@@ -1,0 +1,148 @@
+{% load risk_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Risk Card - {{ security.symbol }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 11px; margin: 20px; }
+    h1 { font-size: 18px; margin-bottom: 5px; }
+    h2 { font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+    th { background-color: #f5f5f5; }
+    .text-right { text-align: right; }
+    .text-danger { color: #dc3545; font-weight: bold; }
+    .text-success { color: #198754; font-weight: bold; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; color: white; font-size: 10px; }
+    .badge-danger { background-color: #dc3545; }
+    .badge-warning { background-color: #ffc107; color: #333; }
+    .badge-success { background-color: #198754; }
+    .badge-info { background-color: #0dcaf0; }
+    .section { margin-bottom: 15px; }
+    .row { display: flex; flex-wrap: wrap; }
+    .col-4 { flex: 0 0 33.33%; padding: 0 5px; }
+    .col-6 { flex: 0 0 50%; padding: 0 5px; }
+    .card { border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; page-break-inside: avoid; }
+    .card-header { background: #f8f9fa; padding: 6px 10px; font-weight: bold; border-bottom: 1px solid #ddd; }
+    .card-body { padding: 8px 10px; }
+  </style>
+</head>
+<body>
+  <h1>{{ security.symbol }} \u2014 {{ security.name }}</h1>
+  <p>
+    {{ security.asset_class }} | {{ security.sector }} | {{ security.primary_currency }}
+    | Calc Date: {{ calc_date }}
+    {% if urgency %}
+    | Urgency: <span class="badge badge-{{ urgency.urgency_level|lower|default:'info' }}">{{ urgency.urgency_level }}</span>
+    {% endif %}
+  </p>
+
+  <h2>Volatility (Annualised)</h2>
+  <table>
+    <tr><th>Period</th><th class="text-right">Value</th></tr>
+    <tr><td>10-day</td><td class="text-right">{{ security_metrics.vol_10d|floatformat:1 }}%</td></tr>
+    <tr><td>21-day</td><td class="text-right">{{ security_metrics.vol_21d|floatformat:1 }}%</td></tr>
+    <tr><td>63-day</td><td class="text-right">{{ security_metrics.vol_63d|floatformat:1 }}%</td></tr>
+    <tr><td>252-day</td><td class="text-right">{{ security_metrics.vol_252d|floatformat:1 }}%</td></tr>
+  </table>
+
+  <h2>Value at Risk (1-day, 95%)</h2>
+  <table>
+    <tr><th>Method</th><th class="text-right">Value</th></tr>
+    <tr><td>Parametric</td><td class="text-right">{{ security_metrics.var_parametric_95|floatformat:2 }}%</td></tr>
+    <tr><td>Historical</td><td class="text-right">{{ security_metrics.var_historical_95|floatformat:2 }}%</td></tr>
+    <tr><td>Cornish-Fisher</td><td class="text-right">{{ security_metrics.var_cornish_fisher_95|floatformat:2 }}%</td></tr>
+    <tr><td>CVaR (ES)</td><td class="text-right text-danger">{{ security_metrics.cvar_95|floatformat:2 }}%</td></tr>
+  </table>
+
+  <h2>Risk Ratios</h2>
+  <table>
+    <tr><th>Metric</th><th class="text-right">Value</th></tr>
+    <tr><td>Beta vs SPY</td><td class="text-right">{{ security_metrics.beta_spy|floatformat:2|default:"\u2014" }}</td></tr>
+    <tr><td>Beta vs XIU</td><td class="text-right">{{ security_metrics.beta_xiu|floatformat:2|default:"\u2014" }}</td></tr>
+    <tr><td>Sharpe Ratio</td><td class="text-right">{{ security_metrics.sharpe_ratio|floatformat:2|default:"\u2014" }}</td></tr>
+    <tr><td>Sortino Ratio</td><td class="text-right">{{ security_metrics.sortino_ratio|floatformat:2|default:"\u2014" }}</td></tr>
+    <tr><td>Liquidity Score</td><td class="text-right">{{ security_metrics.liquidity_score|floatformat:0|default:"\u2014" }}/100</td></tr>
+  </table>
+
+  {% if market_condition %}
+  <h2>Market Conditions</h2>
+  <table>
+    <tr><th>Indicator</th><th>Value</th><th>Status</th></tr>
+    <tr>
+      <td>RSI (14)</td>
+      <td class="text-right">{{ market_condition.rsi_14|floatformat:1 }}</td>
+      <td>{% if market_condition.rsi_14 < 30 %}Oversold{% elif market_condition.rsi_14 > 70 %}Overbought{% else %}Neutral{% endif %}</td>
+    </tr>
+    <tr>
+      <td>vs 50d SMA</td>
+      <td class="text-right">{{ market_condition.price_vs_sma50_pct|floatformat:1 }}%</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>vs 200d SMA</td>
+      <td class="text-right">{{ market_condition.price_vs_sma200_pct|floatformat:1 }}%</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>%B (Bollinger)</td>
+      <td class="text-right">{{ market_condition.bb_pct_b|floatformat:2 }}</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>MACD Histogram</td>
+      <td class="text-right">{{ market_condition.macd_histogram|floatformat:4 }}</td>
+      <td></td>
+    </tr>
+  </table>
+  {% endif %}
+
+  {% if regime_sensitivities %}
+  <h2>Regime Sensitivity</h2>
+  <table>
+    <tr><th>Quadrant</th><th>Description</th><th>Multiplier</th><th>Rationale</th></tr>
+    {% for rs in regime_sensitivities %}
+    <tr>
+      <td>{{ rs.regime_quadrant }}</td>
+      <td>{{ rs.regime_quadrant|quadrant_description }}</td>
+      <td class="text-right">{{ rs.sensitivity_multiplier }}x</td>
+      <td class="small">{{ rs.rationale }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if top_recommendations %}
+  <h2>Strategy Recommendations</h2>
+  <table>
+    <tr><th>Rank</th><th>Account</th><th>Strategy</th><th class="text-right">Cost</th><th>Tax</th></tr>
+    {% for rec in top_recommendations %}
+    <tr>
+      <td>{{ rec.rank }}</td>
+      <td>{{ rec.account_id }}</td>
+      <td>{{ rec.strategy_template.name }}</td>
+      <td class="text-right">${{ rec.estimated_strategy_cost_usd|floatformat:0|intcomma }}</td>
+      <td>{% if rec.is_tax_triggering %}Tax Event{% else %}No Tax{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if recent_backtest %}
+  <h2>Recent Backtest</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th></tr>
+    <tr><td>Strategy</td><td>{{ recent_backtest.run.strategy_template.name }}</td></tr>
+    <tr><td>Scenario</td><td>{{ recent_backtest.run.scenario.display_name }}</td></tr>
+    <tr><td>Return (Unhedged)</td><td class="text-right">{{ recent_backtest.total_return_unhedged_pct }}%</td></tr>
+    <tr><td>Return (Hedged)</td><td class="text-right">{{ recent_backtest.total_return_hedged_pct }}%</td></tr>
+    <tr><td>Max DD (Unhedged)</td><td class="text-right text-danger">{{ recent_backtest.max_drawdown_unhedged }}%</td></tr>
+  </table>
+  {% endif %}
+
+  <p style="color: #999; font-size: 9px; margin-top: 20px;">
+    Generated on {{ calc_date }} by Portfolio Manager Risk Engine
+  </p>
+</body>
+</html>

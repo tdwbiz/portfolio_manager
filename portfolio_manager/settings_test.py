@@ -12,6 +12,9 @@ DATABASES = {
 # Amibroker export watch folder
 AMIBROKER_WATCH_FOLDER = r'C:\AI-Workspace\amibroker_exports'
 
+# VL model settings for tests
+VL_MODEL_BASE_URL = 'http://localhost:11440/v1'
+
 # yFinance fetch settings
 YFINANCE_DEFAULT_HISTORY_YEARS = 10
 YFINANCE_RETRY_ATTEMPTS = 3

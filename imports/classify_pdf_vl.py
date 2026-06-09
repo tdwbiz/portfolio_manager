@@ -67,7 +67,7 @@ def classify_pdf(file_path: str) -> str:
     str
         One of: 'annual', 'monthly', 'unknown'.
     """
-    base_url = getattr(settings, 'VL_MODEL_BASE_URL', 'http://localhost:11440/v1')
+    base_url = settings.VL_MODEL_BASE_URL
     model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)

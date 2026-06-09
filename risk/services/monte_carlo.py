@@ -128,19 +128,29 @@ def generate_jump_diffusion_paths(
         (n_paths, horizon_days)
     )
 
-    # Jump component — vectorised
+    # Jump component — fully vectorised
     # Number of jumps per step per path: N ~ Poisson(lambda * dt)
     n_jumps = rng.poisson(jump_intensity * dt, size=(n_paths, horizon_days))
 
-    # For each path-step, draw N_jumps jump sizes
-    jump_sizes = np.zeros((n_paths, horizon_days))
-    for path_idx in range(n_paths):
-        for step_idx in range(horizon_days):
-            n = int(n_jumps[path_idx, step_idx])
-            if n > 0:
-                jump_sizes[path_idx, step_idx] = sum(
-                    rng.normal(jump_mean, jump_std) for _ in range(n)
-                )
+    # Vectorised jump size computation:
+    # 1. Determine maximum jumps needed across all path-step combinations
+    max_jumps = int(n_jumps.max()) if n_jumps.size > 0 else 0
+    
+    # 2. Generate all jump sizes at once: (n_paths, horizon_days, max_jumps)
+    if max_jumps > 0:
+        all_jump_sizes = rng.normal(jump_mean, jump_std, size=(n_paths, horizon_days, max_jumps))
+        
+        # 3. Create mask for valid jumps: True where jump index < n_jumps[path, step]
+        jump_indices = np.arange(max_jumps, dtype=np.int32)  # (max_jumps,)
+        # Broadcast to (n_paths, horizon_days, max_jumps)
+        valid_mask = jump_indices < n_jumps[:, :, np.newaxis]  # (n_paths, horizon_days, max_jumps)
+        
+        # 4. Sum only valid jumps along the last axis
+        # Replace invalid jumps with 0 before summing
+        masked_jumps = np.where(valid_mask, all_jump_sizes, 0.0)
+        jump_sizes = np.sum(masked_jumps, axis=2)  # (n_paths, horizon_days)
+    else:
+        jump_sizes = np.zeros((n_paths, horizon_days))
 
     total_log_returns = gbm_log_returns + jump_sizes
     paths = S0 * np.exp(np.cumsum(total_log_returns, axis=1))
@@ -445,10 +455,19 @@ def _apply_trailing_stop(
     )
 
     # Create hedged symbol paths: replace post-exit prices with exit price
-    hedged_sym_paths = np.broadcast_to(sym_paths, (n_paths, T_plus_1)).copy()
-    for path_idx in range(n_paths):
-        if trigger_mask[path_idx]:
-            hedged_sym_paths[path_idx, trigger_days[path_idx]:] = exit_prices[path_idx]
+    # Fully vectorised: use advanced indexing to set all post-exit prices at once
+    hedged_sym_paths = sym_paths.copy()
+    
+    # For paths that triggered, set post-exit prices to exit price
+    triggered_paths = np.where(trigger_mask)[0]
+    if len(triggered_paths) > 0:
+        # Create time indices array: (T_plus_1,)
+        time_indices = np.arange(T_plus_1)
+        
+        # For each triggered path, set prices from exit day onward to exit price
+        for path_idx in triggered_paths:
+            exit_day = trigger_days[path_idx]
+            hedged_sym_paths[path_idx, exit_day:] = exit_prices[path_idx]
 
     # Adjust portfolio: replace symbol contribution
     # Original: portfolio = (1 - w) * others + w * sym/S0

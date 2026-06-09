@@ -15,6 +15,25 @@ from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 logger = logging.getLogger(__name__)
 
 
+def save_uploaded_pdf(uploaded_file):
+    """Save an uploaded PDF file to the MEDIA_ROOT/pdf_uploads directory.
+
+    Returns the Path to the saved file, or raises ValueError if the file is not a PDF.
+    """
+    if not uploaded_file.name.lower().endswith('.pdf'):
+        raise ValueError('Only PDF files are accepted.')
+
+    upload_dir = Path(settings.MEDIA_ROOT) / 'pdf_uploads'
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = upload_dir / uploaded_file.name
+
+    with open(temp_path, 'wb+') as destination:
+        for chunk in uploaded_file.chunks():
+            destination.write(chunk)
+
+    return temp_path
+
+
 def pdf_import_view(request):
     """Handle PDF statement upload and display results.
 
@@ -28,18 +47,12 @@ def pdf_import_view(request):
         if not uploaded_file:
             context['error'] = 'No file uploaded.'
         else:
-            if not uploaded_file.name.lower().endswith('.pdf'):
-                context['error'] = 'Only PDF files are accepted.'
+            try:
+                temp_path = save_uploaded_pdf(uploaded_file)
+            except ValueError as e:
+                context['error'] = str(e)
             else:
                 try:
-                    # Save uploaded file temporarily
-                    upload_dir = Path(settings.MEDIA_ROOT) / 'pdf_uploads'
-                    upload_dir.mkdir(parents=True, exist_ok=True)
-                    temp_path = upload_dir / uploaded_file.name
-                    with open(temp_path, 'wb+') as destination:
-                        for chunk in uploaded_file.chunks():
-                            destination.write(chunk)
-
                     # Parse the PDF
                     parsed = parse_rbc_pdf(str(temp_path))
 
@@ -146,18 +159,12 @@ def annual_report_import_view(request):
         if not uploaded_file:
             context['error'] = 'No file uploaded.'
         else:
-            if not uploaded_file.name.lower().endswith('.pdf'):
-                context['error'] = 'Only PDF files are accepted.'
+            try:
+                temp_path = save_uploaded_pdf(uploaded_file)
+            except ValueError as e:
+                context['error'] = str(e)
             else:
                 try:
-                    # Save uploaded file temporarily
-                    upload_dir = Path(settings.MEDIA_ROOT) / 'pdf_uploads'
-                    upload_dir.mkdir(parents=True, exist_ok=True)
-                    temp_path = upload_dir / uploaded_file.name
-                    with open(temp_path, 'wb+') as destination:
-                        for chunk in uploaded_file.chunks():
-                            destination.write(chunk)
-
                     # Parse the Annual Report PDF via VL model (hard error on failure)
                     parsed = parse_rbc_annual_report_vl(str(temp_path))
 

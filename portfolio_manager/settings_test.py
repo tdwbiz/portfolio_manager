@@ -9,8 +9,10 @@ DATABASES = {
     }
 }
 
-# Amibroker export watch folder
-AMIBROKER_WATCH_FOLDER = r'C:\AI-Workspace\amibroker_exports'
+# Amibroker export watch folder (temp dir for tests)
+import tempfile
+
+AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix='amibroker_')
 
 # VL model settings for tests
 VL_MODEL_BASE_URL = 'http://localhost:11440/v1'

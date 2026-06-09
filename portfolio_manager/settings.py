@@ -263,8 +263,11 @@ LOGGING = {
     },
 }
 
-# Amibroker export watch folder
-AMIBROKER_WATCH_FOLDER = r'C:\AI-Workspace\amibroker_exports'
+# Amibroker export watch folder (configurable via environment variable)
+AMIBROKER_WATCH_FOLDER = os.getenv(
+    'AMIBROKER_WATCH_FOLDER',
+    os.path.join(BASE_DIR, 'amibroker_exports'),
+)
 
 # yFinance fetch settings
 YFINANCE_DEFAULT_HISTORY_YEARS = 10   # Full history on first fetch

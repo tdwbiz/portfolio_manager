@@ -1,0 +1,13 @@
+Portfolio Alert Digest
+======================
+{{ alert_count }} alert(s) for {{ calc_date }}
+
+{% for alert in alerts %}
+Type: {{ alert.alert_type }}
+Entity: {{ alert.entity_description }}
+Trigger: {{ alert.trigger_value }}
+Symbol: {{ alert.symbol|default:"—" }}
+
+{% endfor %}
+--
+Portfolio Manager — Automated Risk Monitoring

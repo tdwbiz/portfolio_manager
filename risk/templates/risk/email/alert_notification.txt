@@ -1,0 +1,12 @@
+Portfolio Alert
+===============
+
+Type: {{ alert_type }}
+Entity: {{ entity_description }}
+Trigger Value: {{ trigger_value }}
+{% if previous_value %}Previous Value: {{ previous_value }}{% endif %}
+{% if symbol %}Symbol: {{ symbol }}{% endif %}
+Date: {{ calc_date }}
+
+--
+Portfolio Manager — Automated Risk Monitoring

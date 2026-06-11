@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Portfolio Alert Digest</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { background: #fff; border-radius: 8px; padding: 24px; max-width: 700px; margin: 0 auto; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; margin-top: 0; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        td, th { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { color: #666; font-weight: 600; }
+        .alert-type { color: #d32f2f; font-weight: 600; }
+        .footer { color: #999; font-size: 12px; margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Alert Digest — {{ alert_count }} alert(s) for {{ calc_date }}</h1>
+
+        <table>
+            <thead>
+                <tr><th>Type</th><th>Entity</th><th>Trigger</th><th>Symbol</th></tr>
+            </thead>
+            <tbody>
+                {% for alert in alerts %}
+                <tr>
+                    <td class="alert-type">{{ alert.alert_type }}</td>
+                    <td>{{ alert.entity_description }}</td>
+                    <td>{{ alert.trigger_value }}</td>
+                    <td>{{ alert.symbol|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p class="footer">Portfolio Manager — Automated Risk Monitoring</p>
+    </div>
+</body>
+</html>

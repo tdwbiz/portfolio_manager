@@ -1,6 +1,6 @@
 from django.urls import path
 from risk import views
-from risk.views import security, strategy, alternatives, compare, stress, exports
+from risk.views import security, strategy, alternatives, compare, stress, exports, explain
 
 app_name = 'risk'
 
@@ -30,4 +30,7 @@ urlpatterns = [
     path('stress/<int:run_id>/',           stress.stress_results,   name='stress_results'),
     path('export/strategy/<int:rec_id>/<str:fmt>/',
                                          exports.strategy_export,         name='strategy_export'),
+    # M8-Spec-1: Explainability
+    path('explain/<int:urgency_score_id>/',
+                                         explain.explain_score,           name='explain_score'),
 ]

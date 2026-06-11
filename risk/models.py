@@ -4,6 +4,13 @@ from decimal import Decimal
 from core.models import Account
 
 
+class ImmutableRecordError(Exception):
+    """
+    Raised when an attempt is made to modify or delete an immutable (append-only) record.
+    """
+    pass
+
+
 class SecurityUniverse(models.Model):
     symbol = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=200, blank=True)
@@ -1469,14 +1476,14 @@ class ImmutableModel(models.Model):
     def save(self, *args, **kwargs):
         if self.pk:
             # Prevent updates to existing records — append-only
-            raise PermissionError(
+            raise ImmutableRecordError(
                 f"ImmutableModel '{self.__class__.__name__}' is append-only. "
                 "Use add_audit_entry() to create new entries instead."
             )
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        raise PermissionError(
+        raise ImmutableRecordError(
             f"ImmutableModel '{self.__class__.__name__}' is append-only. "
             "Deletion is not permitted."
         )
@@ -1590,3 +1597,172 @@ class AuditTaxLog(ImmutableModel):
 
     def __str__(self):
         return f"Tax ack — {self.recommendation} ({self.tax_year})"
+
+
+# =============================================================================
+# M8-Spec-1: Detailed Audit Models (Score Snapshot, Recommendation Log,
+#            Simulation Run, Regime Log)
+# =============================================================================
+
+
+class AuditScoreSnapshot(ImmutableModel):
+    """
+    Immutable snapshot of an urgency score calculation with component breakdown.
+    Written by calc_urgency command after each UrgencyScore UPSERT.
+    Unique on (entity_type, entity_id, symbol, calc_date).
+    """
+    entity_type = models.CharField(max_length=30)
+    # 'security_in_account' | 'account' | 'owner' | 'portfolio'
+    entity_id = models.CharField(max_length=100)
+    symbol = models.CharField(max_length=20, blank=True)
+    calc_date = models.DateField()
+    urgency_level = models.CharField(max_length=20)
+    score_raw = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # JSON fields preserving exact state at calculation time
+    component_scores_json = models.JSONField(default=dict)
+    # {m1: {score, weight}, driver: {score, weight}, regime: {score, weight}, market: {score, weight}}
+    weights_at_calc_json = models.JSONField(default=dict)
+    # {weight_m1_metrics, weight_security_driver, weight_regime, weight_market_condition,
+    #  threshold_low, threshold_medium, threshold_high}
+    input_metrics_json = models.JSONField(default=dict)
+    # {var_parametric_95, current_drawdown_from_252d_peak, vol_252d, ...}
+
+    class Meta:
+        db_table = 'rm_audit_score_snapshot'
+        unique_together = [('entity_type', 'entity_id', 'symbol', 'calc_date')]
+        indexes = [
+            models.Index(fields=['calc_date', 'entity_type']),
+            models.Index(fields=['calc_date', 'urgency_level']),
+            models.Index(fields=['entity_id', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"ScoreSnapshot — {self.entity_id} ({self.symbol}) — {self.calc_date}"
+
+
+class AuditRecommendationLog(ImmutableModel):
+    """
+    Immutable log of every strategy template considered (eligible or rejected)
+    for each (symbol, account, calc_date). Written by
+    calc_strategy_recommendations command.
+    """
+    symbol = models.CharField(max_length=20)
+    account_id = models.CharField(max_length=50)
+    owner = models.CharField(max_length=50, blank=True)
+    calc_date = models.DateField()
+
+    # Input state at calculation time
+    input_urgency_level = models.CharField(max_length=20)
+    input_urgency_score = models.DecimalField(max_digits=10, decimal_places=2)
+    input_regime_quadrant = models.CharField(max_length=4)
+
+    # Template info
+    strategy_template_code = models.CharField(max_length=50)
+    strategy_template_name = models.CharField(max_length=200, blank=True)
+
+    # Eligibility
+    was_eligible = models.BooleanField()
+    ineligibility_reason = models.CharField(max_length=50, blank=True, default='')
+    # 'options_not_available', 'not_in_universe', 'insufficient_history',
+    # 'no_instrument_links', 'inactive', 'tax_shelter_ineligible',
+    # 'risk_limit_exceeded', 'concentration_limit', 'other'
+
+    # Ranking (only for eligible)
+    rank = models.IntegerField(null=True, blank=True)
+
+    # Cost/VaR results (only for eligible and ranked)
+    cost_result_json = models.JSONField(default=dict, blank=True)
+    var_result_json = models.JSONField(default=dict, blank=True)
+    cost_per_var_reduction_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+
+    # Selection rationale (plain English)
+    selection_rationale = models.TextField(blank=True)
+
+    # Constraints
+    constraints_applied_json = models.JSONField(default=list, blank=True)
+
+    # Tax
+    is_tax_triggering = models.BooleanField(default=False)
+    tax_cost_estimate_usd = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        db_table = 'rm_audit_recommendation_log'
+        indexes = [
+            models.Index(fields=['calc_date', 'symbol', 'account_id']),
+            models.Index(fields=['calc_date', 'was_eligible']),
+            models.Index(fields=['calc_date', 'strategy_template_code']),
+            models.Index(fields=['symbol', 'account_id', 'calc_date']),
+        ]
+
+    def __str__(self):
+        status = 'eligible' if self.was_eligible else f'rejected ({self.ineligibility_reason})'
+        return f"RecLog — {self.symbol} ({self.account_id}) — {self.strategy_template_code} — {status}"
+
+
+class AuditSimulationRun(ImmutableModel):
+    """
+    Immutable record of a simulation run (backtest, Monte Carlo, or stress test).
+    Written after each simulation command completes.
+    """
+    simulation_family = models.CharField(max_length=30)
+    # 'backtest' | 'montecarlo' | 'stress_test'
+    source_run_id = models.IntegerField()
+    # FK to the primary result table (BacktestRun.id / SimulationRun.id)
+
+    symbol = models.CharField(max_length=20, blank=True)
+    account_id = models.CharField(max_length=50, blank=True)
+    entity_type = models.CharField(max_length=30, blank=True)
+    entity_id = models.CharField(max_length=100, blank=True)
+
+    strategy_template_code = models.CharField(max_length=50, blank=True)
+    scenario_name = models.CharField(max_length=200, blank=True)
+
+    parameters_json = models.JSONField(default=dict)
+    summary_json = models.JSONField(default=dict)
+
+    calc_date = models.DateField()
+    run_timestamp = models.DateTimeField()
+
+    class Meta:
+        db_table = 'rm_audit_simulation_run'
+        indexes = [
+            models.Index(fields=['calc_date', 'simulation_family']),
+            models.Index(fields=['simulation_family', 'source_run_id']),
+            models.Index(fields=['symbol', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"SimRun — {self.simulation_family} — {self.symbol} ({self.account_id}) — {self.calc_date}"
+
+
+class AuditRegimeLog(ImmutableModel):
+    """
+    Immutable record of regime state + market condition summary for each date.
+    Written at the end of calc_market_conditions command.
+    Unique on calc_date — re-runs for the same date are skipped (no error).
+    """
+    calc_date = models.DateField(unique=True)
+
+    # From RegimeState
+    quadrant = models.CharField(max_length=4)
+    confidence_score = models.DecimalField(max_digits=10, decimal_places=2)
+    transition_flag = models.BooleanField(default=False)
+    indicator_snapshot_json = models.JSONField(default=dict)
+
+    # Aggregated from MarketCondition for calc_date
+    death_cross_count = models.IntegerField(default=0)
+    golden_cross_count = models.IntegerField(default=0)
+    oversold_count = models.IntegerField(default=0)
+    overbought_count = models.IntegerField(default=0)
+    bear_phase_symbols_json = models.JSONField(default=list)
+
+    class Meta:
+        db_table = 'rm_audit_regime_log'
+        indexes = [
+            models.Index(fields=['calc_date']),
+            models.Index(fields=['quadrant', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"RegimeLog — {self.calc_date} ({self.quadrant})"

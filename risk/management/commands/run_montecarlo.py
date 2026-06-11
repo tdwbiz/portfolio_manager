@@ -53,6 +53,7 @@ from risk.models import (
     SimulationRun,
     StrategyRecommendation,
 )
+from risk.services.audit_hooks import write_audit_simulation_run
 from risk.services.monte_carlo import (
     apply_strategy_overlay,
     compute_output_distribution,
@@ -369,6 +370,36 @@ class Command(BaseCommand):
             })
 
         SimulationResult.objects.create(**result_kwargs)
+
+        # Audit hook: write simulation run log
+        try:
+            write_audit_simulation_run(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                symbol=symbols[0] if symbols else '',
+                calc_date=calc_date,
+                simulation_family='montecarlo',
+                source_run_id=run.pk,
+                parameters_json=json.dumps({
+                    'n_paths': n_paths,
+                    'horizon_days': horizon_days,
+                    'use_jump_diffusion': any(use_jump_flags.values()),
+                    'random_seed': seed,
+                    'symbols': symbols,
+                    'strategy_overlay': strategy_overlay,
+                }),
+                summary_json=json.dumps({
+                    'portfolio_value_start_usd': total_mv_usd,
+                    'pct5': dist['pct5'],
+                    'pct50': dist['pct50'],
+                    'pct95': dist['pct95'],
+                    'prob_loss_5pct': dist['prob_loss_5pct'],
+                    'expected_shortfall_5pct_usd': dist['expected_shortfall'],
+                    'duration_seconds': round(duration, 2),
+                }),
+            )
+        except Exception:
+            pass
 
         # Print summary
         self.stdout.write(self.style.SUCCESS("\n=== Monte Carlo Simulation Complete ==="))

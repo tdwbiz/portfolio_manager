@@ -27,6 +27,7 @@ from risk.models import (
     SecurityUniverse,
     UrgencyScore,
 )
+from risk.services.audit_hooks import write_audit_score_snapshot
 
 
 def _get_config_value(key: str, default: str) -> str:
@@ -687,6 +688,28 @@ def calculate_urgency_for_date(
                 },
             )
 
+            # Audit hook: write score snapshot
+            try:
+                write_audit_score_snapshot(
+                    entity_type='security_in_account',
+                    entity_id=entity_id,
+                    symbol=symbol,
+                    calc_date=calc_date,
+                    urgency_level=urgency_level,
+                    score_raw=score_raw,
+                    component_scores_json=json.dumps(component_json),
+                    weights_config={
+                        'weight_m1_metrics': config['weight_m1_metrics'],
+                        'weight_security_driver': config['weight_security_driver'],
+                        'weight_regime': config['weight_regime'],
+                        'weight_market_condition': config['weight_market_condition'],
+                    },
+                    input_metrics_json=json.dumps(m1_inputs.get("inputs", {})),
+                )
+            except Exception:
+                # Audit write failures logged at ERROR but never raise out of M2
+                pass
+
             security_in_account_scores.append({
                 'symbol': symbol,
                 'account_id': account_id,
@@ -734,6 +757,27 @@ def calculate_urgency_for_date(
                 'component_scores_json': json.dumps({"rollup": "account"}),
             },
         )
+
+        # Audit hook: write score snapshot
+        try:
+            write_audit_score_snapshot(
+                entity_type='account',
+                entity_id=account_id,
+                symbol='',
+                calc_date=calc_date,
+                urgency_level=urgency_level,
+                score_raw=score_raw,
+                component_scores_json=json.dumps({"rollup": "account"}),
+                weights_config={
+                    'weight_m1_metrics': config['weight_m1_metrics'],
+                    'weight_security_driver': config['weight_security_driver'],
+                    'weight_regime': config['weight_regime'],
+                    'weight_market_condition': config['weight_market_condition'],
+                },
+                input_metrics_json='{}',
+            )
+        except Exception:
+            pass
 
         account_scores.append({
             'entity_id': account_id,
@@ -787,6 +831,27 @@ def calculate_urgency_for_date(
             },
         )
 
+        # Audit hook: write score snapshot
+        try:
+            write_audit_score_snapshot(
+                entity_type='owner',
+                entity_id=owner,
+                symbol='',
+                calc_date=calc_date,
+                urgency_level=urgency_level,
+                score_raw=score_raw,
+                component_scores_json=json.dumps({"rollup": "owner"}),
+                weights_config={
+                    'weight_m1_metrics': config['weight_m1_metrics'],
+                    'weight_security_driver': config['weight_security_driver'],
+                    'weight_regime': config['weight_regime'],
+                    'weight_market_condition': config['weight_market_condition'],
+                },
+                input_metrics_json='{}',
+            )
+        except Exception:
+            pass
+
     # Roll up to portfolio level
     portfolio_weights = {a['entity_id']: 1.0 for a in account_scores}
     total_w = sum(portfolio_weights.values())
@@ -812,6 +877,27 @@ def calculate_urgency_for_date(
             'component_scores_json': json.dumps({"rollup": "portfolio"}),
         },
     )
+
+    # Audit hook: write score snapshot
+    try:
+        write_audit_score_snapshot(
+            entity_type='portfolio',
+            entity_id='ALL',
+            symbol='',
+            calc_date=calc_date,
+            urgency_level=urgency_level,
+            score_raw=score_raw,
+            component_scores_json=json.dumps({"rollup": "portfolio"}),
+            weights_config={
+                'weight_m1_metrics': config['weight_m1_metrics'],
+                'weight_security_driver': config['weight_security_driver'],
+                'weight_regime': config['weight_regime'],
+                'weight_market_condition': config['weight_market_condition'],
+            },
+            input_metrics_json='{}',
+        )
+    except Exception:
+        pass
 
     # Summary
     distribution = {'Low': 0, 'Medium': 0, 'High': 0, 'Critical': 0}

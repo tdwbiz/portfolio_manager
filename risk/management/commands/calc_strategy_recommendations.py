@@ -33,6 +33,7 @@ from risk.models import (
     StrategyTemplate,
     UrgencyScore,
 )
+from risk.services.audit_hooks import write_audit_recommendation_log
 from risk.services.catalogue import get_eligible_templates
 from risk.services.option_pricing import estimate_option_cost
 from risk.services.strategy_costs import compute_ranking_metric, estimate_strategy_cost
@@ -265,8 +266,8 @@ class Command(BaseCommand):
             options_available = su.options_available if su else True
             is_lif_or_rrif = pos['account_category'] in ('LIF', 'RRIF')
 
-            # Get eligible templates
-            templates = get_eligible_templates(
+            # Get eligible templates and rejected templates with reasons
+            eligible_templates, rejected_templates = get_all_templates_with_reasons(
                 asset_class=asset_class,
                 account_category=pos['account_category'],
                 urgency_level=us.urgency_level,
@@ -277,8 +278,29 @@ class Command(BaseCommand):
                 unrealised_gain_usd=max(0, unrealised_gain),
             )
 
-            if not templates:
+            if not eligible_templates:
                 positions_skipped.append(f"{symbol} ({account_id}): no eligible templates")
+                # Still audit rejected templates
+                for template, reason in rejected_templates:
+                    try:
+                        write_audit_recommendation_log(
+                            entity_type='security_in_account',
+                            entity_id=f"{account_id}::{symbol}",
+                            symbol=symbol,
+                            calc_date=calc_date,
+                            strategy_code=template.code,
+                            strategy_name=template.name,
+                            urgency_level=us.urgency_level,
+                            urgency_score=us.score_raw,
+                            rationale='rejected',
+                            ineligibility_reason=reason,
+                            estimated_strategy_cost_usd=0,
+                            estimated_var_reduction_usd=0,
+                            is_tax_triggering=False,
+                            tax_cost_estimate_usd=0,
+                        )
+                    except Exception:
+                        pass
                 continue
 
             # Build constraints list
@@ -381,6 +403,49 @@ class Command(BaseCommand):
                         status='active',
                     )
                     total_recommendations += 1
+
+                    # Audit hook: write recommendation log
+                    try:
+                        write_audit_recommendation_log(
+                            entity_type='security_in_account',
+                            entity_id=f"{account_id}::{symbol}",
+                            symbol=symbol,
+                            calc_date=calc_date,
+                            strategy_code=template.code,
+                            strategy_name=template.name,
+                            urgency_level=us.urgency_level,
+                            urgency_score=us.score_raw,
+                            rationale='eligible',
+                            ineligibility_reason=None,
+                            estimated_strategy_cost_usd=cr['strategy_cost_usd'],
+                            estimated_var_reduction_usd=vr['var_reduction_usd'],
+                            is_tax_triggering=cr['is_tax_triggering'],
+                            tax_cost_estimate_usd=cr['tax_cost_usd'],
+                        )
+                    except Exception:
+                        pass
+
+                # Audit rejected templates
+                for template, reason in rejected_templates:
+                    try:
+                        write_audit_recommendation_log(
+                            entity_type='security_in_account',
+                            entity_id=f"{account_id}::{symbol}",
+                            symbol=symbol,
+                            calc_date=calc_date,
+                            strategy_code=template.code,
+                            strategy_name=template.name,
+                            urgency_level=us.urgency_level,
+                            urgency_score=us.score_raw,
+                            rationale='rejected',
+                            ineligibility_reason=reason,
+                            estimated_strategy_cost_usd=0,
+                            estimated_var_reduction_usd=0,
+                            is_tax_triggering=False,
+                            tax_cost_estimate_usd=0,
+                        )
+                    except Exception:
+                        pass
 
             positions_processed += 1
 

@@ -48,6 +48,7 @@ from risk.models import (
     HistoricalScenario,
     StrategyTemplate,
 )
+from risk.services.audit_hooks import write_audit_simulation_run
 from risk.services.backtest_engine import (
     load_price_series,
     get_position_at_date,
@@ -303,6 +304,44 @@ class Command(BaseCommand):
                 )
             )
 
+        # Audit hook: write simulation run log
+        try:
+            write_audit_simulation_run(
+                entity_type='security_in_account',
+                entity_id=f"{account_id}::{symbol}",
+                symbol=symbol,
+                calc_date=end_date if isinstance(end_date, date) else date.today(),
+                simulation_family='backtest',
+                source_run_id=run.pk,
+                parameters_json=json.dumps({
+                    'scenario': scenario.name,
+                    'strategy': template.code,
+                    'start_date': str(start_date),
+                    'end_date': str(end_date),
+                    'quantity': quantity,
+                    'cost_basis': cost_basis,
+                    'currency': currency,
+                    'strategy_params': {k: v for k, v in {
+                        'trail_pct': options.get('trail_pct'),
+                        'hedge_ratio': options.get('hedge_ratio'),
+                        'option_expiry_months': options.get('option_expiry_months'),
+                        'put_strike_pct': options.get('put_strike_pct'),
+                        'call_strike_pct': options.get('call_strike_pct'),
+                        'inverse_leverage': options.get('inverse_leverage'),
+                    }.items() if v is not None},
+                }),
+                summary_json=json.dumps({
+                    'total_return_unhedged_pct': metrics['total_return_unhedged_pct'],
+                    'total_return_hedged_pct': metrics['total_return_hedged_pct'],
+                    'return_improvement_pct': metrics['return_improvement_pct'],
+                    'max_drawdown_unhedged': metrics['max_drawdown_unhedged'],
+                    'max_drawdown_hedged': metrics['max_drawdown_hedged'],
+                    'hedge_cost_total_usd': metrics['hedge_cost_total_usd'],
+                }),
+            )
+        except Exception:
+            pass
+
     def _save_stress_test_result(self, symbol, account_id, template, scenario,
                                   start_date, end_date, quantity, cost_basis,
                                   stress_result, options):
@@ -362,6 +401,32 @@ class Command(BaseCommand):
                     f'  ✓ Saved stress test result for BacktestRun #{run.pk}'
                 )
             )
+
+        # Audit hook: write simulation run log (stress test mode)
+        try:
+            write_audit_simulation_run(
+                entity_type='security_in_account',
+                entity_id=f"{account_id}::{symbol}",
+                symbol=symbol,
+                calc_date=end_date if isinstance(end_date, date) else date.today(),
+                simulation_family='backtest',
+                source_run_id=run.pk,
+                parameters_json=json.dumps({
+                    'scenario': scenario.name,
+                    'strategy': template.code,
+                    'start_date': str(start_date),
+                    'end_date': str(end_date),
+                    'quantity': quantity,
+                    'cost_basis': cost_basis,
+                    'stress_test_mode': True,
+                }),
+                summary_json=json.dumps({
+                    'total_return_pct': stress_result['total_return_pct'],
+                    'end_value_usd': stress_result['end_value_usd'],
+                }),
+            )
+        except Exception:
+            pass
 
     def _print_metrics(self, metrics, strategy_type, is_stress_test):
         """Print metrics to stdout."""

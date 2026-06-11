@@ -41,6 +41,7 @@ from risk.models import (
     SimulationRun,
     StrategyRecommendation,
 )
+from risk.services.audit_hooks import write_audit_simulation_run
 from risk.services.stress_test import run_portfolio_stress_test
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,33 @@ class Command(BaseCommand):
             stress_loss_hedged_pct=result_data["stress_loss_hedged_pct"],
             stress_per_position_json=result_data["stress_per_position_json"],
         )
+
+        # Audit hook: write simulation run log
+        try:
+            write_audit_simulation_run(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                symbol=positions[0]['symbol'] if positions else '',
+                calc_date=calc_date,
+                simulation_family='stress_test',
+                source_run_id=run.pk,
+                parameters_json=json.dumps({
+                    'scenario': scenario_label,
+                    'shocks': shock_map,
+                    'strategy_overlay': strategy_overlay,
+                    'positions': len(positions),
+                }),
+                summary_json=json.dumps({
+                    'portfolio_value_start_usd': result_data['total_mv_usd'],
+                    'stress_loss_unhedged_usd': result_data['stress_loss_unhedged_usd'],
+                    'stress_loss_unhedged_pct': result_data['stress_loss_unhedged_pct'],
+                    'stress_loss_hedged_usd': result_data['stress_loss_hedged_usd'],
+                    'stress_loss_hedged_pct': result_data['stress_loss_hedged_pct'],
+                    'duration_seconds': round(duration, 2),
+                }),
+            )
+        except Exception:
+            pass
 
         # Print summary
         self.stdout.write(self.style.SUCCESS("\n=== Stress Test Complete ==="))

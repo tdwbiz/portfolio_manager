@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.http import HttpResponse
 from .models import (
     SecurityUniverse,
     MarketPriceHistory,
@@ -31,6 +32,15 @@ from .models import (
     CustomStressScenario,
     AlertConfig,
     AlertHistory,
+    AuditEntry,
+    AuditScoreSnapshot,
+    AuditRationale,
+    AuditActionLog,
+    AuditRetentionLog,
+    AuditTaxLog,
+    AuditRecommendationLog,
+    AuditSimulationRun,
+    AuditRegimeLog,
 )
 
 
@@ -522,3 +532,123 @@ class AlertHistoryAdmin(admin.ModelAdmin):
         ('Values', {'fields': ['trigger_value', 'previous_value']}),
         ('Acknowledgement', {'fields': ['acknowledged_at', 'acknowledged_by']}),
     ]
+
+
+# =============================================================================
+# M8-Spec-1: Audit Trail Admin
+# =============================================================================
+
+
+class ReadOnlyAuditAdmin(admin.ModelAdmin):
+    """Base admin for all audit tables — read-only with export capability."""
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def export_csv(self, request, queryset):
+        """Export selected records to CSV."""
+        import csv
+        import io
+
+        output = io.StringIO()
+        if queryset.exists():
+            fields = [f.name for f in queryset.model._meta.fields]
+            writer = csv.DictWriter(output, fieldnames=fields)
+            writer.writeheader()
+            for obj in queryset:
+                writer.writerow({
+                    field: getattr(obj, field) for field in fields
+                })
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='text/csv',
+            headers={'Content-Disposition': 'attachment; filename="audit_export.csv"'},
+        )
+        return response
+    export_csv.short_description = 'Export selected to CSV'
+
+
+@admin.register(AuditEntry)
+class AuditEntryAdmin(ReadOnlyAuditAdmin):
+    list_display = ['model_name', 'calc_date', 'status', 'created_at']
+    list_filter = ['status', 'calc_date']
+    search_fields = ['model_name']
+    readonly_fields = [f.name for f in AuditEntry._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditScoreSnapshot)
+class AuditScoreSnapshotAdmin(ReadOnlyAuditAdmin):
+    list_display = ['entity_type', 'entity_id', 'symbol', 'urgency_level', 'score_raw', 'calc_date']
+    list_filter = ['urgency_level', 'entity_type', 'calc_date']
+    search_fields = ['entity_id', 'symbol']
+    readonly_fields = [f.name for f in AuditScoreSnapshot._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditRationale)
+class AuditRationaleAdmin(ReadOnlyAuditAdmin):
+    list_display = ['recommendation', 'calc_date', 'created_at']
+    list_filter = ['calc_date']
+    search_fields = ['rationale_text']
+    readonly_fields = [f.name for f in AuditRationale._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditRecommendationLog)
+class AuditRecommendationLogAdmin(ReadOnlyAuditAdmin):
+    list_display = ['symbol', 'account_id', 'strategy_template_code', 'was_eligible', 'calc_date', 'rank']
+    list_filter = ['was_eligible', 'calc_date', 'input_urgency_level']
+    search_fields = ['symbol', 'strategy_template_code']
+    readonly_fields = [f.name for f in AuditRecommendationLog._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditActionLog)
+class AuditActionLogAdmin(ReadOnlyAuditAdmin):
+    list_display = ['recommendation', 'action_type', 'performed_by', 'created_at']
+    list_filter = ['action_type']
+    search_fields = ['performed_by', 'reason']
+    readonly_fields = [f.name for f in AuditActionLog._meta.fields]
+    date_hierarchy = 'created_at'
+
+
+@admin.register(AuditRegimeLog)
+class AuditRegimeLogAdmin(ReadOnlyAuditAdmin):
+    list_display = ['calc_date', 'quadrant', 'confidence_score', 'transition_flag']
+    list_filter = ['quadrant', 'calc_date']
+    search_fields = []
+    readonly_fields = [f.name for f in AuditRegimeLog._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditSimulationRun)
+class AuditSimulationRunAdmin(ReadOnlyAuditAdmin):
+    list_display = ['simulation_family', 'source_run_id', 'symbol', 'account_id', 'calc_date']
+    list_filter = ['simulation_family', 'calc_date']
+    search_fields = ['symbol', 'scenario_name']
+    readonly_fields = [f.name for f in AuditSimulationRun._meta.fields]
+    date_hierarchy = 'calc_date'
+
+
+@admin.register(AuditTaxLog)
+class AuditTaxLogAdmin(ReadOnlyAuditAdmin):
+    list_display = ['recommendation', 'tax_year', 'estimated_tax_impact', 'acknowledged_by', 'created_at']
+    list_filter = ['tax_year']
+    search_fields = ['acknowledged_by']
+    readonly_fields = [f.name for f in AuditTaxLog._meta.fields]
+    date_hierarchy = 'created_at'
+
+
+@admin.register(AuditRetentionLog)
+class AuditRetentionLogAdmin(ReadOnlyAuditAdmin):
+    list_display = ['check_date', 'retention_days', 'records_reviewed', 'records_flagged']
+    list_filter = ['check_date']
+    search_fields = []
+    readonly_fields = [f.name for f in AuditRetentionLog._meta.fields]
+    date_hierarchy = 'check_date'

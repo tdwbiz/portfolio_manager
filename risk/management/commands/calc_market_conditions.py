@@ -11,8 +11,10 @@ import logging
 from datetime import date
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import models
 
-from risk.models import MarketCondition, SecurityUniverse
+from risk.models import MarketCondition, RegimeState, SecurityUniverse
+from risk.services.audit_hooks import write_audit_regime_log
 from risk.services.data_source import DataSource, DataNotAvailableError
 from risk.services.technical_indicators import (
     bollinger_bands,
@@ -202,6 +204,31 @@ class Command(BaseCommand):
                 f"Processed {processed} symbols, skipped {skipped}"
             )
         )
+
+        # Audit hook: write regime log
+        try:
+            regime = RegimeState.objects.filter(calc_date=calc_date).order_by('-calc_date').first()
+            if regime:
+                # Aggregate market conditions for this date
+                conditions = MarketCondition.objects.filter(calc_date=calc_date)
+                phases = list(conditions.values_list('market_phase', flat=True).distinct())
+                avg_rsi = conditions.filter(rsi_14__isnull=False).aggregate(avg_rsi=models.Avg('rsi_14'))['avg_rsi']
+                uptrend_count = conditions.filter(market_phase='uptrend').count()
+                total = conditions.count()
+
+                write_audit_regime_log(
+                    calc_date=calc_date,
+                    regime_quadrant=regime.quadrant,
+                    regime_volatility=regime.volatility_regime,
+                    regime_trend=regime.trend_regime,
+                    market_phases=phases,
+                    avg_rsi=float(avg_rsi) if avg_rsi is not None else None,
+                    uptrend_count=uptrend_count,
+                    total_symbols=total,
+                )
+        except Exception:
+            # Audit write failures logged at ERROR but never raise out of M4
+            pass
 
     def _store_null_conditions(self, symbol: str, calc_date: date):
         """Store NULL conditions for mutual funds/cash equivalents."""

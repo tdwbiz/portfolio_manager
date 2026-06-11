@@ -1361,3 +1361,232 @@ class CustomStressScenario(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# =============================================================================
+# M7-Spec-1: Alerting & Continuous Monitoring
+# =============================================================================
+
+
+class AlertConfig(models.Model):
+    """
+    Defines a single monitored alert condition.
+    Scope filters (owner, account, symbol) are nullable — NULL means "applies to all".
+    This is reference data, edited via Django admin, not written by application logic
+    except for the seed command on first run.
+    """
+    alert_type = models.CharField(max_length=30)
+    # Values: 'urgency_level_change', 'var_portfolio_breach', 'regime_shift',
+    #         'death_cross', 'earnings_proximity', 'concentration_breach',
+    #         'taxable_gain_bracket'
+
+    # --- Scope filters (NULL = applies to all) ---
+    owner = models.CharField(max_length=50, null=True, blank=True)
+    account_id = models.CharField(max_length=50, null=True, blank=True)
+    symbol = models.CharField(max_length=20, null=True, blank=True)
+
+    # --- Threshold ---
+    threshold_value = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)
+    threshold_operator = models.CharField(max_length=5, default='>')
+    # '>' | '>=' | '<' | '<=' | '==' | '!='
+
+    is_active = models.BooleanField(default=True)
+    notify_email = models.EmailField(blank=True)
+    description = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rm_alert_config'
+        indexes = [
+            models.Index(fields=['alert_type', 'is_active']),
+            models.Index(fields=['owner', 'account_id', 'symbol']),
+        ]
+
+    def __str__(self):
+        return f"{self.alert_type} — {self.owner or 'ALL'} / {self.account_id or 'ALL'} / {self.symbol or 'ALL'}"
+
+
+class AlertHistory(models.Model):
+    """
+    Immutable record of a fired alert. Created by evaluate_alerts.
+    The only mutable fields are acknowledged_at / acknowledged_by, set
+    when a user dismisses the alert in the dashboard.
+    """
+    alert_config = models.ForeignKey(
+        AlertConfig, on_delete=models.PROTECT, related_name='history'
+    )
+    alert_type = models.CharField(max_length=30)
+    calc_date = models.DateField()
+    triggered_at = models.DateTimeField(auto_now_add=True)
+
+    entity_description = models.CharField(max_length=255)
+    entity_type = models.CharField(max_length=20, blank=True)
+    entity_id = models.CharField(max_length=100, blank=True)
+    symbol = models.CharField(max_length=20, blank=True)
+
+    trigger_value = models.CharField(max_length=50)
+    previous_value = models.CharField(max_length=50, blank=True)
+
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_by = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        db_table = 'rm_alert_history'
+        indexes = [
+            models.Index(fields=['calc_date', 'alert_type']),
+            models.Index(fields=['entity_type', 'entity_id', 'calc_date']),
+            models.Index(fields=['acknowledged_at']),
+            models.Index(fields=['symbol', 'calc_date']),
+        ]
+        ordering = ['-triggered_at']
+
+    def __str__(self):
+        return f"{self.alert_type} — {self.entity_description} ({self.calc_date})"
+
+
+# =============================================================================
+# M8-Spec-1: Audit Trail & Explainability
+# =============================================================================
+
+
+class ImmutableModel(models.Model):
+    """
+    Abstract base model that enforces append-only behaviour.
+    - save() is allowed (creates or updates no fields — subclasses override to
+      set only new fields on creation).
+    - delete() is blocked.
+    Subclasses must set managed=True in Meta (default).
+    """
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=100, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            # Prevent updates to existing records — append-only
+            raise PermissionError(
+                f"ImmutableModel '{self.__class__.__name__}' is append-only. "
+                "Use add_audit_entry() to create new entries instead."
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError(
+            f"ImmutableModel '{self.__class__.__name__}' is append-only. "
+            "Deletion is not permitted."
+        )
+
+
+class AuditEntry(ImmutableModel):
+    """
+    Immutable record of a risk calculation event.
+    """
+    calc_date = models.DateField()
+    model_name = models.CharField(max_length=50)
+    input_snapshot = models.JSONField(default=dict)
+    output_summary = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, default='success')
+    error_message = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'rm_audit_entry'
+        indexes = [
+            models.Index(fields=['calc_date', 'model_name']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.model_name} — {self.calc_date} ({self.status})"
+
+
+class AuditRationale(ImmutableModel):
+    """
+    Immutable record of a recommendation rationale.
+    """
+    recommendation = models.ForeignKey(
+        'StrategyRecommendation', on_delete=models.PROTECT, related_name='rationales'
+    )
+    calc_date = models.DateField()
+    rationale_text = models.TextField()
+    factors = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = 'rm_audit_rationale'
+        indexes = [
+            models.Index(fields=['recommendation', 'calc_date']),
+        ]
+
+    def __str__(self):
+        return f"Rationale for {self.recommendation} ({self.calc_date})"
+
+
+class AuditActionLog(ImmutableModel):
+    """
+    Immutable record of a user action on a recommendation.
+    """
+    recommendation = models.ForeignKey(
+        'StrategyRecommendation', on_delete=models.PROTECT, related_name='action_logs'
+    )
+    action_type = models.CharField(max_length=30)
+    # 'actioned', 'deferred', 'rejected', 'tax_acknowledged'
+    performed_by = models.CharField(max_length=100)
+    reason = models.TextField(blank=True, default='')
+    tax_acknowledged = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'rm_audit_action_log'
+        indexes = [
+            models.Index(fields=['recommendation', 'action_type']),
+            models.Index(fields=['performed_by']),
+        ]
+
+    def __str__(self):
+        return f"{self.performed_by} → {self.action_type} on {self.recommendation}"
+
+
+class AuditRetentionLog(ImmutableModel):
+    """
+    Immutable record of a retention check run.
+    """
+    check_date = models.DateField(auto_now_add=True)
+    retention_days = models.IntegerField()
+    records_reviewed = models.IntegerField(default=0)
+    records_flagged = models.IntegerField(default=0)
+    details = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = 'rm_audit_retention_log'
+        indexes = [
+            models.Index(fields=['check_date']),
+        ]
+
+    def __str__(self):
+        return f"Retention check — {self.check_date} (flagged={self.records_flagged})"
+
+
+class AuditTaxLog(ImmutableModel):
+    """
+    Immutable record of a tax acknowledgement event.
+    """
+    recommendation = models.ForeignKey(
+        'StrategyRecommendation', on_delete=models.PROTECT, related_name='tax_logs'
+    )
+    tax_year = models.CharField(max_length=10)
+    estimated_tax_impact = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    acknowledged_by = models.CharField(max_length=100)
+    acknowledgement_text = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'rm_audit_tax_log'
+        indexes = [
+            models.Index(fields=['recommendation', 'tax_year']),
+            models.Index(fields=['acknowledged_by']),
+        ]
+
+    def __str__(self):
+        return f"Tax ack — {self.recommendation} ({self.tax_year})"

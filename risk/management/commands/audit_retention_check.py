@@ -21,13 +21,11 @@ from django.utils import timezone
 from risk.models import (
     AuditActionLog,
     AuditEntry,
-    AuditRationale,
     AuditRegimeLog,
     AuditRecommendationLog,
     AuditRetentionLog,
     AuditScoreSnapshot,
     AuditSimulationRun,
-    AuditTaxLog,
 )
 
 
@@ -61,12 +59,10 @@ class Command(BaseCommand):
         tables = [
             ('AuditEntry', AuditEntry.objects),
             ('AuditScoreSnapshot', AuditScoreSnapshot.objects),
-            ('AuditRationale', AuditRationale.objects),
             ('AuditRecommendationLog', AuditRecommendationLog.objects),
             ('AuditActionLog', AuditActionLog.objects),
             ('AuditRegimeLog', AuditRegimeLog.objects),
             ('AuditSimulationRun', AuditSimulationRun.objects),
-            ('AuditTaxLog', AuditTaxLog.objects),
             ('AuditRetentionLog', AuditRetentionLog.objects),
         ]
 
@@ -74,15 +70,24 @@ class Command(BaseCommand):
             # Count total records
             total_count = queryset.count()
 
+            # Determine which date field this model uses
+            # Models with calc_date: AuditEntry, AuditScoreSnapshot,
+            #   AuditRecommendationLog, AuditRegimeLog, AuditSimulationRun
+            # Models with created_at only: AuditActionLog, AuditRetentionLog
+            if table_name in ('AuditActionLog', 'AuditRetentionLog'):
+                date_field = 'created_at__date'
+            else:
+                date_field = 'calc_date'
+
             # Find records expiring within warning period
             # A record expires calc_date + 2557 days
             expiring_soon = queryset.filter(
-                calc_date__lte=warning_cutoff,
-                calc_date__gt=today,
+                **{f'{date_field}__lte': warning_cutoff},
+                **{f'{date_field}__gt': today},
             )
 
             # Find records already expired
-            expired = queryset.filter(calc_date__lt=today)
+            expired = queryset.filter(**{f'{date_field}__lt': today})
 
             warnings = expiring_soon.count()
             expired_count = expired.count()

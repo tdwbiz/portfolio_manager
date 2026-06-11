@@ -14,6 +14,7 @@ from datetime import date
 from django.core.management.base import BaseCommand, CommandError
 
 from risk.models import EconomicIndicator, RegimeState, ScoringConfig
+from risk.services.audit_hooks import write_audit_entry
 from risk.services.regime_engine import (
     score_cpi,
     score_gdp,
@@ -157,3 +158,21 @@ class Command(BaseCommand):
                 f"(confidence: {confidence:.2f}, transition: {transition_flag})"
             )
         )
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='regime_state',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Regime quadrant={quadrant} confidence={confidence:.2f} transition={transition_flag}",
+                details_json={
+                    'quadrant': quadrant,
+                    'confidence': float(confidence),
+                    'transition_flag': transition_flag,
+                    'indicator_snapshot': indicator_snapshot,
+                    'probabilities': {k: float(v) for k, v in probs.items()},
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))

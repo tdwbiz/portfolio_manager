@@ -33,7 +33,7 @@ from risk.models import (
     StrategyTemplate,
     UrgencyScore,
 )
-from risk.services.audit_hooks import write_audit_recommendation_log
+from risk.services.audit_hooks import write_audit_entry, write_audit_recommendation_log
 from risk.services.catalogue import get_eligible_templates
 from risk.services.option_pricing import estimate_option_cost
 from risk.services.strategy_costs import compute_ranking_metric, estimate_strategy_cost
@@ -459,3 +459,20 @@ class Command(BaseCommand):
             self.stdout.write(f"  Positions skipped: {len(positions_skipped)}")
             for ps in positions_skipped:
                 self.stdout.write(f"    - {ps}")
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='strategy_recommendations',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Strategy recommendations calculated for {positions_processed} positions, "
+                        f"{total_recommendations} recommendations generated",
+                details_json={
+                    'positions_processed': positions_processed,
+                    'total_recommendations': total_recommendations,
+                    'positions_skipped': positions_skipped,
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))

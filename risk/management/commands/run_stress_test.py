@@ -41,7 +41,7 @@ from risk.models import (
     SimulationRun,
     StrategyRecommendation,
 )
-from risk.services.audit_hooks import write_audit_simulation_run
+from risk.services.audit_hooks import write_audit_entry, write_audit_simulation_run
 from risk.services.stress_test import run_portfolio_stress_test
 
 logger = logging.getLogger(__name__)
@@ -233,6 +233,25 @@ class Command(BaseCommand):
             )
         except Exception:
             pass
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='stress_test',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Stress test: {scenario_label} {len(positions)} positions",
+                details_json={
+                    'entity_type': entity_type,
+                    'entity_id': entity_id,
+                    'scenario': scenario_label,
+                    'positions': len(positions),
+                    'shocks': shock_map,
+                    'duration_seconds': round(duration, 2),
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))
 
         # Print summary
         self.stdout.write(self.style.SUCCESS("\n=== Stress Test Complete ==="))

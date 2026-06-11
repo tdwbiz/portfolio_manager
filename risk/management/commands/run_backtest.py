@@ -48,7 +48,7 @@ from risk.models import (
     HistoricalScenario,
     StrategyTemplate,
 )
-from risk.services.audit_hooks import write_audit_simulation_run
+from risk.services.audit_hooks import write_audit_entry, write_audit_simulation_run
 from risk.services.backtest_engine import (
     load_price_series,
     get_position_at_date,
@@ -341,6 +341,26 @@ class Command(BaseCommand):
             )
         except Exception:
             pass
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='backtest',
+                calc_date=end_date if isinstance(end_date, date) else date.today(),
+                status='success',
+                summary=f"Backtest: {symbol} {scenario} {template.code}",
+                details_json={
+                    'symbol': symbol,
+                    'account_id': account_id,
+                    'scenario': scenario.name,
+                    'strategy': template.code,
+                    'start_date': str(start_date),
+                    'end_date': str(end_date),
+                    'metrics': {k: float(v) if isinstance(v, (int, float)) else v for k, v in metrics.items()},
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))
 
     def _save_stress_test_result(self, symbol, account_id, template, scenario,
                                   start_date, end_date, quantity, cost_basis,

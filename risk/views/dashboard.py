@@ -3,10 +3,12 @@ from django.shortcuts import render
 from django.db.models import Q
 from core.models import Account
 from risk.models import (
+    TaxDecisionAcknowledgement,
     UrgencyScore,
     PortfolioRiskMetrics,
     RegimeState,
     MarketCondition,
+    StrategyRecommendation,
 )
 from risk.views.helpers import get_latest_calc_date, get_show_excluded, get_excluded_account_ids
 
@@ -122,17 +124,53 @@ def dashboard(request):
         'Dividend':      float(portfolio_metrics.effective_dividend_weight or 0) * 100 if portfolio_metrics else 0,
     }
 
+    # Unacknowledged tax-triggering recommendations (M8-Spec-1 §4.3)
+    unacknowledged_tax_recs = get_unacknowledged_tax_recommendations(calc_date)
+
     context = {
-        'calc_date':            calc_date,
-        'show_excluded':        show_excluded,
-        'portfolio_score':      portfolio_score,
-        'portfolio_metrics':    portfolio_metrics,
-        'regime':               regime,
-        'death_cross_count':    death_cross_count,
-        'oversold_count':       oversold_count,
-        'overbought_count':     overbought_count,
-        'top_ugl_positions':    top_ugl_positions,
-        'account_scores':       account_scores,
-        'index_concentration':  index_concentration,
+        'calc_date':              calc_date,
+        'show_excluded':          show_excluded,
+        'portfolio_score':        portfolio_score,
+        'portfolio_metrics':      portfolio_metrics,
+        'regime':                 regime,
+        'death_cross_count':      death_cross_count,
+        'oversold_count':         oversold_count,
+        'overbought_count':       overbought_count,
+        'top_ugl_positions':      top_ugl_positions,
+        'account_scores':         account_scores,
+        'index_concentration':    index_concentration,
+        'unacknowledged_tax_recs': unacknowledged_tax_recs,
     }
     return render(request, 'risk/dashboard.html', context)
+
+
+def get_unacknowledged_tax_recommendations(calc_date) -> list:
+    """
+    Return active, is_tax_triggering=True recommendations at calc_date for
+    which no rm_tax_decision_acknowledgement row exists, ordered by
+    tax_cost_estimate_usd descending (largest tax exposure first).
+
+    Implementation note: TaxDecisionAcknowledgement has no FK to
+    StrategyRecommendation (see M8-Spec-1 §1.6 rationale), so this is a
+    Python-side set difference: load the candidate recommendation ids,
+    load the set of acknowledged recommendation_ids, subtract.
+    """
+    # Active, tax-triggering recommendations for this calc_date
+    candidates = StrategyRecommendation.objects.filter(
+        calc_date=calc_date,
+        is_tax_triggering=True,
+        status='active',
+    ).select_related('strategy_template').order_by('-tax_cost_estimate_usd')
+
+    # Already acknowledged recommendation ids
+    acknowledged_ids = set(
+        TaxDecisionAcknowledgement.objects.values_list(
+            'recommendation_id', flat=True
+        )
+    )
+
+    # Filter out acknowledged ones
+    return [
+        rec for rec in candidates
+        if rec.id not in acknowledged_ids
+    ]

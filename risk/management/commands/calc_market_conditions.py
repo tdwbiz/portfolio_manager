@@ -14,7 +14,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import models
 
 from risk.models import MarketCondition, RegimeState, SecurityUniverse
-from risk.services.audit_hooks import write_audit_regime_log
+from risk.services.audit_hooks import write_audit_entry, write_audit_regime_log
 from risk.services.data_source import DataSource, DataNotAvailableError
 from risk.services.technical_indicators import (
     bollinger_bands,
@@ -229,6 +229,21 @@ class Command(BaseCommand):
         except Exception:
             # Audit write failures logged at ERROR but never raise out of M4
             pass
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='market_conditions',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Market conditions processed for {processed} symbols, skipped {skipped}",
+                details_json={
+                    'processed': processed,
+                    'skipped': skipped,
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))
 
     def _store_null_conditions(self, symbol: str, calc_date: date):
         """Store NULL conditions for mutual funds/cash equivalents."""

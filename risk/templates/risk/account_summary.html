@@ -43,6 +43,11 @@
                 <span class="badge urgency-{{ account_score.urgency_level|lower }} fs-5">
                     {{ account_score.urgency_level|default:"—" }}
                 </span>
+                {% if account_score %}
+                <a href="{% url 'risk:explain_score' account_score.id %}" class="text-muted ms-2" title="Why this score?">
+                    <i class="bi bi-question-circle"></i> Why?
+                </a>
+                {% endif %}
                 <div class="small text-muted">Score: {{ account_score.score_raw|floatformat:1|default:"—" }}</div>
                 {% else %}
                 <div class="text-muted">No data</div>

@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from risk.models import StrategyRecommendation, TaxDecisionAcknowledgement
+from risk.models import AuditActionLog, StrategyRecommendation, TaxDecisionAcknowledgement
 from risk.views.helpers import get_latest_calc_date
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,21 @@ def strategy_acknowledge(request, rec_id: int):
             request,
             "Tax impact acknowledged. You may now mark this recommendation as actioned."
         )
+
+        # Write AuditActionLog
+        try:
+            AuditActionLog.objects.create(
+                recommendation=recommendation,
+                action_type='tax_acknowledged',
+                performed_by=request.user.username if request.user.is_authenticated else 'anonymous',
+                reason='',
+                tax_acknowledged=True,
+            )
+        except Exception:
+            logger.error(
+                "AuditActionLog write failed for recommendation %d",
+                rec_id, exc_info=True,
+            )
         return redirect('risk:strategy_report', rec_id=rec_id)
 
     context = {
@@ -102,18 +117,38 @@ def strategy_acknowledge(request, rec_id: int):
 def strategy_mark_actioned(request, rec_id: int):
     """
     Mark a strategy recommendation as actioned.
-    POST only — records actioned_at and actioned_by.
+    POST only — gated by tax acknowledgement (M8-Spec-1 §4.2).
+    Uses can_mark_actioned/mark_actioned from tax_acknowledgement.py.
     """
+    from risk.services.tax_acknowledgement import can_mark_actioned, mark_actioned
+
     recommendation = get_object_or_404(StrategyRecommendation, id=rec_id)
 
     if request.method == 'POST':
-        recommendation.status = 'actioned'
-        recommendation.actioned_at = timezone.now()
-        recommendation.actioned_by = (
-            request.user.username if request.user.is_authenticated else 'anonymous'
-        )
-        recommendation.save()
-        messages.success(request, "Recommendation marked as actioned.")
+        allowed, reason = can_mark_actioned(recommendation)
+        if not allowed:
+            messages.error(request, reason)
+        else:
+            actioned_by = (
+                request.user.username if request.user.is_authenticated else 'anonymous'
+            )
+            mark_actioned(recommendation, actioned_by)
+            messages.success(request, "Recommendation marked as actioned.")
+
+            # Write AuditActionLog
+            try:
+                AuditActionLog.objects.create(
+                    recommendation=recommendation,
+                    action_type='actioned',
+                    performed_by=actioned_by,
+                    reason='',
+                    tax_acknowledged=recommendation.is_tax_triggering,
+                )
+            except Exception:
+                logger.error(
+                    "AuditActionLog write failed for recommendation %d",
+                    rec_id, exc_info=True,
+                )
         return redirect('risk:strategy_report', rec_id=rec_id)
 
     return redirect('risk:strategy_report', rec_id=rec_id)

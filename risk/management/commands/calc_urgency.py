@@ -11,6 +11,7 @@ from datetime import date
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from risk.services.audit_hooks import write_audit_entry
 from risk.services.urgency_engine import calculate_urgency_for_date
 
 
@@ -74,3 +75,24 @@ class Command(BaseCommand):
         self.stdout.write(f"  Portfolio rows: {result['portfolio_count']}")
         self.stdout.write(f"  Skipped symbols: {', '.join(result['skipped_symbols']) if result['skipped_symbols'] else 'None'}")
         self.stdout.write(f"  Distribution: {result['distribution']}")
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='urgency_scores',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Urgency scores calculated for {result['security_in_account_count']} security-in-account rows, "
+                        f"{result['account_count']} accounts, {result['owner_count']} owners, "
+                        f"{result['portfolio_count']} portfolios",
+                details_json={
+                    'security_in_account_count': result['security_in_account_count'],
+                    'account_count': result['account_count'],
+                    'owner_count': result['owner_count'],
+                    'portfolio_count': result['portfolio_count'],
+                    'skipped_symbols': result['skipped_symbols'],
+                    'distribution': result['distribution'],
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))

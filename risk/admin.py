@@ -34,10 +34,8 @@ from .models import (
     AlertHistory,
     AuditEntry,
     AuditScoreSnapshot,
-    AuditRationale,
     AuditActionLog,
     AuditRetentionLog,
-    AuditTaxLog,
     AuditRecommendationLog,
     AuditSimulationRun,
     AuditRegimeLog,
@@ -575,9 +573,10 @@ class ReadOnlyAuditAdmin(admin.ModelAdmin):
 
 @admin.register(AuditEntry)
 class AuditEntryAdmin(ReadOnlyAuditAdmin):
+    """Admin for AuditEntry — high-level calculation event tracking."""
     list_display = ['model_name', 'calc_date', 'status', 'created_at']
     list_filter = ['status', 'calc_date']
-    search_fields = ['model_name']
+    search_fields = ['model_name', 'summary']
     readonly_fields = [f.name for f in AuditEntry._meta.fields]
     date_hierarchy = 'calc_date'
 
@@ -591,13 +590,7 @@ class AuditScoreSnapshotAdmin(ReadOnlyAuditAdmin):
     date_hierarchy = 'calc_date'
 
 
-@admin.register(AuditRationale)
-class AuditRationaleAdmin(ReadOnlyAuditAdmin):
-    list_display = ['recommendation', 'calc_date', 'created_at']
-    list_filter = ['calc_date']
-    search_fields = ['rationale_text']
-    readonly_fields = [f.name for f in AuditRationale._meta.fields]
-    date_hierarchy = 'calc_date'
+
 
 
 @admin.register(AuditRecommendationLog)
@@ -611,8 +604,9 @@ class AuditRecommendationLogAdmin(ReadOnlyAuditAdmin):
 
 @admin.register(AuditActionLog)
 class AuditActionLogAdmin(ReadOnlyAuditAdmin):
+    """Admin for AuditActionLog — post-recommendation action tracking."""
     list_display = ['recommendation', 'action_type', 'performed_by', 'created_at']
-    list_filter = ['action_type']
+    list_filter = ['action_type', 'tax_acknowledged', 'created_at']
     search_fields = ['performed_by', 'reason']
     readonly_fields = [f.name for f in AuditActionLog._meta.fields]
     date_hierarchy = 'created_at'
@@ -636,13 +630,7 @@ class AuditSimulationRunAdmin(ReadOnlyAuditAdmin):
     date_hierarchy = 'calc_date'
 
 
-@admin.register(AuditTaxLog)
-class AuditTaxLogAdmin(ReadOnlyAuditAdmin):
-    list_display = ['recommendation', 'tax_year', 'estimated_tax_impact', 'acknowledged_by', 'created_at']
-    list_filter = ['tax_year']
-    search_fields = ['acknowledged_by']
-    readonly_fields = [f.name for f in AuditTaxLog._meta.fields]
-    date_hierarchy = 'created_at'
+
 
 
 @admin.register(AuditRetentionLog)

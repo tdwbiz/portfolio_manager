@@ -6,6 +6,7 @@ All are wrapped in try/except in the calling commands — audit failures
 are logged at ERROR but never raise out of the M2/M4/M5 commands.
 
 Functions:
+    write_audit_entry() — after any management command completes
     write_audit_score_snapshot() — after calc_urgency UPSERT
     write_audit_recommendation_log() — after calc_strategy_recommendations ranking
     write_audit_regime_log() — after calc_market_conditions
@@ -21,6 +22,7 @@ from decimal import Decimal
 from django.db import IntegrityError
 
 from risk.models import (
+    AuditEntry,
     AuditRegimeLog,
     AuditRecommendationLog,
     AuditScoreSnapshot,
@@ -207,4 +209,46 @@ def write_audit_simulation_run(
             "Audit simulation run write failed: family=%s source_run_id=%s "
             "symbol=%s calc_date=%s error=%s",
             simulation_family, source_run_id, symbol, calc_date, e,
+        )
+
+
+def write_audit_entry(
+    model_name: str,
+    calc_date: date,
+    status: str,
+    summary: str,
+    details_json: dict = None,
+) -> None:
+    """
+    Create one rm_audit_entry row after a management command completes.
+
+    One row per (model_name, calc_date) pair — unique_together enforced.
+    If a row already exists for that pair, log WARNING and skip
+    (re-run scenario, not a data integrity violation).
+
+    Wrapped in try/except in the calling command — never raises.
+    """
+    try:
+        # Check if row already exists (append-only, one per model_name+calc_date)
+        exists = AuditEntry.objects.filter(
+            model_name=model_name,
+            calc_date=calc_date,
+        ).exists()
+        if exists:
+            logger.warning(
+                "AuditEntry already exists for model=%s date=%s — skipping (re-run)",
+                model_name, calc_date,
+            )
+            return
+        AuditEntry.objects.create(
+            model_name=model_name,
+            calc_date=calc_date,
+            status=status,
+            output_summary={'text': summary} if isinstance(summary, str) else summary,
+            input_snapshot=details_json or {},
+        )
+    except Exception as e:
+        logger.error(
+            "AuditEntry write failed: model=%s date=%s error=%s",
+            model_name, calc_date, e,
         )

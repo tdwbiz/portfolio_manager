@@ -1502,6 +1502,7 @@ class AuditEntry(ImmutableModel):
 
     class Meta:
         db_table = 'rm_audit_entry'
+        unique_together = [('model_name', 'calc_date')]
         indexes = [
             models.Index(fields=['calc_date', 'model_name']),
             models.Index(fields=['status']),
@@ -1511,30 +1512,10 @@ class AuditEntry(ImmutableModel):
         return f"{self.model_name} — {self.calc_date} ({self.status})"
 
 
-class AuditRationale(ImmutableModel):
-    """
-    Immutable record of a recommendation rationale.
-    """
-    recommendation = models.ForeignKey(
-        'StrategyRecommendation', on_delete=models.PROTECT, related_name='rationales'
-    )
-    calc_date = models.DateField()
-    rationale_text = models.TextField()
-    factors = models.JSONField(default=dict)
-
-    class Meta:
-        db_table = 'rm_audit_rationale'
-        indexes = [
-            models.Index(fields=['recommendation', 'calc_date']),
-        ]
-
-    def __str__(self):
-        return f"Rationale for {self.recommendation} ({self.calc_date})"
-
-
 class AuditActionLog(ImmutableModel):
     """
     Immutable record of a user action on a recommendation.
+    Written by strategy_mark_actioned view and future action views.
     """
     recommendation = models.ForeignKey(
         'StrategyRecommendation', on_delete=models.PROTECT, related_name='action_logs'
@@ -1550,6 +1531,7 @@ class AuditActionLog(ImmutableModel):
         indexes = [
             models.Index(fields=['recommendation', 'action_type']),
             models.Index(fields=['performed_by']),
+            models.Index(fields=['action_type', 'recommendation_id']),
         ]
 
     def __str__(self):
@@ -1574,29 +1556,6 @@ class AuditRetentionLog(ImmutableModel):
 
     def __str__(self):
         return f"Retention check — {self.check_date} (flagged={self.records_flagged})"
-
-
-class AuditTaxLog(ImmutableModel):
-    """
-    Immutable record of a tax acknowledgement event.
-    """
-    recommendation = models.ForeignKey(
-        'StrategyRecommendation', on_delete=models.PROTECT, related_name='tax_logs'
-    )
-    tax_year = models.CharField(max_length=10)
-    estimated_tax_impact = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    acknowledged_by = models.CharField(max_length=100)
-    acknowledgement_text = models.TextField(blank=True, default='')
-
-    class Meta:
-        db_table = 'rm_audit_tax_log'
-        indexes = [
-            models.Index(fields=['recommendation', 'tax_year']),
-            models.Index(fields=['acknowledged_by']),
-        ]
-
-    def __str__(self):
-        return f"Tax ack — {self.recommendation} ({self.tax_year})"
 
 
 # =============================================================================

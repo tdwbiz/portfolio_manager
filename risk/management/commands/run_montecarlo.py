@@ -53,7 +53,7 @@ from risk.models import (
     SimulationRun,
     StrategyRecommendation,
 )
-from risk.services.audit_hooks import write_audit_simulation_run
+from risk.services.audit_hooks import write_audit_entry, write_audit_simulation_run
 from risk.services.monte_carlo import (
     apply_strategy_overlay,
     compute_output_distribution,
@@ -400,6 +400,26 @@ class Command(BaseCommand):
             )
         except Exception:
             pass
+
+        # Write AuditEntry
+        try:
+            write_audit_entry(
+                model_name='montecarlo',
+                calc_date=calc_date,
+                status='success',
+                summary=f"Monte Carlo: {entity_type}={entity_id} {n_paths} paths {horizon_days}d",
+                details_json={
+                    'entity_type': entity_type,
+                    'entity_id': entity_id,
+                    'n_paths': n_paths,
+                    'horizon_days': horizon_days,
+                    'use_jump_diffusion': any(use_jump_flags.values()),
+                    'symbols': symbols,
+                    'duration_seconds': round(duration, 2),
+                },
+            )
+        except Exception as e:
+            self.stderr.write(self.style.ERROR(f"Warning: audit entry write failed: {e}"))
 
         # Print summary
         self.stdout.write(self.style.SUCCESS("\n=== Monte Carlo Simulation Complete ==="))

@@ -1,10 +1,13 @@
 """Strategy Recommendation Report views."""
+import logging
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from risk.models import StrategyRecommendation, TaxDecisionAcknowledgement
 from risk.views.helpers import get_latest_calc_date
+
+logger = logging.getLogger(__name__)
 
 
 def strategy_report(request, rec_id: int):
@@ -38,7 +41,7 @@ def strategy_report(request, rec_id: int):
             run__strategy_template=recommendation.strategy_template,
         ).select_related('run__scenario').order_by('-run__run_timestamp').first()
     except Exception:
-        pass
+        logger.debug("No backtest found for %s/%s", recommendation.symbol, recommendation.strategy_template.code)
 
     # Has this recommendation been tax-acknowledged?
     tax_acknowledgement = None

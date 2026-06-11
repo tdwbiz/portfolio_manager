@@ -41,7 +41,7 @@ class PerformanceChartTests(TestCase):
         response = self.client.get(reverse('portfolio_chart'))
         self.assertEqual(response.status_code, 200)
 
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_endpoint(self, mock_compute):
         mock_compute.return_value = [
             {'date': '2024-01-31', 'market_value_cad': Decimal('2500.00')}
@@ -55,7 +55,7 @@ class PerformanceChartTests(TestCase):
         self.assertEqual(data['datasets'][0]['id'], 'market_value')
         self.assertEqual(data['datasets'][0]['data'], [2500.0])
 
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_empty(self, mock_compute):
         mock_compute.return_value = []
         response = self.client.get(reverse('portfolio_chart_data'))
@@ -66,7 +66,7 @@ class PerformanceChartTests(TestCase):
         self.assertEqual(data['datasets'][0]['id'], 'market_value')
         self.assertEqual(data['datasets'][0]['data'], [])
 
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_with_date_range(self, mock_compute):
         """Test that date range parameters are passed through and labels are filtered."""
         mock_compute.return_value = [
@@ -86,8 +86,8 @@ class PerformanceChartTests(TestCase):
             "Expected 'market_value' dataset in response"
         )
 
-    @patch('core.views.compute_portfolio_value_series')
-    @patch('core.views.compute_cost_basis_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_cost_basis_series')
     def test_chart_data_with_cost_basis(self, mock_cost_basis, mock_compute):
         """Test that cost_basis dataset is included when requested."""
         mock_compute.return_value = [
@@ -105,8 +105,8 @@ class PerformanceChartTests(TestCase):
         dataset_ids = [ds['id'] for ds in data['datasets']]
         self.assertIn('cost_basis', dataset_ids)
 
-    @patch('core.views.compute_portfolio_value_series')
-    @patch('core.views.compute_income_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_income_series')
     def test_chart_data_with_income(self, mock_income, mock_compute):
         """Test that income dataset with type='bar' is included when requested."""
         mock_compute.return_value = [
@@ -299,7 +299,7 @@ class PerformanceChartFixesTests(TestCase):
         self.assertEqual(feb_entry['cost_basis_cad'], Decimal('400.00'))
         self.assertLess(feb_entry['cost_basis_cad'], Decimal('800.00'))
 
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_freq_daily(self, mock_compute):
         """Test that freq=daily is accepted and echoed in response."""
         mock_compute.return_value = [
@@ -321,7 +321,7 @@ class PerformanceChartFixesTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_market_value_nonzero_with_prices(self, mock_compute):
         """Test that market value is non-zero when prices are available."""
         mock_compute.return_value = [
@@ -344,8 +344,8 @@ class PerformanceChartFixesTests(TestCase):
         non_zero_count = sum(1 for v in mv_dataset['data'] if v != 0)
         self.assertGreater(non_zero_count, 0)
 
-    @patch('core.views.compute_series_by_account')
-    @patch('core.views.compute_portfolio_value_series')
+    @patch('core.views_portfolio.compute_series_by_account')
+    @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_by_account_labels_match(self, mock_mv, mock_by_account):
         """Test that by_account datasets have the same length as labels."""
         mock_mv.return_value = [

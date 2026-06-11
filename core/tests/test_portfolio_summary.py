@@ -38,23 +38,23 @@ class PortfolioSummaryTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
     def test_portfolio_page_loads(self):
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertEqual(response.status_code, 200)
 
     def test_portfolio_shows_positions(self):
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertIn(b'AAPL', response.content)
             self.assertIn(b'VFV.TO', response.content)
 
     def test_portfolio_unrealised_pnl_calculation(self):
-        with patch('core.views.utils_fetch_last_prices', return_value={'AAPL': Decimal('180.00'), 'VFV.TO': Decimal('110.00'), 'USDCAD=X': Decimal('1.35')}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={'AAPL': Decimal('180.00'), 'VFV.TO': Decimal('110.00'), 'USDCAD=X': Decimal('1.35')}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertIn(b'2430.00', response.content)
 
     def test_portfolio_missing_price_shows_dash(self):
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertIn(b'&mdash;', response.content)
 
@@ -67,7 +67,7 @@ class PortfolioSummaryTests(TestCase):
             amount_cad=Decimal('2133.20'), exchange_rate_cad=Decimal('1.333'),
             tx_hash='port_test_aapl_sell',
         )
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertNotIn(b'AAPL', response.content)
 
@@ -195,14 +195,14 @@ class PortfolioSummaryTests(TestCase):
 
     def test_portfolio_summary_page_shows_category_section(self):
         """Test that the portfolio summary page renders the category section."""
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertEqual(response.status_code, 200)
             self.assertIn(b'Summary by Category', response.content)
 
     def test_portfolio_summary_page_shows_account_section(self):
         """Test that the portfolio summary page renders the account section."""
-        with patch('core.views.utils_fetch_last_prices', return_value={}):
+        with patch('core.views_portfolio.utils_fetch_last_prices', return_value={}):
             response = self.client.get(reverse('portfolio_summary'))
             self.assertEqual(response.status_code, 200)
             self.assertIn(b'Summary by Account', response.content)

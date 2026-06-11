@@ -157,6 +157,7 @@ class Command(BaseCommand):
             prices = load_price_series(symbol, start_date, end_date)
         except Exception:
             # No price history — run in stress test mode
+            logger.warning("No price history found for %s (%s to %s) — running in stress test mode", symbol, start_date, end_date)
             if verbosity >= 1:
                 self.stdout.write('  No price history found — running in stress test mode.')
             is_stress_test = True

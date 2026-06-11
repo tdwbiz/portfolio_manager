@@ -139,7 +139,8 @@ class Command(BaseCommand):
             if sgov_data:
                 risk_free_annual = float(sgov_data.value)
         except Exception:
-            pass
+            logger.warning("Could not fetch SGOV yield for risk-free rate — using 0.0")
+            risk_free_annual = 0.0
         
         processed = 0
         skipped = 0
@@ -349,7 +350,7 @@ class Command(BaseCommand):
                     price_usd = to_usd(float(latest_price.close), latest_price.currency, fx_rate)
                     total_market_value_usd = sum(p.quantity * price_usd for p in positions)
             except Exception:
-                pass
+                logger.warning("Could not fetch price for %s — market value will be 0", symbol)
         
         is_mutual_fund = universe.security_type == 'MUTUAL_FUND'
         is_cash_equiv = symbol in ('SGOV', 'ICSH')

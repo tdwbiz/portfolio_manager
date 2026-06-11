@@ -29,6 +29,8 @@ from .models import (
     SimulationRun,
     SimulationResult,
     CustomStressScenario,
+    AlertConfig,
+    AlertHistory,
 )
 
 
@@ -482,4 +484,41 @@ class CustomStressScenarioAdmin(admin.ModelAdmin):
         ('Scenario', {'fields': ['name', 'description', 'owner', 'is_active']}),
         ('Shocks', {'fields': ['shocks_json']}),
         ('Audit', {'fields': ['created_at']}),
+    ]
+
+
+# =============================================================================
+# M7-Spec-1: Alerting Admin
+# =============================================================================
+
+
+@admin.register(AlertConfig)
+class AlertConfigAdmin(admin.ModelAdmin):
+    list_display = ['alert_type', 'owner', 'account_id', 'symbol', 'is_active', 'threshold_value']
+    list_filter = ['alert_type', 'is_active']
+    search_fields = ['alert_type', 'owner', 'account_id', 'symbol']
+    readonly_fields = ['created_at', 'updated_at']
+    fieldsets = [
+        ('Alert Type', {'fields': ['alert_type', 'is_active', 'threshold_operator', 'threshold_value']}),
+        ('Scope', {'fields': ['owner', 'account_id', 'symbol']}),
+        ('Notification', {'fields': ['notify_email', 'description']}),
+        ('Audit', {'fields': ['created_at', 'updated_at']}),
+    ]
+
+
+@admin.register(AlertHistory)
+class AlertHistoryAdmin(admin.ModelAdmin):
+    list_display = ['alert_type', 'entity_description', 'calc_date', 'trigger_value', 'acknowledged_at']
+    list_filter = ['alert_type', 'calc_date', 'acknowledged_at']
+    search_fields = ['entity_description', 'symbol', 'entity_id']
+    readonly_fields = [
+        'alert_config', 'alert_type', 'calc_date', 'triggered_at',
+        'entity_description', 'entity_type', 'entity_id', 'symbol',
+        'trigger_value', 'previous_value', 'acknowledged_at', 'acknowledged_by',
+    ]
+    fieldsets = [
+        ('Alert', {'fields': ['alert_config', 'alert_type', 'calc_date', 'triggered_at']}),
+        ('Entity', {'fields': ['entity_description', 'entity_type', 'entity_id', 'symbol']}),
+        ('Values', {'fields': ['trigger_value', 'previous_value']}),
+        ('Acknowledgement', {'fields': ['acknowledged_at', 'acknowledged_by']}),
     ]

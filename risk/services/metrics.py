@@ -488,6 +488,7 @@ def ugl_at_risk(
         current_price = float(latest_price.close)
         currency = latest_price.currency
     except Exception:
+        logger.warning("Could not fetch latest price for %s — returning None", symbol)
         return None, None
     
     # Calculate totals

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 def save_uploaded_pdf(uploaded_file):
     """Save an uploaded PDF file to the MEDIA_ROOT/pdf_uploads directory.
 
+    Validates that the file has a .pdf extension and contains valid PDF magic bytes (%PDF-).
     Returns the Path to the saved file, or raises ValueError if the file is not a PDF.
     """
     if not uploaded_file.name.lower().endswith('.pdf'):
@@ -30,6 +31,13 @@ def save_uploaded_pdf(uploaded_file):
     with open(temp_path, 'wb+') as destination:
         for chunk in uploaded_file.chunks():
             destination.write(chunk)
+
+    # Validate PDF magic bytes
+    with open(temp_path, 'rb') as f:
+        header = f.read(5)
+        if header != b'%PDF-':
+            temp_path.unlink(missing_ok=True)
+            raise ValueError('Uploaded file is not a valid PDF (invalid magic bytes).')
 
     return temp_path
 

@@ -1,170 +1,33 @@
-from collections import deque, defaultdict
-from decimal import Decimal
+"""Portfolio valuation, position management, and time-series calculations.
+
+Provides functions for:
+- Computing portfolio value series with historical prices
+- Computing realised P&L using FIFO and average-cost methods
+- Computing cost basis series over time
+- Computing income (dividends, distributions, interest) series
+- Computing per-account value series
+- Computing and grouping positions
+"""
+
 import math
-import yfinance as yf
+from collections import deque
+from decimal import Decimal
+from datetime import datetime, date, timedelta
+
 import pandas as pd
+import yfinance as yf
 from django.core.cache import cache
 from django.conf import settings
 from django.utils import timezone
-from datetime import datetime, timedelta, date
-from core.models import Transaction
+
 import logging
-import calendar
 
 logger = logging.getLogger(__name__)
 
-
-POSITION_TRANSACTION_TYPES = ('BUY', 'SELL')
-
-# Cash-equivalent mutual funds: always $10 per share, no exchange price needed.
-# RBF2010 = RBC CAD money market fund (CAD-denominated).
-# RBF2014 = RBC USD money market fund (USD-denominated).
-# Add any additional fixed-price fund codes here as needed.
-CASH_EQUIV_CAD = {'RBF2010': Decimal('10.00')}
-CASH_EQUIV_USD = {'RBF2014': Decimal('10.00')}
-
-
-def _generate_date_series(
-    start_date: date,
-    end_date: date,
-    freq: str = 'monthly',
-) -> list[date]:
-    """Generate period-end dates between start_date and end_date (inclusive).
-
-    Args:
-        freq: One of 'daily', 'weekly', 'monthly', 'annual'.
-
-    Returns:
-        List of date objects. For monthly: last day of each month.
-        For weekly: each Friday (or last trading day of week).
-        For daily: every calendar day in range.
-        For annual: last day of each calendar year (Dec 31).
-    """
-    if freq == 'daily':
-        dates = []
-        current = start_date
-        while current <= end_date:
-            dates.append(current)
-            current += timedelta(days=1)
-        return dates
-
-    elif freq == 'weekly':
-        dates = []
-        # Find the first Friday on or after start_date
-        days_to_friday = (4 - start_date.weekday()) % 7
-        current = start_date + timedelta(days=days_to_friday)
-        while current <= end_date:
-            dates.append(current)
-            current += timedelta(days=7)
-        return dates
-
-    elif freq == 'annual':
-        dates = []
-        year = start_date.year
-        while True:
-            year_end = date(year, 12, 31)
-            if year_end < start_date:
-                year += 1
-                continue
-            if year_end > end_date:
-                year_end = end_date
-            dates.append(year_end)
-            if year_end == end_date:
-                break
-            year += 1
-        return dates
-
-    else:
-        # monthly (default)
-        dates = []
-        current = start_date.replace(day=1)
-        while current <= end_date:
-            # Move to next month
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1, day=1)
-            else:
-                current = current.replace(month=current.month + 1, day=1)
-            # Last day of the previous month (current is now the 1st of the next month)
-            dates.append(current - timedelta(days=1))
-        return dates
-
-
-def _load_prices_from_db(symbols: list[str], start: date, end: date):
-    """Load historical prices from the HistoricalPrice table into a pandas DataFrame.
-
-    Returns a DataFrame with DatetimeIndex and symbols as columns, or None if insufficient data.
-    """
-    try:
-        from .models import HistoricalPrice  # avoid circular import at module level
-        qs = HistoricalPrice.objects.filter(
-            symbol__in=symbols,
-            date__range=(start, end),
-        ).values_list('symbol', 'date', 'close').order_by('date')
-
-        rows = list(qs)
-        if not rows:
-            return None
-
-        # Check that at least the portfolio symbols (not just USDCAD) have data
-        db_symbols = {r[0] for r in rows}
-        non_fx_needed = [s for s in symbols if s != 'USDCAD=X']
-        if not any(s in db_symbols for s in non_fx_needed):
-            return None
-
-        prices_dict: dict[str, dict] = {}
-        for symbol, price_date, close in rows:
-            if symbol not in prices_dict:
-                prices_dict[symbol] = {}
-            prices_dict[symbol][price_date] = float(close)
-
-        df = pd.DataFrame(prices_dict)
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        return df
-    except Exception as exc:
-        logger.warning(f"_load_prices_from_db error: {exc}")
-        return None
-
-
-def _load_prices_from_yfinance(symbols: list[str], start: date, end: date):
-    """Download closing prices from yfinance for the given symbols and date range.
-
-    Returns a DataFrame with DatetimeIndex and symbols as columns, or None on failure.
-    """
-    try:
-        cache_key = f'hist_prices_{",".join(sorted(symbols))}_{start}_{end}'
-        df = cache.get(cache_key)
-        if df is not None and not df.empty:
-            logger.info("Using cached yfinance prices")
-            return df
-
-        logger.info(f"Fetching {len(symbols)} symbols from yfinance: {start} → {end}")
-        raw_df = yf.download(
-            symbols,
-            start=start.strftime('%Y-%m-%d'),
-            end=(end + timedelta(days=1)).strftime('%Y-%m-%d'),
-            auto_adjust=True,
-            progress=False,
-        )
-        if raw_df is None or raw_df.empty:
-            return None
-
-        if isinstance(raw_df.columns, pd.MultiIndex):
-            lvl0 = raw_df.columns.get_level_values(0)
-            if 'Close' in lvl0:
-                df = raw_df['Close']
-            else:
-                df = raw_df.xs('Close', axis=1, level=1)
-        elif len(symbols) == 1:
-            df = raw_df[['Close']].rename(columns={'Close': symbols[0]})
-        else:
-            df = raw_df.get('Close', raw_df)
-
-        cache.set(cache_key, df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
-        return df
-    except Exception as exc:
-        logger.error(f"_load_prices_from_yfinance error: {type(exc).__name__}: {exc}")
-        return None
+from .currencies import CASH_EQUIV_CAD, CASH_EQUIV_USD
+from .dates import generate_date_series
+from .prices import load_prices_from_db, load_prices_from_yfinance
+from core.models import Transaction
 
 
 def compute_portfolio_value_series(
@@ -188,7 +51,7 @@ def compute_portfolio_value_series(
     logger.info("compute_portfolio_value_series called")
     try:
         # Get all transactions ordered by date
-        transactions = Transaction.objects.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
+        transactions = Transaction.objects.filter(type__in=('BUY', 'SELL')).order_by('date', 'id')
 
         if not transactions.exists():
             logger.info("No BUY/SELL transactions found, returning empty series")
@@ -215,7 +78,7 @@ def compute_portfolio_value_series(
         logger.info(f"Visible date range: {clip_start} to {end_date}")
 
         # Generate period-end dates based on freq
-        dates = _generate_date_series(clip_start, end_date, freq)
+        dates = generate_date_series(clip_start, end_date, freq)
 
         # Collect all unique symbols ever held
         all_symbols = list(set(tx.symbol for tx in transactions))
@@ -225,11 +88,11 @@ def compute_portfolio_value_series(
         # ---- Build prices DataFrame ----
         # 1. Try HistoricalPrice DB (from fetch_historical_prices command)
         # 2. Fall back to live yfinance
-        prices_df = _load_prices_from_db(symbols_with_usdcad, first_tx_date, end_date)
+        prices_df = load_prices_from_db(symbols_with_usdcad, first_tx_date, end_date)
 
         if prices_df is None or prices_df.empty:
             logger.info("HistoricalPrice DB empty/incomplete — falling back to live yfinance")
-            prices_df = _load_prices_from_yfinance(symbols_with_usdcad, first_tx_date, end_date)
+            prices_df = load_prices_from_yfinance(symbols_with_usdcad, first_tx_date, end_date)
         else:
             logger.info(f"Using DB prices: {len(prices_df)} rows × {len(prices_df.columns)} symbols")
 
@@ -343,7 +206,7 @@ def compute_realised_pnl(
     if symbol:
         qs = qs.filter(symbol__iexact=symbol)
 
-    transactions = qs.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
+    transactions = qs.filter(type__in=('BUY', 'SELL')).order_by('date', 'id')
 
     # Group by (symbol, account_id), preserving chronological order
     groups: dict[tuple, list] = {}
@@ -414,7 +277,6 @@ def compute_realised_pnl(
             sell_date = trade['sell_date']
             if date_from:
                 try:
-                    from datetime import date as date_type
                     df = datetime.strptime(date_from, '%Y-%m-%d').date()
                     if sell_date < df:
                         continue
@@ -422,7 +284,6 @@ def compute_realised_pnl(
                     pass
             if date_to:
                 try:
-                    from datetime import date as date_type
                     dt = datetime.strptime(date_to, '%Y-%m-%d').date()
                     if sell_date > dt:
                         continue
@@ -452,7 +313,7 @@ def compute_cost_basis_series(
     Returns a list of dicts: [{'date': 'YYYY-MM-DD', 'cost_basis_cad': Decimal}]
     """
     try:
-        transactions = Transaction.objects.filter(type__in=POSITION_TRANSACTION_TYPES).order_by('date', 'id')
+        transactions = Transaction.objects.filter(type__in=('BUY', 'SELL')).order_by('date', 'id')
 
         if not transactions.exists():
             return []
@@ -475,7 +336,7 @@ def compute_cost_basis_series(
             except ValueError:
                 pass
 
-        dates = _generate_date_series(start_date, end_date, freq)
+        dates = generate_date_series(start_date, end_date, freq)
 
         # Use a pointer into the transactions list to avoid re-querying
         all_txs = list(transactions)
@@ -565,10 +426,10 @@ def compute_income_series(
             except ValueError:
                 pass
 
-        dates = _generate_date_series(start_date, end_date, freq)
+        dates = generate_date_series(start_date, end_date, freq)
 
         # Build a lookup of income by period-end date
-        income_by_date = defaultdict(lambda: Decimal('0'))
+        income_by_date = {}
         for tx in transactions:
             # Find the period-end date that this transaction falls into
             if freq == 'monthly':
@@ -578,18 +439,18 @@ def compute_income_series(
                 else:
                     tx_period_end = tx_period_end.replace(month=tx_period_end.month + 1, day=1)
                 tx_period_end = tx_period_end - timedelta(days=1)
-                income_by_date[tx_period_end] += tx.amount_cad
+                income_by_date[tx_period_end] = income_by_date.get(tx_period_end, Decimal('0')) + tx.amount_cad
             elif freq == 'weekly':
                 # Find the Friday on or after the transaction date
                 days_to_friday = (4 - tx.date.weekday()) % 7
                 tx_period_end = tx.date + timedelta(days=days_to_friday)
-                income_by_date[tx_period_end] += tx.amount_cad
+                income_by_date[tx_period_end] = income_by_date.get(tx_period_end, Decimal('0')) + tx.amount_cad
             elif freq == 'annual':
                 tx_period_end = date(tx.date.year, 12, 31)
-                income_by_date[tx_period_end] += tx.amount_cad
+                income_by_date[tx_period_end] = income_by_date.get(tx_period_end, Decimal('0')) + tx.amount_cad
             else:
                 # daily: each transaction goes to its own date
-                income_by_date[tx.date] += tx.amount_cad
+                income_by_date[tx.date] = income_by_date.get(tx.date, Decimal('0')) + tx.amount_cad
 
         results = []
         for tx_date in dates:
@@ -631,7 +492,7 @@ def compute_series_by_account(
         # Compute global date range from ALL accounts
         global_start = Transaction.objects.filter(
             account__account_id__in=accounts_with_buys,
-            type__in=POSITION_TRANSACTION_TYPES
+            type__in=('BUY', 'SELL')
         ).order_by('date', 'id').first()
 
         if not global_start:
@@ -655,7 +516,7 @@ def compute_series_by_account(
                 pass
 
         # Generate a single shared dates list
-        dates = _generate_date_series(start_date, end_date, freq)
+        dates = generate_date_series(start_date, end_date, freq)
 
         # Fetch prices once using ALL symbols across ALL accounts
         cache_key = 'hist_prices'
@@ -694,7 +555,7 @@ def compute_series_by_account(
         for account_id in accounts_with_buys:
             account_txs = Transaction.objects.filter(
                 account__account_id=account_id,
-                type__in=POSITION_TRANSACTION_TYPES
+                type__in=('BUY', 'SELL')
             ).order_by('date', 'id')
 
             if not account_txs.exists():
@@ -774,7 +635,14 @@ def compute_series_by_account(
 
 
 def compute_positions(broker=None):
-    """Compute positions from Transaction queryset."""
+    """Compute positions from Transaction queryset.
+
+    Args:
+        broker: Optional statement source filter.
+
+    Returns:
+        List of position dicts with shares, cost, and metadata.
+    """
     qs = Transaction.objects.select_related('statement', 'account').all()
     if broker:
         qs = qs.filter(statement__source=broker)
@@ -934,84 +802,3 @@ def group_positions_by_category(positions: list[dict]) -> list[dict]:
     result.sort(key=lambda g: category_order.get(g['category'], 99))
     
     return result
-
-
-def fetch_last_prices(symbols: list[str], cache_timeout: int | None = None) -> dict[str, Decimal]:
-    """Fetch latest prices for given symbols using yfinance."""
-    cache_timeout = cache_timeout or settings.PRICE_CACHE_TIMEOUT
-    logger.info(f"fetch_last_prices called with {len(symbols)} symbols: {symbols}")
-
-    to_fetch = list(symbols)
-    if 'USDCAD=X' not in to_fetch:
-        to_fetch.append('USDCAD=X')
-
-    cached_prices = {}
-    uncached_symbols = []
-
-    for sym in to_fetch:
-        price = cache.get(f'price_{sym}')
-        if price is not None:
-            logger.debug(f"Using cached price for {sym}: {price}")
-            cached_prices[sym] = price
-        else:
-            uncached_symbols.append(sym)
-
-    if uncached_symbols:
-        logger.info(f"Fetching prices from yfinance for {len(uncached_symbols)} symbols: {uncached_symbols}")
-        try:
-            tickers = yf.Tickers(' '.join(uncached_symbols))
-            logger.debug(f"yfinance Tickers object created successfully")
-
-            for sym in uncached_symbols:
-                try:
-                    ticker_obj = tickers.tickers[sym]
-                    price = ticker_obj.fast_info.last_price
-                    if price is not None:
-                        price = Decimal(str(price))
-                        cache.set(f'price_{sym}', price, cache_timeout)
-                        cached_prices[sym] = price
-                        logger.info(f"OK Fetched price for {sym}: {price}")
-                    else:
-                        logger.warning(f"✗ No price available for {sym} (fast_info.last_price is None)")
-                except Exception as e:
-                    logger.error(f"✗ Error fetching price for {sym}: {type(e).__name__}: {e}")
-        except Exception as e:
-            logger.error(f"✗ Error creating yfinance Tickers object: {type(e).__name__}: {e}")
-    else:
-        logger.info("All prices served from cache")
-
-    logger.info(f"Returning {len(cached_prices)} prices: {list(cached_prices.keys())}")
-    return cached_prices
-
-
-def enrich_positions_with_prices(positions: list[dict], prices: dict) -> list[dict]:
-    """Enrich positions with market prices and calculate P&L."""
-    usdcad = prices.get('USDCAD=X', Decimal('1'))
-
-    enriched = []
-    for pos in positions:
-        last_price = prices.get(pos['symbol'])
-
-        fx = usdcad if pos['currency'] != 'CAD' else Decimal('1')
-
-        market_value_cad = None
-        if last_price is not None:
-            market_value_cad = last_price * pos['total_shares'] * fx
-
-        unrealised_pnl_cad = None
-        if market_value_cad is not None:
-            unrealised_pnl_cad = market_value_cad - pos['total_cost_cad']
-
-        unrealised_pnl_pct = None
-        if unrealised_pnl_cad is not None and pos['total_cost_cad'] != 0:
-            unrealised_pnl_pct = (unrealised_pnl_cad / pos['total_cost_cad'] * 100)
-
-        enriched.append({
-            **pos,
-            'last_price': last_price,
-            'market_value_cad': market_value_cad,
-            'unrealised_pnl_cad': unrealised_pnl_cad,
-            'unrealised_pnl_pct': unrealised_pnl_pct,
-        })
-
-    return enriched

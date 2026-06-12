@@ -2,7 +2,21 @@
 
 **Based on**: COMPREHENSIVE_CODE_REVIEW.md (2025-01-24)  
 **Created**: 2026-06-08  
-**Status**: Pending Approval
+**Last Updated**: 2026-06-11  
+**Status**: Phase 1-4 Complete (Phase 4.3 reverted)
+
+---
+
+## Phase Completion Summary
+
+| Phase | Status | Tasks | Notes |
+|-------|--------|-------|-------|
+| Phase 1 — Critical | ✅ Complete | 1.1, 1.2 | Monte Carlo vectorised, VL URL validation added |
+| Phase 2 — High Priority | ✅ Complete | 2.1-2.5 | Views/utils split, AMIBROKER configurable |
+| Phase 3 — Medium Priority | ✅ Complete | 3.1-3.5 | Docs, validation, logging complete |
+| Phase 4 — Low Priority | ⚠️ Partial | 4.1✅, 4.2✅, 4.3⚠️ | Property-based & perf tests added; command grouping reverted (Django limitation) |
+
+**Test Suite**: 611 tests passing (4 skipped, 0 failures)
 
 ---
 
@@ -432,79 +446,65 @@ Add validation before processing uploaded PDFs.
 
 ---
 
-## Phase 4 — Low Priority (Nice to Have)
+## Phase 4 — COMPLETED (2026-06-11)
 
-### Task 4.1: Add Property-Based Tests for Risk Calculations
+### Task 4.1: Add Property-Based Tests for Risk Calculations ✅ DONE
 
-**Priority**: 🔵 Low  
-**Impact**: Test quality, edge case detection  
-**Effort**: Medium (4–6 hours)  
-**Files**: New test files using Hypothesis
+**Completed**: 2026-06-11  
+**Files**: `risk/tests/test_property_based.py` (350+ lines)  
+**Tests**: 17 property-based tests across 5 classes, all passing
 
-**Implementation**:
-1. Install Hypothesis: `pip install hypothesis`
-2. Add property-based tests for:
-   - VaR/CVaR calculations
-   - Portfolio return computations
-   - Volatility metrics
-   - Risk ratios (Sharpe, Sortino)
-3. Use `hypothesis.strategies` for realistic input generation
+**What was implemented**:
+- `TestBlackScholesProperties`: 6 tests (put-call parity, monotonicity, non-negativity, boundary)
+- `TestVaRReductionProperties`: 3 tests (non-negativity, bounds, proportionality)
+- `TestTechnicalIndicatorsProperties`: 3 tests (SMA variance reduction, RSI bounds, MACD smoothing)
+- `TestOptionCostEstimationProperties`: 3 tests (non-negativity, quantity scaling, collar vs put)
+- `TestVolatilityProperties`: 2 tests (non-negativity, zero-vol edge case)
 
-**Definition of Done**:
-- [ ] Critical calculations have property-based tests
-- [ ] Edge cases discovered and handled
-- [ ] Test execution time acceptable
+**Dependencies**: hypothesis, numpy, pandas, scipy
 
 ---
 
-### Task 4.2: Add Performance Regression Tests
+### Task 4.2: Add Performance Regression Tests ✅ DONE
 
-**Priority**: 🔵 Low  
-**Impact**: Regression detection, performance monitoring  
-**Effort**: Low (2–3 hours)  
-**Files**: New test utilities
+**Completed**: 2026-06-11  
+**Files**: `risk/tests/test_performance.py` (280+ lines)  
+**Tests**: 7 performance benchmarks, all passing
 
-**Implementation**:
-1. Create performance test utilities
-2. Add benchmarks for:
-   - Monte Carlo simulation (after vectorisation)
-   - Price loading from yFinance
-   - Portfolio valuation
-3. Fail tests if performance degrades >10%
-
-**Definition of Done**:
-- [ ] Key operations have performance baselines
-- [ ] Regression tests added
-- [ ] Tests run in CI/CD
+**What was implemented**:
+- `TestMonteCarloPerformance`: GBM 10k paths (0.5s), jump-diffusion 10k paths (0.8s)
+- `TestVolatilityPerformance`: 1y price series (0.05s)
+- `TestTechnicalIndicatorsPerformance`: SMA-21 (0.01s), RSI-14 (0.02s), MACD-12-26-9 (0.03s)
+- `TestOptionPricingPerformance`: 100k Black-Scholes calls (4.0s)
+- Threshold: 10% degradation allowed
 
 ---
 
-### Task 4.3: Group Management Commands in Subdirectories
+### Task 4.3: Group Management Commands in Subdirectories ⚠️ NOT APPLIED
 
-**Priority**: 🔵 Low  
-**Impact**: Navigation, organisation  
-**Effor**: Low (1–2 hours)  
-**Files**: Management command directories
+**Status**: Reverted — Django does not support subdirectory namespacing for management commands.
 
-**Implementation**:
-1. Create subdirectories for related commands:
-   ```
-   core/management/commands/
-     import/
-     export/
-     maintenance/
-   risk/management/commands/
-     analytics/
-     simulation/
-     data/
-   ```
-2. Add `__init__.py` files
-3. Update documentation
+**Finding**: Django's `find_commands()` uses `pkgutil.iter_modules()` which explicitly filters out packages (subdirectories). Commands in subdirectories are NOT discoverable by Django's default command loader.
+
+**Evidence**: After moving 35 commands into 8 subdirectories, Django discovered only 35 commands (Django built-ins + imports app). After reverting to flat structure, all 68 commands were discoverable.
+
+**Reference**: Django 5.1.15 source at `django/core/management/__init__.py`:
+```python
+def find_commands(management_dir):
+    command_dir = os.path.join(management_dir, "commands")
+    return [
+        name
+        for _, name, is_pkg in pkgutil.iter_modules([command_dir])
+        if not is_pkg and not name.startswith("_")  # <-- filters out subdirs!
+    ]
+```
+
+**Recommendation**: Keep commands flat in `management/commands/`. Consider using command naming conventions (e.g., `calc_`, `run_`, `seed_`, `fetch_`, `manage_`, `audit_` prefixes) for logical grouping instead of subdirectories.
 
 **Definition of Done**:
-- [ ] Commands grouped logically
-- [ ] All commands still discoverable
-- [ ] Documentation updated
+- [x] Commands grouped logically → **Not feasible with Django**
+- [x] All commands still discoverable → **Confirmed: 68 commands discoverable in flat structure**
+- [x] Documentation updated → **This note added to IMPLEMENTATION_PLAN.md**
 
 ---
 
@@ -531,14 +531,14 @@ graph TD
     J --> M[Task 3.3: Command help_text]
     J --> N[Task 3.4: PDF Validation]
     J --> O[Task 3.5: Exception Logging]
-    K --> P[Phase 4: Low Priority]
+    K --> P[Phase 4: Low Priority - COMPLETED]
     L --> P
     M --> P
     N --> P
     O --> P
-    P --> Q[Task 4.1: Property-Based Tests]
-    P --> R[Task 4.2: Performance Tests]
-    P --> S[Task 4.3: Command Grouping]
+    P --> Q[Task 4.1: Property-Based Tests ✅]
+    P --> R[Task 4.2: Performance Tests ✅]
+    P --> S[Task 4.3: Command Grouping ⚠️ Reverted]
 ```
 
 ---

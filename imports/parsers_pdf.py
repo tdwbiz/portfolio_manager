@@ -313,10 +313,20 @@ def _parse_asset_summary(text: str) -> dict[str, Any]:
         )
         if match:
             asset_class = match.group(1).strip()
-            # Skip false positives: postal addresses (e.g., "200 Bay Street Other")
-            if re.search(r'\b\d+\s+[A-Z][a-z]+\s+(Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Way|Court|Ct|Place|Pl)\b', asset_class, re.IGNORECASE):
-                logger.debug("Skipping false positive asset summary line: %s", stripped)
-                continue
+            # Handle false positives: postal addresses may precede the category name
+            # e.g., "200 Bay Street Other" where "Other" is the actual category
+            address_pattern = r'\b\d+\s+[A-Z][a-z]+\s+(Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Road|Rd|Lane|Ln|Way|Court|Ct|Place|Pl)\b'
+            addr_match = re.search(address_pattern, asset_class, re.IGNORECASE)
+            if addr_match:
+                # Extract the category name after the address
+                after_addr = asset_class[addr_match.end():].strip()
+                if after_addr:
+                    # The category is after the address (e.g., "Other" from "200 Bay Street Other")
+                    asset_class = after_addr
+                else:
+                    # No category after address — skip this line (pure address false positive)
+                    logger.debug("Skipping false positive asset summary line: %s", stripped)
+                    continue
             market_value = _clean_currency('$' + match.group(2))
             percentage = _clean_pct(match.group(3) + '%')
             results.append({

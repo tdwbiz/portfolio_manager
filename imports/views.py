@@ -103,6 +103,8 @@ def pdf_import_view(request):
                                     last_statement_date=parsed.get('last_statement_date'),
                                     account_number=account_number,
                                     fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
+                                    begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
+                                    end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
                                 )
 
                                 # Create balances

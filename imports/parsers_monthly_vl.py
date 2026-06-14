@@ -9,12 +9,13 @@ already expect:
 
 [
     {
-        'statement_date':      date,
-        'account_number':      str,
-        'currency':            'CAD' | 'USD',
-        'last_statement_date': date | None,
-        'fx_rate':             Decimal,
-        'total_market_value':  Decimal,
+        'statement_date':            date,
+        'account_number':            str,
+        'currency':                  'CAD' | 'USD',
+        'last_statement_date':       date | None,
+        'fx_rate':                   Decimal,
+        'begin_total_market_value':  Decimal,
+        'end_total_market_value':    Decimal,
         'balances': [
             {
                 'account_type':  str,   # e.g. "Cash", "Common Shares"
@@ -79,7 +80,8 @@ JSON schema:
   "sections": [
     {
       "currency": "CAD",
-      "total_market_value": number or 0,
+      "begin_total_market_value": number or 0,
+      "end_total_market_value": number or 0,
       "balances": [
         {
           "account_type": "e.g. Cash, Mutual Funds, Common Shares, Foreign Securities",
@@ -120,8 +122,25 @@ Rules:
 - activity_type must be uppercase (e.g. "BUY", "SELL", "INTEREST",
   "DIVIDEND", "DEPOSIT", "WITHDRAWAL", "TRANSFER", "FEE").
 - If a transaction has no ticker symbol, use an empty string for symbol.
-- total_market_value is the grand total portfolio value shown in the
-  Asset Summary footer for this currency section; use 0 if not visible.
+
+- **CRITICAL: begin_total_market_value and end_total_market_value**
+  These are found at the BOTTOM of the "Asset Summary" or "Market Value" table.
+  The table lists individual holdings with their market values and percentages.
+  At the very end of this table, there are TWO "Total on [date]" lines:
+  
+    Total on MAY 31 $420.85 100.00 %    ← ENDING total (current statement date)
+    Total on APR. 30 $420.85             ← BEGINNING total (previous statement date)
+  
+  - end_total_market_value = the dollar amount from the "Total on [CURRENT DATE]" line
+    (the one that HAS a percentage, e.g. "Total on MAY 31 $420.85 100.00 %")
+  - begin_total_market_value = the dollar amount from the "Total on [PREVIOUS DATE]" line
+    (the one that does NOT have a percentage, e.g. "Total on APR. 30 $420.85")
+  
+  IMPORTANT: Do NOT return 0 for these values. Look carefully at the bottom of the
+  Asset Summary table. These totals are ALWAYS present. Extract the dollar amount
+  from each "Total on [date]" line. The dollar amount is the number after the $ sign.
+  Example: "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
+
 - Include ALL transactions visible on ALL pages provided.
 """
 
@@ -231,7 +250,8 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             )
             continue
 
-        total_mv = _to_decimal(sec.get('total_market_value', 0))
+        begin_total_mv = _to_decimal(sec.get('begin_total_market_value', 0))
+        end_total_mv = _to_decimal(sec.get('end_total_market_value', 0))
 
         balances = []
         for b in sec.get('balances') or []:
@@ -276,12 +296,13 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             })
 
         result.append({
-            'statement_date':      statement_date,
-            'account_number':      account_number,
+            'statement_date':            statement_date,
+            'account_number':            account_number,
             'currency':            currency,
             'last_statement_date': last_statement_date,
             'fx_rate':             fx_rate,
-            'total_market_value':  total_mv,
+            'begin_total_market_value':  begin_total_mv,
+            'end_total_market_value':    end_total_mv,
             'balances':            balances,
             'transactions':        transactions,
         })

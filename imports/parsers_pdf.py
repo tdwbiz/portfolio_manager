@@ -261,20 +261,50 @@ def _find_section(text: str, pattern: re.Pattern) -> tuple[int, int]:
     return start_idx, end_idx
 
 
-def _parse_asset_summary(text: str) -> list[dict[str, Any]]:
-    """Parse the Asset Summary table."""
+def _parse_asset_summary(text: str) -> dict[str, Any]:
+    """Parse the Asset Summary table.
+
+    Returns a dict with:
+      - 'balances': list of asset category dicts (Cash, Common Shares, etc.)
+      - 'begin_total': opening total from 'Total on [prev date]' footer line
+      - 'end_total': closing total from 'Total on [curr date]' line
+    """
     start, end = _find_section(text, ASSET_SUMMARY_HEADER)
     if start == -1:
-        return []
+        return {'balances': [], 'begin_total': Decimal('0.00'), 'end_total': Decimal('0.00')}
 
     lines = text.split('\n')[start:end]
     results = []
+    begin_total = Decimal('0.00')
+    end_total = Decimal('0.00')
 
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith('---') or stripped.startswith('___'):
             continue
         if ASSET_SUMMARY_HEADER.search(stripped):
+            continue
+
+        # Check for "Total on [date]" footer lines FIRST (before asset row regex)
+        # Format: "Total on MAY 31 $420.85 100.00 %" or "Total on APR. 30 $420.85"
+        # NOTE: PDF text extraction may prepend address text (e.g., "Toronto, ON Total on...")
+        # so we use re.search instead of re.match to find "Total on" anywhere in the line.
+        total_match = re.search(
+            r'Total on\s+(.+?)\s+\$([\d,]+\.\d+)(?:\s+([\d.]+)\s*%)?',
+            stripped, re.IGNORECASE,
+        )
+        if total_match:
+            date_str = total_match.group(1).strip()
+            total_value = _clean_currency('$' + total_match.group(2))
+            # Determine if this is BEGINNING or ENDING total based on percentage
+            # The "Total on MAY 31" line has the % sign and is the ENDING total
+            # The "Total on APR. 30" line has no % and is the BEGINNING total
+            if total_match.group(3):
+                # Has percentage → this is the ENDING total (current statement date)
+                end_total = total_value
+            else:
+                # No percentage → this is the BEGINNING total (previous statement date)
+                begin_total = total_value
             continue
 
         match = re.match(
@@ -297,7 +327,7 @@ def _parse_asset_summary(text: str) -> list[dict[str, Any]]:
                 'percentage': percentage,
             })
 
-    return results
+    return {'balances': results, 'begin_total': begin_total, 'end_total': end_total}
 
 
 def _parse_cash_balance(text: str) -> list[dict[str, Any]]:
@@ -807,10 +837,10 @@ def parse_rbc_pdf(file_path: str) -> dict:
 
     # Parse sections
     try:
-        balances_raw = _parse_asset_summary(full_text)
+        asset_data = _parse_asset_summary(full_text)
     except Exception as e:
         logger.warning("Error parsing asset summary: %s", e)
-        balances_raw = []
+        asset_data = {'balances': [], 'begin_total': Decimal('0.00'), 'end_total': Decimal('0.00')}
 
     try:
         cash_balances = _parse_cash_balance(full_text)
@@ -822,7 +852,7 @@ def parse_rbc_pdf(file_path: str) -> dict:
     all_balances = []
     cash_types = {b['account_type'] for b in cash_balances}
 
-    for bal in balances_raw:
+    for bal in asset_data['balances']:
         cash_entry = next(
             (c for c in cash_balances if c['account_type'] == bal['account_type']),
             None,
@@ -870,6 +900,8 @@ def parse_rbc_pdf(file_path: str) -> dict:
         'last_statement_date': last_statement_date,
         'account_number': account_number,
         'fx_rate': fx_rate,
+        'begin_total_market_value': asset_data['begin_total'],
+        'end_total_market_value': asset_data['end_total'],
         'balances': all_balances,
         'transactions': transactions,
         'income_summary': income_summary,
@@ -964,10 +996,10 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
 
         # Parse section-specific data
         try:
-            balances_raw = _parse_asset_summary(section_text)
+            asset_data = _parse_asset_summary(section_text)
         except Exception as e:
             logger.warning("Error parsing asset summary for %s: %s", currency, e)
-            balances_raw = []
+            asset_data = {'balances': [], 'begin_total': Decimal('0.00'), 'end_total': Decimal('0.00')}
 
         try:
             cash_balances = _parse_cash_balance(section_text)
@@ -978,7 +1010,7 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
         # Merge cash balances
         all_balances = []
         cash_types = {b['account_type'] for b in cash_balances}
-        for bal in balances_raw:
+        for bal in asset_data['balances']:
             cash_entry = next(
                 (c for c in cash_balances if c['account_type'] == bal['account_type']),
                 None,
@@ -1030,6 +1062,8 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
             'last_statement_date': last_statement_date,
             'account_number': account_number,
             'fx_rate': fx_rate,
+            'begin_total_market_value': asset_data['begin_total'],
+            'end_total_market_value': asset_data['end_total'],
             'balances': all_balances,
             'transactions': transactions,
             'income_summary': income_summary,

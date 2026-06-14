@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -212,20 +213,27 @@ class Command(BaseCommand):
                 # Look up or create Account (once per file)
                 if account is None:
                     if account_number:
+                        # Normalize to 8-digit canonical form first
+                        digits = re.sub(r'\D', '', account_number)
+                        canonical = digits[:8] if len(digits) >= 8 else digits
                         try:
-                            account = Account.objects.get(account_id=account_number)
+                            account = Account.objects.get(account_id=canonical)
                         except Account.DoesNotExist:
-                            # Auto-create account if not found
-                            account = Account.objects.create(
-                                account_id=account_number,
-                                name=f'Auto-created from PDF: {account_number}',
-                                broker='RBC',
-                            )
-                            self.stdout.write(
-                                self.style.SUCCESS(
-                                    f'Auto-created account: {account_number}'
+                            # Fallback: exact match on raw string
+                            try:
+                                account = Account.objects.get(account_id=account_number)
+                            except Account.DoesNotExist:
+                                # Auto-create account if not found
+                                account = Account.objects.create(
+                                    account_id=canonical,
+                                    name=f'Auto-created from PDF: {account_number}',
+                                    broker='RBC',
                                 )
-                            )
+                                self.stdout.write(
+                                    self.style.SUCCESS(
+                                        f'Auto-created account: {account_number} -> {canonical}'
+                                    )
+                                )
 
                 if account is None:
                     error_msg = f'No account number found in PDF [{currency}]'
@@ -275,6 +283,8 @@ class Command(BaseCommand):
                     last_statement_date=parsed.get('last_statement_date'),
                     account_number=account_number,
                     fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
+                    begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
+                    end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
                 )
 
                 # Create RbcMonthlyBalance records

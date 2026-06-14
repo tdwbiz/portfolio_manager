@@ -120,6 +120,7 @@ Visit:
 | [Logging Guide](LOGGING_GUIDE.md) | Log locations, troubleshooting, yfinance diagnostics |
 | [Implementation Plan](IMPLEMENTATION_PLAN.md) | Development phases and completion status |
 | [Next Features](NEXT_FEATURES.md) | Prioritized enhancement roadmap |
+| [User Manual](USER_MANUAL.md) | Complete user guide with audit documentation |
 | [Specs Directory](specs/) | Feature specifications (M0–M8, Phase A/B) |
 
 ## Project Structure
@@ -206,6 +207,25 @@ The application includes **68 management commands** organized by module:
 | `auto_import` | Run background auto-import |
 | `import_statements` | Import broker statements |
 | `watch_inbox` | Start inbox file watcher |
+
+### Data Audit Commands (1)
+| Command | Description |
+|---------|-------------|
+| `audit_rbc_data` | Run 10 comprehensive data integrity checks on RBC imports |
+
+**Quick Audit:**
+```powershell
+# Run all 10 checks
+python manage.py audit_rbc_data
+
+# Generate markdown report
+python manage.py audit_rbc_data --md
+
+# Verbose output
+python manage.py audit_rbc_data --verbose
+```
+
+The audit checks: statement continuity, balance reconciliation, annual vs monthly cross-checks, currency validation, exchange rates, account matching, transaction integrity, orphaned records, market value trends, and data completeness.
 
 ### Risk Commands (26)
 | Command | Description |

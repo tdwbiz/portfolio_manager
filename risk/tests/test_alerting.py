@@ -18,6 +18,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from unittest.mock import patch, MagicMock
 
 from risk.models import AlertConfig, AlertHistory
@@ -251,7 +252,7 @@ class AlertHistoryModelTests(TestCase):
             entity_id='AAPL',
             trigger_value='140.00',
         )
-        history.acknowledged_at = date(2026, 6, 11)
+        history.acknowledged_at = timezone.make_aware(timezone.datetime(2026, 6, 11))
         history.acknowledged_by = 'tom'
         history.save()
         self.assertIsNotNone(history.acknowledged_at)
@@ -430,7 +431,7 @@ class AlertHelpersTests(TestCase):
             entity_type='symbol',
             entity_id='AAPL',
             trigger_value='140.00',
-            triggered_at='2026-06-10 12:00:00',
+            triggered_at=timezone.make_aware(timezone.datetime(2026, 6, 10, 12, 0, 0)),
         )
         self.acknowledged = AlertHistory.objects.create(
             alert_config=self.config,
@@ -440,8 +441,8 @@ class AlertHelpersTests(TestCase):
             entity_type='symbol',
             entity_id='MSFT',
             trigger_value='380.00',
-            triggered_at='2026-06-9 12:00:00',
-            acknowledged_at='2026-06-9 14:00:00',
+            triggered_at=timezone.make_aware(timezone.datetime(2026, 6, 9, 12, 0, 0)),
+            acknowledged_at=timezone.make_aware(timezone.datetime(2026, 6, 9, 14, 0, 0)),
             acknowledged_by='tom',
         )
 
@@ -474,7 +475,7 @@ class AlertHelpersTests(TestCase):
             entity_type='symbol',
             entity_id='GOOGL',
             trigger_value='200.00',
-            triggered_at='2026-06-10 13:00:00',
+            triggered_at=timezone.make_aware(timezone.datetime(2026, 6, 10, 13, 0, 0)),
         )
         count = alerts.acknowledge_alerts([self.recent.pk, a2.pk], user='tom')
         self.assertEqual(count, 2)

@@ -14,12 +14,13 @@ Tests cover:
 - audit_retention_check management command (spec §6)
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
 from django.db import IntegrityError
 from django.test import TestCase, TransactionTestCase
+from django.utils import timezone
 
 from core.models import Account
 from risk.models import (
@@ -287,7 +288,7 @@ class AuditSimulationRunTests(TestCase):
             parameters_json={'start_date': '2025-01-01'},
             summary_json={'total_return_hedged_pct': 5.2},
             calc_date=date(2026, 6, 1),
-            run_timestamp=datetime(2026, 6, 1, 10, 0, 0),
+            run_timestamp=timezone.make_aware(timezone.datetime(2026, 6, 1, 10, 0, 0)),
         )
         self.assertEqual(run.simulation_family, 'backtest')
         self.assertEqual(run.source_run_id, 1)
@@ -301,7 +302,7 @@ class AuditSimulationRunTests(TestCase):
             parameters_json={'n_paths': 10000},
             summary_json={'pct5_outcome_usd': -5000},
             calc_date=date(2026, 6, 1),
-            run_timestamp=datetime(2026, 6, 1, 11, 0, 0),
+            run_timestamp=timezone.make_aware(timezone.datetime(2026, 6, 1, 11, 0, 0)),
         )
         self.assertEqual(run.simulation_family, 'montecarlo')
 
@@ -315,7 +316,7 @@ class AuditSimulationRunTests(TestCase):
             parameters_json={'shock_equity': -0.40},
             summary_json={'stress_loss_hedged_pct': -15.0},
             calc_date=date(2026, 6, 1),
-            run_timestamp=datetime(2026, 6, 1, 12, 0, 0),
+            run_timestamp=timezone.make_aware(timezone.datetime(2026, 6, 1, 12, 0, 0)),
         )
         self.assertEqual(run.simulation_family, 'stress_test')
 
@@ -423,7 +424,7 @@ class TaxDecisionAcknowledgementTests(TestCase):
             recommendation=rec,
             presented_to_user='TOM',
             presented_at=rec.calc_timestamp,
-            acknowledged_at=datetime(2026, 6, 1, 10, 5, 0),
+            acknowledged_at=timezone.make_aware(timezone.datetime(2026, 6, 1, 10, 5, 0)),
             acknowledged_by='TOM',
             tax_cost_estimate_presented=rec.tax_cost_estimate_usd,
             user_notes='Acknowledged — proceed with protective put.',
@@ -536,7 +537,7 @@ class AuditHookFunctionsTests(TestCase):
             parameters={'start_date': '2025-01-01'},
             summary={'total_return_hedged_pct': 5.2},
             calc_date=date(2026, 6, 1),
-            run_timestamp=datetime(2026, 6, 1, 10, 0, 0),
+            run_timestamp=timezone.make_aware(timezone.datetime(2026, 6, 1, 10, 0, 0)),
         )
         self.assertEqual(AuditSimulationRun.objects.count(), 1)
         run = AuditSimulationRun.objects.first()
@@ -684,7 +685,7 @@ class TaxAcknowledgementServiceTests(TestCase):
             recommendation_id=rec.id,
             presented_to_user='TOM',
             presented_at=rec.calc_timestamp,
-            acknowledged_at=datetime(2026, 6, 1, 10, 5, 0),
+            acknowledged_at=timezone.make_aware(timezone.datetime(2026, 6, 1, 10, 5, 0)),
             acknowledged_by='TOM',
             tax_cost_estimate_presented=rec.tax_cost_estimate_usd,
         )
@@ -722,7 +723,7 @@ class TaxAcknowledgementServiceTests(TestCase):
             recommendation_id=rec.id,
             presented_to_user='TOM',
             presented_at=rec.calc_timestamp,
-            acknowledged_at=datetime(2026, 6, 1, 10, 5, 0),
+            acknowledged_at=timezone.make_aware(timezone.datetime(2026, 6, 1, 10, 5, 0)),
             acknowledged_by='TOM',
             tax_cost_estimate_presented=rec.tax_cost_estimate_usd,
         )

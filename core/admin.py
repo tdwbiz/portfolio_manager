@@ -65,7 +65,7 @@ class FileImportLogAdmin(admin.ModelAdmin):
 
 @admin.register(RbcMonthly)
 class RbcMonthlyAdmin(admin.ModelAdmin):
-    list_display = ['account', 'statement_date', 'account_number', 'total_market_value', 'file_name']
+    list_display = ['account', 'statement_date', 'account_number', 'begin_total_market_value', 'end_total_market_value', 'file_name']
     list_filter = ['account']
     search_fields = ['account_number', 'file_name']
     date_hierarchy = 'statement_date'

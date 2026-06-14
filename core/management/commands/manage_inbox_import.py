@@ -427,7 +427,8 @@ class Command(BaseCommand):
                 last_statement_date=parsed.get('last_statement_date'),
                 account_number=account_number,
                 fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
-                total_market_value=parsed.get('total_market_value', Decimal('0.00')),
+                begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
+                end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
             )
 
             for bal in parsed.get('balances', []):

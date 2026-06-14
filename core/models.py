@@ -178,9 +178,13 @@ class RbcMonthly(models.Model):
         max_digits=10, decimal_places=6, default=Decimal('1.000000'),
         help_text='USD to CAD exchange rate as of statement date',
     )
-    total_market_value = models.DecimalField(
+    begin_total_market_value = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text='Total portfolio market value from statement footer (for cross-check vs annual)',
+        help_text='Total portfolio market value at the previous statement date (BEGINNING)',
+    )
+    end_total_market_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal('0.00'),
+        help_text='Total portfolio market value at this statement date (ENDING)',
     )
     parsed_at = models.DateTimeField(auto_now_add=True)
 

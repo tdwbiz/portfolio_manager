@@ -44,6 +44,7 @@
    - [Risk Calculations](#62-risk-calculations)
    - [Seed Data](#63-seed-data)
    - [Maintenance](#64-maintenance)
+   - [Data Audit](#65-data-audit)
 7. [Admin Interface](#7-admin-interface)
 8. [Troubleshooting](#8-troubleshooting)
 9. [Security](#9-security)
@@ -647,6 +648,101 @@ python manage.py daily_risk_refresh
 | `rebuild_position_history` | Rebuild position history from transactions |
 | `merge_duplicate_accounts` | Merge duplicate account records |
 | `audit_retention_check` | Audit data retention compliance |
+
+### 6.5 Data Audit
+
+The audit command runs **10 comprehensive checks** to verify data integrity after RBC PDF imports. Run this after every import to catch issues early.
+
+| Command | Description |
+|---------|-------------|
+| `audit_rbc_data` | Run all 10 audit checks |
+| `audit_rbc_data --verbose` | Show detailed output with all fields |
+| `audit_rbc_data --json` | Output audit report in JSON format |
+| `audit_rbc_data --md` | Generate markdown report file |
+| `audit_rbc_data --md --output-dir processed\audit` | Custom output directory |
+| `audit_rbc_data --fix` | Auto-fix reversible issues |
+
+**The 10 Audit Checks:**
+
+| # | Check | Description |
+|---|-------|-------------|
+| 1 | Statement Continuity | Detect temporal gaps, overlapping dates, begin/end total mismatches |
+| 2 | Balance Sum Reconciliation | Verify balance sums match `end_total_market_value` |
+| 3 | Annual vs Monthly | Cross-check annual ending values against December monthly statements |
+| 4 | Currency Validation | Ensure currency fields are valid (CAD/USD) and consistent |
+| 5 | Exchange Rate Validation | Flag USD statements with `fx_rate=1.000000` (parser bug) |
+| 6 | Account Matching | Detect duplicate accounts and auto-created accounts |
+| 7 | Transaction Integrity | Check for negative quantities, prices, commissions |
+| 8 | Orphaned Records | Find orphaned balances, transactions, or statements |
+| 9 | Market Value Trends | Detect extreme market value changes (>50%) |
+| 10 | Data Completeness | Verify required fields are populated |
+
+**Example Usage:**
+
+```powershell
+# Run audit with terminal output
+python manage.py audit_rbc_data
+
+# Generate markdown report (saved to processed/audit/)
+python manage.py audit_rbc_data --md
+
+# Generate markdown report with custom directory
+python manage.py audit_rbc_data --md --output-dir processed\audit
+
+# Generate JSON report
+python manage.py audit_rbc_data --json > audit_report.json
+
+# Verbose output with details
+python manage.py audit_rbc_data --verbose
+
+# Auto-fix reversible issues
+python manage.py audit_rbc_data --fix
+```
+
+**Markdown Report Format:**
+
+Reports are saved as `RBC_pdf_import_audit_YYYYMMDDHHMMSS.md` in the `processed/audit/` directory (configurable via `--output-dir`).
+
+Example report structure:
+```markdown
+# RBC PDF Import Audit Report
+
+## Summary
+| Metric | Value |
+|--------|-------|
+| Checks Run | 10 |
+| Errors | 15 |
+| Warnings | 42 |
+| Passed | 7 |
+
+**Status**: ⚠️ **WARNINGS** — 42 warnings found
+
+## Database Statistics
+| Table | Count |
+|-------|-------|
+| RbcMonthly | 1,203 |
+| RbcMonthlyBalance | 6,070 |
+
+## Errors
+### 5. Exchange Rate Validation
+1. 90000004 USD 2026-04-30: fx_rate=1.000000 (should be ~1.20-1.50 for USD)
+   - **account**: `90000004`
+   - **date**: `2026-04-30`
+   - **fx_rate**: `1.000000`
+
+## Recommendations
+### Immediate Actions Required
+- **Exchange Rates**: USD statements with fx_rate=1.000000 need correction.
+- **Balance Sums**: Reconcile balance discrepancies.
+```
+
+**Best Practices:**
+
+1. **Run after every import** — Catch issues before they corrupt reports
+2. **Review errors first** — Fix parser issues, then re-import
+3. **Check exchange rates** — USD statements with fx_rate=1.000000 indicate parser bugs
+4. **Monitor trends** — Large market value changes may be legitimate (LIRA distributions) but should be reviewed
+5. **Maintain continuity** — Missing statements create gaps in reporting
 
 ---
 

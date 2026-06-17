@@ -16,9 +16,14 @@ from django.utils import timezone
 from decimal import Decimal
 
 from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
-from imports.parsers_pdf import parse_rbc_pdf, parse_rbc_pdf_multi
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
+
+import re
 
 logger = logging.getLogger(__name__)
+
+# ANSI escape code pattern
+_ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
 
 
 class TerminalLogger:
@@ -26,12 +31,18 @@ class TerminalLogger:
     def __init__(self, log_path):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self.log_file = open(self.log_path, 'a', encoding='utf-8')
+        self.log_file = open(self.log_path, 'a', encoding='utf-8', newline='\n')
         self.terminal = sys.stdout
 
     def write(self, message):
+        # Write to terminal with ANSI codes (for colored output)
         self.terminal.write(message)
-        self.log_file.write(message)
+        # Write to file WITHOUT ANSI codes (for readability in Notepad)
+        clean = _ANSI_ESCAPE.sub('', message)
+        # Ensure proper newline at end
+        if clean and not clean.endswith('\n'):
+            clean += '\n'
+        self.log_file.write(clean)
         self.log_file.flush()
 
     def flush(self):
@@ -172,9 +183,23 @@ class Command(BaseCommand):
             self.stdout.write(f'Processing: {pdf_file.name}')
 
             try:
-                parsed_list = parse_rbc_pdf_multi(str(pdf_file))
-            except Exception as e:
+                parsed_list = parse_rbc_monthly_vl(str(pdf_file))
+            except (VLParseError, ValueError) as e:
                 self.stderr.write(self.style.ERROR(f'Failed to parse {pdf_file.name}: {e}'))
+                errors += 1
+                if not dry_run:
+                    FileImportLog.objects.create(
+                        filename=pdf_file.name,
+                        broker='RBC',
+                        imported_at=timezone.now(),
+                        records_imported=0,
+                        records_skipped=0,
+                        status='error',
+                        error_message=str(e),
+                    )
+                continue
+            except Exception as e:
+                self.stderr.write(self.style.ERROR(f'Unexpected error parsing {pdf_file.name}: {e}'))
                 errors += 1
                 if not dry_run:
                     FileImportLog.objects.create(
@@ -359,7 +384,9 @@ class Command(BaseCommand):
                     'statement_date': str(parsed.get('statement_date')) if parsed.get('statement_date') else None,
                     'last_statement_date': str(parsed.get('last_statement_date')) if parsed.get('last_statement_date') else None,
                     'account_number': parsed.get('account_number', ''),
-                    'fx_rate': str(parsed.get('fx_rate', Decimal('1.000000'))),
+                    'fx_rate': str(parsed.get('fx_rate')) if parsed.get('fx_rate') is not None else None,
+                    'begin_total_market_value': str(parsed.get('begin_total_market_value', 0)),
+                    'end_total_market_value': str(parsed.get('end_total_market_value', 0)),
                     'balances_count': len(parsed.get('balances', [])),
                     'transactions_count': len(parsed.get('transactions', [])),
                     'income_summary': parsed.get('income_summary', {}),

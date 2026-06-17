@@ -186,12 +186,15 @@ IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / 'processed' / 'js
 
 # Vision-language (VL) model settings — Qwen2.5-VL on port 11440 via llama.cpp
 VL_MODEL_BASE_URL = os.getenv('VL_MODEL_BASE_URL')
-if not VL_MODEL_BASE_URL and not DEBUG:
-    from django.core.exceptions import ImproperlyConfigured
-    raise ImproperlyConfigured(
-        'VL_MODEL_BASE_URL environment variable must be set in production. '
-        'This is required for PDF classification and report parsing.'
-    )
+if not VL_MODEL_BASE_URL:
+    if DEBUG:
+        VL_MODEL_BASE_URL = 'http://localhost:11440/v1'
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(
+            'VL_MODEL_BASE_URL environment variable must be set in production. '
+            'This is required for PDF classification and report parsing.'
+        )
 VL_MODEL_NAME = os.getenv('VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
 VL_PAGE_DPI = int(os.getenv('VL_PAGE_DPI', '150'))
 VL_MAX_RETRIES = int(os.getenv('VL_MAX_RETRIES', '2'))

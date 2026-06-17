@@ -128,18 +128,36 @@ Rules:
   The table lists individual holdings with their market values and percentages.
   At the very end of this table, there are TWO "Total on [date]" lines:
   
-    Total on MAY 31 $420.85 100.00 %    ← ENDING total (current statement date)
-    Total on APR. 30 $420.85             ← BEGINNING total (previous statement date)
+    Total on MAY 31 $287,192.32 100.00 %    ← ENDING total (current statement date)
+    Total on APR. 30 $285,450.10             ← BEGINNING total (previous statement date)
   
   - end_total_market_value = the dollar amount from the "Total on [CURRENT DATE]" line
-    (the one that HAS a percentage, e.g. "Total on MAY 31 $420.85 100.00 %")
+    (the one that HAS a percentage, e.g. "Total on MAY 31 $287,192.32 100.00 %")
   - begin_total_market_value = the dollar amount from the "Total on [PREVIOUS DATE]" line
-    (the one that does NOT have a percentage, e.g. "Total on APR. 30 $420.85")
+    (the one that does NOT have a percentage, e.g. "Total on APR. 30 $285,450.10")
   
-  IMPORTANT: Do NOT return 0 for these values. Look carefully at the bottom of the
-  Asset Summary table. These totals are ALWAYS present. Extract the dollar amount
-  from each "Total on [date]" line. The dollar amount is the number after the $ sign.
-  Example: "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
+  IMPORTANT: These totals represent the FULL portfolio value, typically in the
+  range of $10,000 to $1,000,000+ for most accounts. Do NOT return small values
+  like $200-$500 unless the account truly has that little money. If you see a
+  "Total on [date]" line with a dollar amount, use THAT value.
+  
+  Common mistakes to avoid:
+  - Do NOT return the market value of a single holding (e.g., just one stock)
+  - Do NOT return 0 unless the account truly has zero value
+  - Do NOT confuse these totals with individual line items in the table
+  
+  Example CORRECT values:
+  - "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
+  - "Total on APR. 30 $285,450.10" → begin_total = 285450.10
+
+- **CRITICAL: fx_rate for USD statements**
+  Look for a line that says "Exchange rate 1 USD = X.XXXX CAD" or similar.
+  The typical range for USD/CAD is 0.70 to 1.60.
+  If you see this line, extract the X.XXXX value as fx_rate.
+  If you do NOT see this line, use null (NOT 1.0 or 0).
+  
+  Common mistake: Do NOT return 1.000000 if you cannot find the exchange rate.
+  Return null instead. The system will handle null values correctly.
 
 - Include ALL transactions visible on ALL pages provided.
 """
@@ -232,7 +250,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
     last_statement_date = _parse_date(last_stmt_str) if last_stmt_str else None
 
     fx_raw = raw.get('fx_rate')
-    fx_rate = _to_decimal(fx_raw) if fx_raw is not None else Decimal('1.000000')
+    fx_rate = _to_decimal(fx_raw) if fx_raw is not None else Decimal('0')
 
     sections_raw = raw.get('sections') or []
     if not sections_raw:

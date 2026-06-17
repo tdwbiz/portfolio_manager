@@ -52,6 +52,7 @@ FX_RATE_USD_NORMAL_MIN = Decimal('1.20')  # USD statements should have fx_rate >
 GAP_WARNING_DAYS = 45  # Days before flagging as warning
 GAP_ERROR_DAYS = 90  # Days before flagging as error
 TREND_CHANGE_PCT = Decimal('30')  # % change threshold for market value trends
+MARKET_VALUE_MIN_NORMAL = Decimal('1000')  # Minimum reasonable portfolio value (flags parser errors)
 
 
 class AuditResult:
@@ -207,6 +208,7 @@ class RBCDataAuditor:
         self._check_8_orphaned_records()
         self._check_9_market_value_trends()
         self._check_10_data_completeness()
+        self._check_11_vl_parser_validation()
         
         # Print final report
         self._print_final_report()
@@ -884,6 +886,87 @@ class RBCDataAuditor:
             self.result.add_ok('market_trends', 'All market value changes within normal range')
         else:
             self.result.add_info('market_trends', f'Found {anomalies} anomalies')
+    
+    def _check_11_vl_parser_validation(self):
+        """CHECK 11: VL parser output validation — flags likely extraction errors.
+        
+        This check identifies records where the VL model likely failed to extract
+        correct values, producing suspiciously low market values or null FX rates.
+        """
+        self.result.checks_run += 1
+        self.printer.print_section('CHECK 11: VL Parser Validation')
+        
+        parser_errors = 0
+        parser_warnings = 0
+        parser_ok = 0
+        
+        # Filter statements by start_date if specified
+        monthly_qs = self._filter_by_start_date(
+            RbcMonthly.objects.select_related('account').order_by('-statement_date')
+        )
+        
+        for stmt in monthly_qs:
+            has_parser_error = False
+            
+            # Check 1: Suspiciously low end_total_market_value (< $1,000)
+            if stmt.end_total_market_value is not None and stmt.end_total_market_value < MARKET_VALUE_MIN_NORMAL:
+                # Only flag if the account likely has more value (has balances)
+                balance_sum = RbcMonthlyBalance.objects.filter(
+                    rbc_monthly=stmt
+                ).aggregate(total=Sum('market_value'))['total'] or Decimal('0')
+                
+                if balance_sum > MARKET_VALUE_MIN_NORMAL:
+                    self.result.add_error(
+                        'vl_parser',
+                        f'{stmt.account.account_id} ({stmt.currency}) {stmt.statement_date}: '
+                        f'end_total=${stmt.end_total_market_value:,.2f} but balances sum to ${balance_sum:,.2f}',
+                        {
+                            'end_total': str(stmt.end_total_market_value),
+                            'balance_sum': str(balance_sum),
+                            'discrepancy': str(balance_sum - stmt.end_total_market_value),
+                            'note': 'VL parser likely extracted wrong value (e.g., single holding instead of total)',
+                        }
+                    )
+                    parser_errors += 1
+                    has_parser_error = True
+            
+            # Check 2: Suspiciously low begin_total_market_value (< $1,000)
+            if not has_parser_error and stmt.begin_total_market_value is not None and stmt.begin_total_market_value < MARKET_VALUE_MIN_NORMAL:
+                balance_sum = RbcMonthlyBalance.objects.filter(
+                    rbc_monthly=stmt
+                ).aggregate(total=Sum('market_value'))['total'] or Decimal('0')
+                
+                if balance_sum > MARKET_VALUE_MIN_NORMAL:
+                    self.result.add_error(
+                        'vl_parser',
+                        f'{stmt.account.account_id} ({stmt.currency}) {stmt.statement_date}: '
+                        f'begin_total=${stmt.begin_total_market_value:,.2f} but balances sum to ${balance_sum:,.2f}',
+                        {
+                            'begin_total': str(stmt.begin_total_market_value),
+                            'balance_sum': str(balance_sum),
+                            'discrepancy': str(balance_sum - stmt.begin_total_market_value),
+                            'note': 'VL parser likely extracted wrong value (e.g., single holding instead of total)',
+                        }
+                    )
+                    parser_errors += 1
+            
+            # Check 3: USD statement with fx_rate = 1.000000 (parser failed to extract)
+            if stmt.currency == 'USD' and stmt.fx_rate == Decimal('1.000000'):
+                self.result.add_warning(
+                    'vl_parser',
+                    f'{stmt.account.account_id} USD {stmt.statement_date}: fx_rate=1.000000 (parser failed to extract)',
+                    {
+                        'fx_rate': str(stmt.fx_rate),
+                        'note': 'VL parser returned default value instead of actual exchange rate',
+                    }
+                )
+                parser_warnings += 1
+        
+        if parser_errors == 0 and parser_warnings == 0:
+            self.result.add_ok('vl_parser', 'All VL parser outputs appear valid')
+        else:
+            self.result.add_info('vl_parser',
+                f'Found {parser_errors} errors, {parser_warnings} warnings — likely VL parser extraction failures')
     
     def _check_10_data_completeness(self):
         """CHECK 10: Data completeness."""

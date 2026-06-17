@@ -1,5 +1,6 @@
 """Management command to import RBC Annual Reports in batch."""
 
+import json
 import logging
 import os
 import shutil
@@ -38,7 +39,11 @@ class Command(BaseCommand):
         )
 
     def _find_annual_report_files(self, target_path: Path):
-        """Find Annual Report PDF files in a directory or single file."""
+        """Find Annual Report PDF files in a directory or single file.
+        
+        Filters to only process files that start with 'annual report' (case-insensitive).
+        This prevents the command from consuming statement PDFs.
+        """
         if target_path.is_file():
             if target_path.suffix.lower() == '.pdf':
                 return [target_path]
@@ -47,10 +52,13 @@ class Command(BaseCommand):
                     f'File {target_path.name} is not a PDF file.'
                 )
         elif target_path.is_dir():
-            pdf_files = sorted(target_path.glob('*.pdf'))
+            all_pdfs = sorted(target_path.glob('*.pdf'))
+            # Filter to only annual report files (filename starts with "annual report")
+            pdf_files = [f for f in all_pdfs if f.name.lower().startswith('annual report')]
             if not pdf_files:
                 raise CommandError(
-                    f'No PDF files found in {target_path}'
+                    f'No Annual Report PDF files found in {target_path} '
+                    f'(found {len(all_pdfs)} total PDFs, but none match "annual report" prefix)'
                 )
             return pdf_files
         else:
@@ -127,6 +135,42 @@ class Command(BaseCommand):
                     shutil.move(str(pdf_file), str(dest))
                     logger.info('Moved failed file to %s', dest)
                 continue
+
+            # Save JSON output for this PDF
+            json_dir = Path(getattr(settings, 'IMPORT_JSON_DIR', settings.BASE_DIR / 'processed' / 'json_logs'))
+            json_dir.mkdir(parents=True, exist_ok=True)
+            json_filename = pdf_file.stem + '.json'
+            json_path = json_dir / json_filename
+
+            json_data = {
+                'filename': pdf_file.name,
+                'processed_at': datetime.now().isoformat(),
+                'is_annual_report': True,
+                'sections': [],
+                'errors': [],
+            }
+
+            section_data = {
+                'currency': 'CAD',
+                'statement_date': None,
+                'last_statement_date': None,
+                'account_number': parsed.get('account_number', ''),
+                'fx_rate': '1.000000',
+                'balances_count': 0,
+                'transactions_count': 0,
+                'income_summary': {},
+                'contribution_summary': {},
+                'is_annual_report_section': True,
+                'balances': [],
+                'transactions': [],
+                'report_year': parsed.get('report_year'),
+                'report_period_start': str(parsed.get('report_period_start')) if parsed.get('report_period_start') else None,
+                'report_period_end': str(parsed.get('report_period_end')) if parsed.get('report_period_end') else None,
+            }
+            json_data['sections'].append(section_data)
+
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, indent=2, default=str)
 
             if dry_run:
                 currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
@@ -222,10 +266,12 @@ class Command(BaseCommand):
                     shutil.move(str(pdf_file), str(dest))
                     logger.info('Moved duplicate-only file to %s', dest)
 
+        json_dir = Path(getattr(settings, 'IMPORT_JSON_DIR', settings.BASE_DIR / 'processed' / 'json_logs'))
         self.stdout.write(self.style.SUCCESS(
             f'\n=== Annual Report Import Summary ===\n'
             f'Files processed:   {files_processed}\n'
             f'Records created:   {records_created}\n'
             f'Duplicates skipped:{duplicates_skipped}\n'
             f'Errors:            {errors}\n'
+            f'JSON files:        {json_dir}\n'
         ))

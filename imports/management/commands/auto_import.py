@@ -16,7 +16,7 @@ from django.utils import timezone
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from core.models import RbcAnnual
 from imports.parsers import parse_ib_csv, parse_rbc_csv
-from imports.parsers_pdf import parse_rbc_pdf
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.rejection_log import rejection_from_trade, write_rejection_log
 
@@ -369,28 +369,36 @@ class Command(BaseCommand):
                             f"{annual_charges_recorded} charges, {annual_compensation_recorded} compensation"
                         )
                     else:
-                        # Standard RBC PDF statement
+                        # Standard RBC PDF statement — use VL parser
                         self.stdout.write(f"  Parsing: {filename}")
-                        parsed = parse_rbc_pdf(file_path)
+                        try:
+                            parsed_list = parse_rbc_monthly_vl(file_path)
+                        except (VLParseError, ValueError) as e:
+                            raise ValueError(f'VL parse failed: {e}')
 
                         if dry_run:
+                            currencies = [s.get('currency', 'CAD') for s in parsed_list]
+                            total_txns = sum(len(s.get('transactions', [])) for s in parsed_list)
+                            total_bals = sum(len(s.get('balances', [])) for s in parsed_list)
                             self.stdout.write(
-                                f"  [DRY RUN] {filename}: {parsed['statement_count']} statement(s), "
-                                f"{parsed['transaction_count']} transactions, "
-                                f"{parsed['balance_count']} balances"
+                                f"  [DRY RUN] {filename}: {len(parsed_list)} section(s) [{', '.join(currencies)}], "
+                                f"{total_txns} transactions, {total_bals} balances"
                             )
                             continue
 
-                        # Import PDF data
+                        # Import PDF data — VL parser returns list of sections (one per currency)
                         statements_created = 0
                         transactions_imported = 0
                         balances_recorded = 0
                         duplicates_skipped = 0
+                        account = None
 
-                        for stmt_data in parsed['statements']:
-                            with transaction.atomic():
-                                # Create account
-                                account_id = stmt_data.get('account_number', '').replace('-', '').upper()
+                        for section in parsed_list:
+                            currency = section.get('currency', 'CAD')
+
+                            # Create account once (use first section's account number)
+                            if account is None:
+                                account_id = section.get('account_number', '').replace('-', '').upper()
                                 if account_id:
                                     account, _ = Account.objects.get_or_create(
                                         account_id=account_id,
@@ -399,67 +407,70 @@ class Command(BaseCommand):
                                 else:
                                     account = None
 
-                                # Create statement
-                                statement = BrokerStatement.objects.create(
-                                    source='RBC',
-                                    file_date=timezone.now().date(),
-                                    raw_filename=filename,
+                            if account is None:
+                                continue
+
+                            # Create statement per section
+                            statement = BrokerStatement.objects.create(
+                                source='RBC',
+                                file_date=timezone.now().date(),
+                                raw_filename=filename,
+                            )
+
+                            # Import transactions
+                            for tx_data in section.get('transactions', []):
+                                tx_hash = compute_tx_hash(
+                                    'RBC',
+                                    account.account_id,
+                                    tx_data['date'],
+                                    tx_data['symbol'],
+                                    tx_data['type'],
+                                    tx_data['quantity'],
+                                    tx_data['price'],
+                                    tx_data['amount'],
+                                    currency,
                                 )
+                                if Transaction.objects.filter(tx_hash=tx_hash).exists():
+                                    duplicates_skipped += 1
+                                    continue
 
-                                # Import transactions
-                                for tx_data in stmt_data.get('transactions', []):
-                                    tx_hash = compute_tx_hash(
-                                        'RBC',
-                                        account.account_id if account else '',
-                                        tx_data['date'],
-                                        tx_data['symbol'],
-                                        tx_data['type'],
-                                        tx_data['quantity'],
-                                        tx_data['price'],
-                                        tx_data['amount'],
-                                        tx_data.get('currency', 'CAD'),
-                                    )
-                                    if Transaction.objects.filter(tx_hash=tx_hash).exists():
-                                        duplicates_skipped += 1
-                                        continue
+                                Transaction.objects.create(
+                                    statement=statement,
+                                    account=account,
+                                    date=tx_data['date'],
+                                    symbol=tx_data['symbol'],
+                                    type=tx_data['type'],
+                                    quantity=tx_data['quantity'],
+                                    price=tx_data['price'],
+                                    commission=tx_data.get('commission', Decimal('0.00')),
+                                    amount=tx_data['amount'],
+                                    currency=currency,
+                                    exchange_rate_cad=section.get('fx_rate', Decimal('1.000000')),
+                                    amount_cad=tx_data.get('amount_cad', tx_data['amount']),
+                                    notes=tx_data.get('notes', ''),
+                                    tx_hash=tx_hash,
+                                )
+                                transactions_imported += 1
 
-                                    Transaction.objects.create(
-                                        statement=statement,
-                                        account=account,
-                                        date=tx_data['date'],
-                                        symbol=tx_data['symbol'],
-                                        type=tx_data['type'],
-                                        quantity=tx_data['quantity'],
-                                        price=tx_data['price'],
-                                        commission=tx_data.get('commission', Decimal('0.00')),
-                                        amount=tx_data['amount'],
-                                        currency=tx_data.get('currency', 'CAD'),
-                                        exchange_rate_cad=tx_data.get('exchange_rate_cad', Decimal('1.000000')),
-                                        amount_cad=tx_data.get('amount_cad', tx_data['amount']),
-                                        notes=tx_data.get('notes', ''),
-                                        tx_hash=tx_hash,
-                                    )
-                                    transactions_imported += 1
+                            if transactions_imported > 0:
+                                statements_created += 1
 
-                                if transactions_imported > 0:
-                                    statements_created += 1
-
-                        # Record balances
-                        for bal_data in parsed.get('balances', []):
-                            with transaction.atomic():
-                                balance_hash = hashlib.sha256(
-                                    f"{filename}:{bal_data['date']}:{bal_data['asset_class']}:{bal_data['amount']}".encode()
-                                ).hexdigest()
-                                if not FileImportLog.objects.filter(content_hash=balance_hash).exists():
-                                    FileImportLog.objects.create(
-                                        filename=f"{filename}_balance_{bal_data['date']}",
-                                        broker='RBC',
-                                        records_imported=1,
-                                        records_skipped=0,
-                                        status='success',
-                                        content_hash=balance_hash,
-                                    )
-                                    balances_recorded += 1
+                            # Record balances
+                            for bal_data in section.get('balances', []):
+                                with transaction.atomic():
+                                    balance_hash = hashlib.sha256(
+                                        f"{filename}:{bal_data['account_type']}:{bal_data['closing']}".encode()
+                                    ).hexdigest()
+                                    if not FileImportLog.objects.filter(content_hash=balance_hash).exists():
+                                        FileImportLog.objects.create(
+                                            filename=f"{filename}_balance_{bal_data['account_type']}",
+                                            broker='RBC',
+                                            records_imported=1,
+                                            records_skipped=0,
+                                            status='success',
+                                            content_hash=balance_hash,
+                                        )
+                                        balances_recorded += 1
 
                         status = 'success' if statements_created > 0 else 'partial'
                         FileImportLog.objects.create(

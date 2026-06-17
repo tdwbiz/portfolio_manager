@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from core.models import RbcAnnual
-from imports.parsers_pdf import parse_rbc_pdf
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 
 logger = logging.getLogger(__name__)
@@ -61,11 +61,13 @@ def pdf_import_view(request):
                 context['error'] = str(e)
             else:
                 try:
-                    # Parse the PDF
-                    parsed = parse_rbc_pdf(str(temp_path))
+                    # Parse the PDF using VL model
+                    parsed_list = parse_rbc_monthly_vl(str(temp_path))
 
-                    statement_date = parsed.get('statement_date')
-                    account_number = parsed.get('account_number', '')
+                    # Use first section (CAD) for statement-level fields
+                    first_section = parsed_list[0] if parsed_list else {}
+                    statement_date = first_section.get('statement_date')
+                    account_number = first_section.get('account_number', '')
 
                     if not statement_date:
                         context['error'] = 'Could not determine statement date from PDF.'
@@ -100,39 +102,44 @@ def pdf_import_view(request):
                                     account=account,
                                     file_name=uploaded_file.name,
                                     statement_date=statement_date,
-                                    last_statement_date=parsed.get('last_statement_date'),
+                                    last_statement_date=first_section.get('last_statement_date'),
                                     account_number=account_number,
-                                    fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
-                                    begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
-                                    end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
+                                    fx_rate=first_section.get('fx_rate', Decimal('1.000000')),
+                                    begin_total_market_value=first_section.get('begin_total_market_value', Decimal('0.00')),
+                                    end_total_market_value=first_section.get('end_total_market_value', Decimal('0.00')),
                                 )
 
-                                # Create balances
-                                for bal in parsed.get('balances', []):
-                                    RbcMonthlyBalance.objects.create(
-                                        rbc_monthly=rbc_monthly,
-                                        account_type=bal['account_type'],
-                                        opening_balance=bal.get('opening', Decimal('0.00')),
-                                        closing_balance=bal.get('closing', Decimal('0.00')),
-                                        market_value=bal.get('market_value', Decimal('0.00')),
-                                        percentage=bal.get('percentage', Decimal('0.00')),
-                                    )
+                                # Create balances and transactions from all sections
+                                total_txns = 0
+                                total_bals = 0
+                                for section in parsed_list:
+                                    currency = section.get('currency', 'CAD')
+                                    for bal in section.get('balances', []):
+                                        RbcMonthlyBalance.objects.create(
+                                            rbc_monthly=rbc_monthly,
+                                            account_type=bal['account_type'],
+                                            opening_balance=bal.get('opening', Decimal('0.00')),
+                                            closing_balance=bal.get('closing', Decimal('0.00')),
+                                            market_value=bal.get('market_value', Decimal('0.00')),
+                                            percentage=bal.get('percentage', Decimal('0.00')),
+                                        )
+                                        total_bals += 1
 
-                                # Create transactions
-                                for tx in parsed.get('transactions', []):
-                                    RbcMonthlyTransaction.objects.create(
-                                        rbc_monthly=rbc_monthly,
-                                        date=tx['date'],
-                                        activity_type=tx['activity_type'],
-                                        description=tx['description'],
-                                        symbol=tx.get('symbol', ''),
-                                        quantity=tx.get('quantity', Decimal('0.00')),
-                                        price=tx.get('price', Decimal('0.00')),
-                                        debit=tx.get('debit', Decimal('0.00')),
-                                        credit=tx.get('credit', Decimal('0.00')),
-                                        currency=tx.get('currency', 'CAD'),
-                                        commission=tx.get('commission', Decimal('0.00')),
-                                    )
+                                    for tx in section.get('transactions', []):
+                                        RbcMonthlyTransaction.objects.create(
+                                            rbc_monthly=rbc_monthly,
+                                            date=tx['date'],
+                                            activity_type=tx['activity_type'],
+                                            description=tx['description'],
+                                            symbol=tx.get('symbol', ''),
+                                            quantity=tx.get('quantity', Decimal('0.00')),
+                                            price=tx.get('price', Decimal('0.00')),
+                                            debit=tx.get('debit', Decimal('0.00')),
+                                            credit=tx.get('credit', Decimal('0.00')),
+                                            currency=currency,
+                                            commission=tx.get('commission', Decimal('0.00')),
+                                        )
+                                        total_txns += 1
 
                                 # Clean up temp file
                                 try:
@@ -142,8 +149,7 @@ def pdf_import_view(request):
 
                                 context['success'] = (
                                     f'Successfully imported {uploaded_file.name}: '
-                                    f'{len(parsed.get("transactions", []))} transactions, '
-                                    f'{len(parsed.get("balances", []))} balances'
+                                    f'{total_txns} transactions, {total_bals} balances'
                                 )
                                 context['rbc_monthly'] = rbc_monthly
                 except Exception as e:

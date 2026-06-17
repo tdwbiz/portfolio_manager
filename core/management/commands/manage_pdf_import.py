@@ -269,18 +269,19 @@ class Command(BaseCommand):
                     errors += 1
                     continue
 
-                # Check for duplicate (per currency)
+                # Check for duplicate (per currency, excluding file_name to prevent duplicates on re-import)
                 existing = RbcMonthly.objects.filter(
                     account=account,
                     statement_date=statement_date,
                     currency=currency,
-                    file_name=pdf_file.name,
                 )
                 if existing.exists():
+                    existing_record = existing.first()
                     self.stdout.write(
                         self.style.WARNING(
                             f'Skipping duplicate: {pdf_file.name} [{currency}] '
-                            f'(account={account}, date={statement_date})'
+                            f'(account={account}, date={statement_date}, '
+                            f'existing_file={existing_record.file_name})'
                         )
                     )
                     duplicates_skipped += 1

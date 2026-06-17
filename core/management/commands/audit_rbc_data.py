@@ -49,9 +49,9 @@ ANNUAL_TOLERANCE_ABS = Decimal('10.00')  # $10.00 absolute tolerance
 FX_RATE_MIN = Decimal('0.60')  # Minimum reasonable CAD/USD rate
 FX_RATE_MAX = Decimal('1.50')  # Maximum reasonable CAD/USD rate
 FX_RATE_USD_NORMAL_MIN = Decimal('1.20')  # USD statements should have fx_rate > 1.20
-GAP_WARNING_DAYS = 45  # Days before flagging as warning
-GAP_ERROR_DAYS = 90  # Days before flagging as error
-TREND_CHANGE_PCT = Decimal('30')  # % change threshold for market value trends
+GAP_WARNING_DAYS = 75  # Days before flagging as warning (RBC statements are quarterly ~90 days)
+GAP_ERROR_DAYS = 180  # Days before flagging as error (2+ quarters missing)
+TREND_CHANGE_PCT = Decimal('50')  # % change threshold for market value trends (quarterly statements can have larger swings)
 MARKET_VALUE_MIN_NORMAL = Decimal('1000')  # Minimum reasonable portfolio value (flags parser errors)
 
 
@@ -328,11 +328,13 @@ class RBCDataAuditor:
                     gap_warnings += 1
                 
                 # Check begin/end total matching (within tolerance)
-                if days_gap <= 65:  # Only check if gap is <= ~2 months
+                # Only check if gap is <= ~3 months (quarterly statements)
+                if days_gap <= 100:
                     discrepancy = abs(
                         curr_stmt.begin_total_market_value - prev_stmt.end_total_market_value
                     )
-                    if discrepancy > BALANCE_TOLERANCE:
+                    # Use $1.00 tolerance for begin/end matching (allows for small rounding differences)
+                    if discrepancy > Decimal('1.00'):
                         self.result.add_warning(
                             'continuity',
                             f'{account.account_id} ({currency}): Begin/end mismatch between '
@@ -709,7 +711,33 @@ class RBCDataAuditor:
                     f'Auto-created account: {acc.account_id} ({acc.name})',
                 )
         
-        if not duplicate_groups and not auto_created.exists():
+        # Check for RbcMonthly records with account_number that doesn't match account
+        mismatched = RbcMonthly.objects.filter(
+            account__broker='RBC'
+        ).exclude(
+            account_number=F('account__account_id')
+        ).values_list(
+            'account__account_id', 'account_number', 'statement_date', 'file_name'
+        ).distinct()[:50]  # Limit to 50 examples
+        
+        if mismatched.exists():
+            self.result.add_warning(
+                'account_matching',
+                f'{mismatched.count()} RbcMonthly records have account_number that doesn\'t match account.account_id',
+                {
+                    'examples': [
+                        {
+                            'account_id': row[0],
+                            'pdf_account_number': row[1],
+                            'statement_date': str(row[2]),
+                            'file_name': row[3],
+                        }
+                        for row in mismatched
+                    ],
+                },
+            )
+        
+        if not duplicate_groups and not auto_created.exists() and not mismatched.exists():
             self.result.add_ok('account_matching', 'All accounts unique and properly configured')
     
     def _check_7_transaction_integrity(self):

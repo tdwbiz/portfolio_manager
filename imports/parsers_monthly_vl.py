@@ -136,19 +136,26 @@ Rules:
   - begin_total_market_value = the dollar amount from the "Total on [PREVIOUS DATE]" line
     (the one that does NOT have a percentage, e.g. "Total on APR. 30 $285,450.10")
   
-  IMPORTANT: These totals represent the FULL portfolio value, typically in the
-  range of $10,000 to $1,000,000+ for most accounts. Do NOT return small values
-  like $200-$500 unless the account truly has that little money. If you see a
-  "Total on [date]" line with a dollar amount, use THAT value.
+  IMPORTANT: These totals represent the FULL PORTFOLIO VALUE, NOT individual holdings.
+  Typical portfolio values range from $10,000 to $1,000,000+.
   
-  Common mistakes to avoid:
-  - Do NOT return the market value of a single holding (e.g., just one stock)
-  - Do NOT return 0 unless the account truly has zero value
-  - Do NOT confuse these totals with individual line items in the table
+  HOW TO FIND THE TOTALS:
+  1. Look for the "Asset Summary" or "Market Value" table
+  2. Scroll to the VERY BOTTOM of this table
+  3. Find lines that start with "Total on" — there should be TWO:
+     - One with the current statement date (has percentage) → end_total
+     - One with the previous statement date (no percentage) → begin_total
+  4. Extract the DOLLAR AMOUNT from each line (remove $ and commas)
   
-  Example CORRECT values:
-  - "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
-  - "Total on APR. 30 $285,450.10" → begin_total = 285450.10
+  CRITICAL WARNINGS:
+  - DO NOT use the market value of a single stock/holding
+  - DO NOT use any value from the middle of the table
+  - DO NOT return 0 or small values (< $1,000) unless the account truly has that little
+  - The "Total on" lines are ALWAYS at the bottom of the table, AFTER all holdings
+  
+  Example CORRECT extraction:
+  - Text: "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
+  - Text: "Total on APR. 30 $285,450.10" → begin_total = 285450.10
 
 - **CRITICAL: fx_rate for USD statements**
   Look for a line that says "Exchange rate 1 USD = X.XXXX CAD" or similar.
@@ -329,6 +336,38 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
         raise ValueError(
             f"VL model returned sections but none had a valid currency for {file_path}"
         )
+
+    # Post-processing validation: flag suspicious values
+    for section in result:
+        end_total = section.get('end_total_market_value', Decimal('0'))
+        begin_total = section.get('begin_total_market_value', Decimal('0'))
+        
+        # Sum up all balance market values for this section
+        balance_sum = sum((b.get('market_value', Decimal('0')) for b in section.get('balances', [])), Decimal('0'))
+        
+        # If end_total is suspiciously low but balances sum to a large value,
+        # the VL model likely extracted a single holding instead of the total
+        if end_total < Decimal('1000') and balance_sum > Decimal('1000'):
+            logger.warning(
+                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f but balances sum to %.2f — "
+                "VL model likely extracted wrong value (single holding vs total)",
+                file_path, section.get('currency', 'CAD'), end_total, balance_sum,
+            )
+            # Attempt to fix: use balance_sum as end_total if it's more reasonable
+            if balance_sum > end_total * 10:  # Only if balance_sum is 10x larger
+                logger.warning(
+                    "parse_rbc_monthly_vl: %s [%s] replacing end_total %.2f with balance_sum %.2f",
+                    file_path, section.get('currency', 'CAD'), end_total, balance_sum,
+                )
+                section['end_total_market_value'] = balance_sum
+        
+        # Same check for begin_total
+        if begin_total < Decimal('1000') and balance_sum > Decimal('1000'):
+            logger.warning(
+                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f but balances sum to %.2f — "
+                "VL model likely extracted wrong value",
+                file_path, section.get('currency', 'CAD'), begin_total, balance_sum,
+            )
 
     return result
 

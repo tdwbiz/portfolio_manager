@@ -34,6 +34,23 @@ GROUP BY rm.id, a.account_id, rm.statement_date, rm.currency,
 HAVING ABS(rm.end_total_market_value - COALESCE(SUM(rmb.market_value), 0)) > 1.00
 ORDER BY ABS(rm.end_total_market_value - COALESCE(SUM(rmb.market_value), 0)) DESC;
 
+--detail 30607:
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthly] where [id] in (30607)
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthlybalance] where [rbc_monthly_id] in (30607) 
+--line missing Common Shares $350,974.13 99.87% which is the discrepancy
+
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthlytransaction] where [rbc_monthly_id] in (30607)
+--346.79 debit is wrong. this is  the cash opening balance
+
+--detail 31110
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthly] where [id] in (31110)
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthlybalance] where [rbc_monthly_id] in (31110) 
+--book value is taken as opening balance. that is not correct
+
+SELECT * FROM [PortfolioDEV].[dbo].[core_rbcmonthlytransaction] where [rbc_monthly_id] in (31110)
+--323.01 debit is wrong. this is credit, and amount is wrong.
+
+
 
 -- ============================================================================
 -- QUERY 2: Begin/End Balance Reconciliation (Statement-to-Statement)
@@ -256,7 +273,7 @@ SELECT
         WHEN prev.end_total_market_value = 0 THEN NULL
         ELSE ROUND((curr.end_total_market_value - prev.end_total_market_value) / prev.end_total_market_value * 100, 2)
     END AS total_change_pct,
-    rm.file_name
+    curr.file_name
 FROM dbo.core_rbcmonthly curr
 JOIN dbo.core_rbcmonthly prev ON 
     curr.account_id = prev.account_id 

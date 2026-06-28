@@ -3,7 +3,7 @@
 **Project:** portfolio_manager  
 **Customer:** tdwdev  
 **Author:** Qwen3.5 35B Q6 (from code review dated 2026-06-27)  
-**Feature branch:** feature_rbc_pdf_fixes  
+**Feature branch:** feature_code_review_fixes  
 **Status:** Draft for human review — CrewAI execution pending
 
 ---

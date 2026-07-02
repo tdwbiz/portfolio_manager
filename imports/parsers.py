@@ -80,13 +80,21 @@ _RBC_TYPE_MAP: Dict[str, Tuple[str, str]] = {
 def _normalize_type(raw: str, type_map: Dict[str, Tuple[str, str]]) -> Tuple[str, str]:
     """Return (code, label) for a raw broker type string.
 
+    Uses the TransactionType registry to auto-create unknown types.
     Falls back to a sanitised uppercase code for any unknown type so that
     future broker inventions are stored without requiring a code change.
     """
+    from core.models import TransactionType
+
     if raw in type_map:
-        return type_map[raw]
+        code, label = type_map[raw]
+        TransactionType.auto_create_or_get(code, label)
+        return (code, label)
+
     code = re.sub(r'[^A-Z0-9]', '_', raw.upper())[:20].strip('_') or 'OTHER'
-    return (code, raw)
+    label = raw
+    TransactionType.auto_create_or_get(code, label)
+    return (code, label)
 
 
 def parse_ib_csv(file_path: str, rejections: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:

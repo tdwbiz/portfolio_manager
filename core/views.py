@@ -52,6 +52,40 @@ def _validate_date_param(date_str):
         raise ValueError(f"Invalid date format: {date_str}")
     return parsed
 
+
+def is_safe_url(url: str, allowed_hosts: set = None) -> bool:
+    """Validate that a URL is safe for redirects.
+
+    Prevents open redirect attacks by ensuring the URL points to an
+    allowed host (the current Django site's host).
+
+    Args:
+        url: The URL to validate.
+        allowed_hosts: Set of allowed hostnames. Defaults to Django's
+            ALLOWED_HOSTS.
+
+    Returns:
+        True if the URL is safe, False otherwise.
+    """
+    if not url:
+        return False
+
+    # Reject URLs with protocol or absolute URLs to other domains
+    if '://' in url:
+        parsed = re.match(r'^https?://([^/]+)', url)
+        if parsed:
+            host = parsed.group(1).lower()
+            if allowed_hosts is None:
+                allowed_hosts = set(settings.ALLOWED_HOSTS)
+            return host in allowed_hosts
+
+    # Relative URLs are always safe
+    if url.startswith('/') and not url.startswith('//'):
+        return True
+
+    return False
+
+
 from core.models import TransactionType
 from core.utils import fetch_last_prices as utils_fetch_last_prices  # Re-export for modular views
 
@@ -148,3 +182,12 @@ class _EmptyQuerySet:
 
     def exists(self):
         return bool(self._items)
+
+
+def health_check(request):
+    """Simple health check endpoint for load balancers and monitoring.
+
+    Returns 200 OK with a JSON body when the application is healthy.
+    """
+    from django.http import JsonResponse
+    return JsonResponse({'status': 'ok', 'timestamp': timezone.now().isoformat()})

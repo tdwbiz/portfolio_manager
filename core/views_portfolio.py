@@ -156,7 +156,11 @@ def portfolio_summary(request):
 def realised_pnl(request):
     """Realised P&L page with FIFO and average-cost methods."""
     account = request.GET.get('account', '')
-    symbol = request.GET.get('symbol', '').strip().upper()[:20]
+    raw_symbol = request.GET.get('symbol', '').strip().upper()
+    # Validate symbol: only allow alphanumeric, dots, hyphens, and slashes (e.g., T.TO, BNS-UN)
+    if raw_symbol and not re.match(r'^[A-Z0-9.\-/]+$', raw_symbol):
+        raw_symbol = re.sub(r'[^A-Z0-9.\-/]', '', raw_symbol).upper()[:20]
+    symbol = raw_symbol[:20]
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
 

@@ -1,6 +1,7 @@
 from django.db import models
 from decimal import Decimal
 import hashlib
+import logging
 
 
 def compute_tx_hash(broker: str, account_id: str, date, symbol: str,
@@ -39,6 +40,26 @@ class TransactionType(models.Model):
     class Meta:
         ordering = ['code']
 
+    @classmethod
+    def auto_create_or_get(cls, code: str, label: str) -> 'TransactionType':
+        """Get or create a TransactionType record.
+
+        Args:
+            code: Canonical code (e.g., 'BUY', 'SELL', 'DIV')
+            label: Human-readable label (e.g., 'Buy', 'Sell', 'Dividend')
+
+        Returns:
+            TransactionType instance
+        """
+        obj, created = cls.objects.get_or_create(
+            code=code,
+            defaults={'label': label}
+        )
+        if created:
+            logger = logging.getLogger(__name__)
+            logger.info(f"Auto-created TransactionType: {code} — {label}")
+        return obj
+
     def __str__(self):
         return f"{self.code} — {self.label}"
 
@@ -75,6 +96,12 @@ class Account(models.Model):
         default=False,
         help_text='When True, this account is excluded from risk calculations'
     )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['broker', 'category']),
+            models.Index(fields=['owner']),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.broker})"
@@ -146,7 +173,14 @@ class Transaction(models.Model):
     exchange_rate_cad = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal('1.000000'))
     amount_cad = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0.00'))
     notes = models.TextField(blank=True, default='')
-    tx_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    tx_hash = models.CharField(max_length=64, blank=True, default='', db_index=True, help_text="SHA-256 hash for deduplication")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['account', 'date']),
+            models.Index(fields=['symbol', 'date']),
+            models.Index(fields=['type']),
+        ]
 
     def __str__(self):
         return f"{self.type} {self.quantity} {self.symbol} on {self.date}"

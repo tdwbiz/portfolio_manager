@@ -324,7 +324,8 @@ class TestParseRbcPdf(TestCase):
             os.unlink(pdf_path)
             account.delete()
 
-    def test_duplicate_detection(self):
+    @patch('imports.parsers_monthly_vl.parse_rbc_monthly_vl')
+    def test_duplicate_detection(self, mock_vl):
         """Test 6: Import the same PDF twice.
         Verify the second import is skipped with a warning."""
         account = Account.objects.create(
@@ -332,6 +333,27 @@ class TestParseRbcPdf(TestCase):
             name="Test Duplicate Account",
             broker="RBC",
         )
+
+        # Mock the VL parser to return valid parsed data
+        mock_vl.return_value = [{
+            'statement_date': date(2025, 9, 30),
+            'last_statement_date': date(2025, 8, 29),
+            'account_number': '900-00003-1-8',
+            'currency': 'CAD',
+            'fx_rate': Decimal('1.000000'),
+            'begin_total_market_value': Decimal('1057.19'),
+            'end_total_market_value': Decimal('1057.19'),
+            'transactions': [],
+            'balances': [
+                {
+                    'account_type': 'Cash',
+                    'opening': Decimal('20.85'),
+                    'closing': Decimal('20.85'),
+                    'market_value': Decimal('20.85'),
+                    'percentage': Decimal('1.97'),
+                },
+            ],
+        }]
 
         pdf_path = self._write_pdf_text(SAMPLE_RBC_PDF_TEXT)
         try:

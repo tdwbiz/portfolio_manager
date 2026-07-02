@@ -12,9 +12,9 @@ class ImmutableRecordError(Exception):
 
 
 class SecurityUniverse(models.Model):
-    symbol = models.CharField(max_length=20, unique=True)
-    name = models.CharField(max_length=200, blank=True)
-    security_type = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=500, blank=True)
+    security_type = models.CharField(max_length=50)
     asset_class = models.CharField(max_length=50)
     sector = models.CharField(max_length=100, blank=True)
     primary_currency = models.CharField(max_length=3, default="USD")
@@ -39,7 +39,7 @@ class SecurityUniverse(models.Model):
 
 
 class MarketPriceHistory(models.Model):
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     date = models.DateField()
     open = models.DecimalField(max_digits=18, decimal_places=6)
     high = models.DecimalField(max_digits=18, decimal_places=6)
@@ -48,7 +48,7 @@ class MarketPriceHistory(models.Model):
     adj_close = models.DecimalField(max_digits=18, decimal_places=6)
     volume = models.BigIntegerField(default=0)
     currency = models.CharField(max_length=3, default="USD")
-    data_source = models.CharField(max_length=20)
+    data_source = models.CharField(max_length=50)
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -64,11 +64,11 @@ class MarketPriceHistory(models.Model):
 
 
 class VolatilitySummary(models.Model):
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     calc_date = models.DateField()
     lookback_days = models.IntegerField()
     volatility_annualised = models.DecimalField(max_digits=10, decimal_places=6)
-    data_source = models.CharField(max_length=20)
+    data_source = models.CharField(max_length=50)
     calc_timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -83,7 +83,7 @@ class VolatilitySummary(models.Model):
 class FxRate(models.Model):
     date = models.DateField(unique=True)
     usd_cad_rate = models.DecimalField(max_digits=10, decimal_places=6)
-    data_source = models.CharField(max_length=20)
+    data_source = models.CharField(max_length=50)
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -132,7 +132,7 @@ class AlternativePortfolio(models.Model):
 
 class AlternativeHolding(models.Model):
     portfolio = models.ForeignKey(AlternativePortfolio, on_delete=models.CASCADE, related_name="holdings")
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     target_weight = models.DecimalField(max_digits=6, decimal_places=4)
 
     class Meta:
@@ -164,10 +164,10 @@ class ScoringConfig(models.Model):
 
 
 class SecurityIndexExposure(models.Model):
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     index_name = models.CharField(max_length=50)
     exposure_weight = models.DecimalField(max_digits=6, decimal_places=4)
-    notes = models.CharField(max_length=200, blank=True)
+    notes = models.CharField(max_length=500, blank=True)
 
     class Meta:
         db_table = "rm_security_index_exposure"
@@ -181,7 +181,7 @@ class DataQualityLog(models.Model):
     """Records data quality events: gaps, fetch failures, symbol mismatches."""
 
     logged_at = models.DateTimeField(auto_now_add=True)
-    symbol = models.CharField(max_length=20, blank=True)
+    symbol = models.CharField(max_length=50, blank=True)
     event_type = models.CharField(max_length=30)
     # Values: 'gap_detected', 'fetch_failed', 'symbol_not_in_universe',
     #         'mutual_fund_skipped', 'ticker_mapping_applied', 'insufficient_history'
@@ -210,7 +210,7 @@ class SecurityRiskMetrics(models.Model):
     Security-level risk metrics computed daily per held symbol.
     All monetary values in USD. CAD positions converted via rm_fx_rates.
     """
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     calc_date = models.DateField()
     
     # --- Volatility ---
@@ -284,7 +284,7 @@ class SecurityRiskMetrics(models.Model):
     
     # --- Metadata ---
     calc_timestamp = models.DateTimeField(auto_now_add=True)
-    price_data_source = models.CharField(max_length=20, blank=True)
+    price_data_source = models.CharField(max_length=50, blank=True)
     # 'amibroker', 'yfinance', or 'mixed' — which source provided the price data used
     price_rows_used = models.IntegerField(default=0)
     # Number of price rows available for this symbol at calc time (for audit)
@@ -307,8 +307,8 @@ class CorrelationMatrix(models.Model):
     Both (A, B) and (B, A) are stored for query convenience.
     Diagonal (A, A) is stored as 1.0.
     """
-    symbol_a = models.CharField(max_length=20)
-    symbol_b = models.CharField(max_length=20)
+    symbol_a = models.CharField(max_length=50)
+    symbol_b = models.CharField(max_length=50)
     calc_date = models.DateField()
     pearson_252d = models.DecimalField(max_digits=8, decimal_places=6)
     # Pearson r of daily log returns over the last 252 trading days.
@@ -376,7 +376,7 @@ class MarketCondition(models.Model):
     Technical indicator values per symbol per calculation date.
     Computed from rm_market_price_history OHLCV.
     """
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     calc_date = models.DateField()
 
     # --- Trend: Moving Averages ---
@@ -439,7 +439,7 @@ class RegimeSensitivity(models.Model):
     asset_class = models.CharField(max_length=50)
     regime_quadrant = models.CharField(max_length=2)
     sensitivity_multiplier = models.DecimalField(max_digits=5, decimal_places=2)
-    rationale = models.CharField(max_length=200, blank=True)
+    rationale = models.CharField(max_length=500, blank=True)
 
     class Meta:
         db_table = 'rm_regime_sensitivity'
@@ -455,7 +455,7 @@ class PortfolioRiskMetrics(models.Model):
     All monetary values in USD. Computed from rm_security_risk_metrics
     and rm_correlation_matrix using position weights from vw_current_portfolio.
     """
-    entity_type = models.CharField(max_length=20)
+    entity_type = models.CharField(max_length=50)
     # Values: 'account', 'owner', 'portfolio'
     entity_id = models.CharField(max_length=50)
     # account: core_account.account_id string (e.g. 'TAXABLE_TOM_SUSAN')
@@ -502,7 +502,7 @@ class PortfolioRiskMetrics(models.Model):
     # Weight of largest single position as fraction of entity total MV
     top3_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
     top5_weight = models.DecimalField(max_digits=6, decimal_places=4, null=True)
-    top1_symbol = models.CharField(max_length=20, blank=True)
+    top1_symbol = models.CharField(max_length=50, blank=True)
     # Symbol name of largest single position (for display)
 
     # --- HHI Concentration ---
@@ -564,7 +564,7 @@ class SecurityDriver(models.Model):
     These values represent the inherent riskiness of the instrument itself,
     independent of market conditions.
     """
-    symbol = models.CharField(max_length=20, unique=True)
+    symbol = models.CharField(max_length=50, unique=True)
 
     asset_class_baseline = models.DecimalField(max_digits=5, decimal_places=2)
     # Baseline risk score 0–100 for this asset class. Higher = riskier.
@@ -590,7 +590,7 @@ class SecurityDriver(models.Model):
     # True if earnings announcement is within 14 days (updated externally or manually)
     # When True: add earnings_proximity_boost from rm_scoring_config to driver score
 
-    notes = models.CharField(max_length=200, blank=True)
+    notes = models.CharField(max_length=500, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -701,7 +701,7 @@ class StrategyTemplate(models.Model):
     # Values: 'Low', 'Medium', 'High', 'Critical'
     # E.g. 'High,Critical' — only recommend this template for High or Critical urgency.
 
-    applicable_regime_quadrants = models.CharField(max_length=20)
+    applicable_regime_quadrants = models.CharField(max_length=50)
     # Comma-separated list of regime quadrants. 'ALL' means regime-agnostic.
     # E.g. 'Q3,Q4' — only recommend in contraction/stagflation regimes.
     # E.g. 'ALL' — recommend regardless of regime.
@@ -808,9 +808,9 @@ class UrgencyScore(models.Model):
         ('market_condition', 'Market Condition'),
     ]
 
-    entity_type = models.CharField(max_length=20, choices=ENTITY_TYPES)
+    entity_type = models.CharField(max_length=50, choices=ENTITY_TYPES)
     entity_id = models.CharField(max_length=100)
-    symbol = models.CharField(max_length=20, blank=True)
+    symbol = models.CharField(max_length=50, blank=True)
     account_id = models.CharField(max_length=50, blank=True)
     calc_date = models.DateField()
 
@@ -832,7 +832,7 @@ class UrgencyScore(models.Model):
     component_market_score = models.DecimalField(max_digits=6, decimal_places=2, null=True)
 
     # --- Dominant Factor ---
-    dominant_component = models.CharField(max_length=20, blank=True, choices=DOMINANT_COMPONENTS)
+    dominant_component = models.CharField(max_length=50, blank=True, choices=DOMINANT_COMPONENTS)
 
     component_scores_json = models.TextField()
     # Full JSON snapshot for M8 audit trail
@@ -905,7 +905,7 @@ class StrategyRecommendation(models.Model):
     All monetary values in USD.
     """
     # --- Entity identification ---
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     account_id = models.CharField(max_length=50)
     # core_account.account_id string (e.g. 'IB_SUSAN')
     owner = models.CharField(max_length=50)
@@ -981,7 +981,7 @@ class StrategyRecommendation(models.Model):
     # Stored for M8 explainability.
 
     # --- Status ---
-    status = models.CharField(max_length=20, default='active')
+    status = models.CharField(max_length=50, default='active')
     # 'active': current recommendation
     # 'actioned': user has marked this as implemented
     # 'superseded': a newer recommendation replaced this one
@@ -1014,7 +1014,7 @@ class HistoricalScenario(models.Model):
     name = models.CharField(max_length=100, unique=True)
     # Machine-readable name, e.g. '2022_rate_shock', '2020_covid_crash'
 
-    display_name = models.CharField(max_length=200)
+    display_name = models.CharField(max_length=500)
     # Human-readable name, e.g. '2022 Rate Shock (Bank of Canada 425bp hikes)'
 
     start_date = models.DateField()
@@ -1059,7 +1059,7 @@ class BacktestRun(models.Model):
     A single backtest execution record. Append-only — never updated or deleted.
     Links a position, strategy, and historical scenario to produce a BacktestResult.
     """
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     account_id = models.CharField(max_length=50)
     owner = models.CharField(max_length=50)
     strategy_template = models.ForeignKey(
@@ -1189,10 +1189,10 @@ class SimulationRun(models.Model):
         ('custom_stress', 'Custom Stress'),
     ]
 
-    simulation_type = models.CharField(max_length=20, choices=SIMULATION_TYPES)
+    simulation_type = models.CharField(max_length=50, choices=SIMULATION_TYPES)
 
     # --- Scope ---
-    entity_type = models.CharField(max_length=20)
+    entity_type = models.CharField(max_length=50)
     # 'portfolio' | 'account' | 'symbol'
     entity_id = models.CharField(max_length=50)
     # portfolio: 'ALL', account: account_id string, symbol: ticker
@@ -1390,7 +1390,7 @@ class AlertConfig(models.Model):
     # --- Scope filters (NULL = applies to all) ---
     owner = models.CharField(max_length=50, null=True, blank=True)
     account_id = models.CharField(max_length=50, null=True, blank=True)
-    symbol = models.CharField(max_length=20, null=True, blank=True)
+    symbol = models.CharField(max_length=50, null=True, blank=True)
 
     # --- Threshold ---
     threshold_value = models.DecimalField(max_digits=15, decimal_places=4, null=True, blank=True)
@@ -1429,9 +1429,9 @@ class AlertHistory(models.Model):
     triggered_at = models.DateTimeField(auto_now_add=True)
 
     entity_description = models.CharField(max_length=255)
-    entity_type = models.CharField(max_length=20, blank=True)
+    entity_type = models.CharField(max_length=50, blank=True)
     entity_id = models.CharField(max_length=100, blank=True)
-    symbol = models.CharField(max_length=20, blank=True)
+    symbol = models.CharField(max_length=50, blank=True)
 
     trigger_value = models.CharField(max_length=50)
     previous_value = models.CharField(max_length=50, blank=True)
@@ -1497,7 +1497,7 @@ class AuditEntry(ImmutableModel):
     model_name = models.CharField(max_length=50)
     input_snapshot = models.JSONField(default=dict)
     output_summary = models.JSONField(default=dict)
-    status = models.CharField(max_length=20, default='success')
+    status = models.CharField(max_length=50, default='success')
     error_message = models.TextField(blank=True, default='')
 
     class Meta:
@@ -1573,9 +1573,9 @@ class AuditScoreSnapshot(ImmutableModel):
     entity_type = models.CharField(max_length=30)
     # 'security_in_account' | 'account' | 'owner' | 'portfolio'
     entity_id = models.CharField(max_length=100)
-    symbol = models.CharField(max_length=20, blank=True)
+    symbol = models.CharField(max_length=50, blank=True)
     calc_date = models.DateField()
-    urgency_level = models.CharField(max_length=20)
+    urgency_level = models.CharField(max_length=50)
     score_raw = models.DecimalField(max_digits=10, decimal_places=2)
 
     # JSON fields preserving exact state at calculation time
@@ -1606,19 +1606,19 @@ class AuditRecommendationLog(ImmutableModel):
     for each (symbol, account, calc_date). Written by
     calc_strategy_recommendations command.
     """
-    symbol = models.CharField(max_length=20)
+    symbol = models.CharField(max_length=50)
     account_id = models.CharField(max_length=50)
     owner = models.CharField(max_length=50, blank=True)
     calc_date = models.DateField()
 
     # Input state at calculation time
-    input_urgency_level = models.CharField(max_length=20)
+    input_urgency_level = models.CharField(max_length=50)
     input_urgency_score = models.DecimalField(max_digits=10, decimal_places=2)
     input_regime_quadrant = models.CharField(max_length=4)
 
     # Template info
     strategy_template_code = models.CharField(max_length=50)
-    strategy_template_name = models.CharField(max_length=200, blank=True)
+    strategy_template_name = models.CharField(max_length=500, blank=True)
 
     # Eligibility
     was_eligible = models.BooleanField()
@@ -1669,13 +1669,13 @@ class AuditSimulationRun(ImmutableModel):
     source_run_id = models.IntegerField()
     # FK to the primary result table (BacktestRun.id / SimulationRun.id)
 
-    symbol = models.CharField(max_length=20, blank=True)
+    symbol = models.CharField(max_length=50, blank=True)
     account_id = models.CharField(max_length=50, blank=True)
     entity_type = models.CharField(max_length=30, blank=True)
     entity_id = models.CharField(max_length=100, blank=True)
 
     strategy_template_code = models.CharField(max_length=50, blank=True)
-    scenario_name = models.CharField(max_length=200, blank=True)
+    scenario_name = models.CharField(max_length=500, blank=True)
 
     parameters_json = models.JSONField(default=dict)
     summary_json = models.JSONField(default=dict)

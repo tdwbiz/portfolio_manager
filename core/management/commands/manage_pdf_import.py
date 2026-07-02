@@ -178,6 +178,10 @@ class Command(BaseCommand):
         duplicates_skipped = 0
         errors = 0
 
+        # Initialize JSON output directory (used in summary)
+        json_dir = Path(getattr(settings, 'IMPORT_JSON_DIR', settings.BASE_DIR / 'processed' / 'json_logs'))
+        json_dir.mkdir(parents=True, exist_ok=True)
+
         for pdf_file in pdf_files:
             files_processed += 1
             self.stdout.write(f'Processing: {pdf_file.name}')
@@ -353,8 +357,6 @@ class Command(BaseCommand):
                 )
 
             # Save JSON output for this PDF
-            json_dir = Path(getattr(settings, 'IMPORT_JSON_DIR', settings.BASE_DIR / 'processed' / 'json_logs'))
-            json_dir.mkdir(parents=True, exist_ok=True)
             json_filename = pdf_file.stem + '.json'
             json_path = json_dir / json_filename
 

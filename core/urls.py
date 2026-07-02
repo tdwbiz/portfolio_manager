@@ -4,6 +4,7 @@ from imports import views as import_views
 
 # Authentication views
 from .views_auth import login, logout
+from .views import health_check
 
 # Account views
 from .views_accounts import accounts_list, account_detail, account_create, account_edit, account_delete
@@ -41,4 +42,5 @@ urlpatterns = [
     path('pdf-import/', import_views.pdf_import_view, name='pdf_import'),
     path('annual-report-import/', import_views.annual_report_import_view, name='annual_report_import'),
     path('annual-reports/', annual_reports_view, name='annual_reports'),
+    path('health/', health_check, name='health_check'),
 ]

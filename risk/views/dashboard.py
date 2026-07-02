@@ -51,7 +51,7 @@ def dashboard(request):
     show_excluded = get_show_excluded(request)
 
     if not calc_date:
-        # No risk data calculated yet
+        # Risk features not yet calculated — show "Coming Soon"
         context = {
             'calc_date': None,
             'show_excluded': show_excluded,
@@ -64,6 +64,7 @@ def dashboard(request):
             'top_ugl_positions': [],
             'account_scores': [],
             'index_concentration': {},
+            'coming_soon': True,
         }
         return render(request, 'risk/dashboard.html', context)
 

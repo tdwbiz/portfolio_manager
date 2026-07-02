@@ -9,7 +9,7 @@ from django.shortcuts import render, redirect
 from django.conf import settings
 from django.core.cache import cache
 
-from core.views import _get_client_ip, _check_login_attempts, _record_login_attempt
+from core.views import _get_client_ip, _check_login_attempts, _record_login_attempt, is_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def login(request):
             logger.info(f'User {username} logged in successfully from IP: {client_ip}')
             next_url = request.POST.get('next', '/')
             # SECURITY: Validate redirect URL to prevent open redirect
-            if next_url.startswith('/'):
+            if is_safe_url(next_url):
                 return redirect(next_url)
             return redirect('/')
         else:

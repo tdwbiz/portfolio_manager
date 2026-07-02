@@ -3,8 +3,9 @@
 import logging
 from pathlib import Path
 
-from django.shortcuts import render, redirect
 from django.conf import settings
+from django.core.cache import cache
+from django.shortcuts import render, redirect
 from decimal import Decimal
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
@@ -13,6 +14,33 @@ from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 
 logger = logging.getLogger(__name__)
+
+# Upload rate limit: max uploads per user per hour
+UPLOAD_RATE_LIMIT = 10
+UPLOAD_RATE_WINDOW = 3600  # 1 hour in seconds
+
+
+def _check_upload_rate_limit(user_id: str) -> bool:
+    """Check if user has exceeded upload rate limit.
+
+    Args:
+        user_id: Identifier for the user (username or IP if anonymous).
+
+    Returns:
+        True if within rate limit, False if exceeded.
+    """
+    cache_key = f'upload_rate:{user_id}'
+    uploads = cache.get(cache_key, 0)
+    if uploads >= UPLOAD_RATE_LIMIT:
+        return False
+    return True
+
+
+def _record_upload(user_id: str):
+    """Record an upload for rate limiting."""
+    cache_key = f'upload_rate:{user_id}'
+    uploads = cache.get(cache_key, 0)
+    cache.set(cache_key, uploads + 1, UPLOAD_RATE_WINDOW)
 
 
 def save_uploaded_pdf(uploaded_file):
@@ -51,10 +79,18 @@ def pdf_import_view(request):
     context = {}
 
     if request.method == 'POST':
+        # Rate limit check
+        user_id = request.user.username if request.user.is_authenticated else request.META.get('REMOTE_ADDR', 'anonymous')
+        if not _check_upload_rate_limit(user_id):
+            context['error'] = f'Too many uploads. Maximum {UPLOAD_RATE_LIMIT} uploads per hour allowed.'
+            context['rbc_monthly_statements'] = RbcMonthly.objects.select_related('account').all()
+            return render(request, 'core/pdf_import.html', context)
+
         uploaded_file = request.FILES.get('pdf_file')
         if not uploaded_file:
             context['error'] = 'No file uploaded.'
         else:
+            _record_upload(user_id)
             try:
                 temp_path = save_uploaded_pdf(uploaded_file)
             except ValueError as e:
@@ -171,10 +207,17 @@ def annual_report_import_view(request):
     context = {}
 
     if request.method == 'POST':
+        # Rate limit check
+        user_id = request.user.username if request.user.is_authenticated else request.META.get('REMOTE_ADDR', 'anonymous')
+        if not _check_upload_rate_limit(user_id):
+            context['error'] = f'Too many uploads. Maximum {UPLOAD_RATE_LIMIT} uploads per hour allowed.'
+            return render(request, 'core/annual_report_import.html', context)
+
         uploaded_file = request.FILES.get('pdf_file')
         if not uploaded_file:
             context['error'] = 'No file uploaded.'
         else:
+            _record_upload(user_id)
             try:
                 temp_path = save_uploaded_pdf(uploaded_file)
             except ValueError as e:

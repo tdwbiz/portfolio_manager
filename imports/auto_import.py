@@ -1,42 +1,68 @@
-"""Automated import script for broker statements."""
+"""Automated import script for broker statements.
+
+REQUIRES Django to be configured (e.g., via python manage.py auto_import).
+This file does NOT configure Django itself — it expects the project's
+settings to already be loaded.
+"""
 
 import hashlib
 import logging
 import os
-from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.management import call_command
+from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 from django.db import transaction
 
-# Setup Django environment
-import django
+# Verify Django is configured
 if not settings.configured:
-    settings.configure(
-        DEBUG=True,
-        DATABASES={
-            'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
-                'NAME': ':memory:',
-            }
-        },
-        INSTALLED_APPS=[
-            'django.contrib.contenttypes',
-            'django.contrib.auth',
-            'core',
-            'imports',
-        ],
-        ROOT_URLCONF='',
-        USE_TZ=True,
+    raise ImproperlyConfigured(
+        "Django is not configured. Run this script via: python manage.py auto_import"
     )
-django.setup()
 
-from core.models import BrokerStatement, Transaction, Account, FileImportLog
+from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
+import re
+from datetime import date
 
 logger = logging.getLogger(__name__)
+
+
+def extract_statement_date(content: str) -> date | None:
+    """Extract statement date from CSV content using regex.
+
+    Tries multiple common date patterns found in broker CSV headers.
+
+    Args:
+        content: Raw CSV file content as string.
+
+    Returns:
+        Extracted date or None if not found.
+    """
+    # Pattern 1: "Statement Date: MM/DD/YYYY" or "Statement Date: MM-DD-YYYY"
+    patterns = [
+        r'Statement\s+Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        r'Statement\s+Period[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        r'Period\s+End[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        r'Report\s+Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+        r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',  # YYYY-MM-DD or YYYY/MM/DD
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            date_str = match.group(1).replace('/', '-')
+            try:
+                parts = date_str.split('-')
+                if len(parts) == 3:
+                    # Handle YYYY-MM-DD vs MM-DD-YYYY
+                    if len(parts[0]) == 4:
+                        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    else:
+                        return date(int(parts[2]), int(parts[0]), int(parts[1]))
+            except (ValueError, IndexError):
+                continue
+    return None
 
 
 def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
@@ -113,22 +139,24 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                 else:
                     account = None
 
-                # Check for duplicates (including account)
-                try:
-                    existing = Transaction.objects.get(
-                        statement__source=broker,
-                        date=trade['date'],
-                        symbol=trade['symbol'],
-                        type=trade['type'],
-                        quantity=trade['quantity'],
-                        price=trade['price'],
-                        account__account_id=account_id if account_id else '',
-                    )
-                    logger.debug(f"Duplicate transaction found: {existing}")
+                # Compute tx_hash for deduplication
+                tx_hash = compute_tx_hash(
+                    broker=broker,
+                    account_id=account_id,
+                    date=trade['date'],
+                    symbol=trade['symbol'],
+                    tx_type=trade['type'],
+                    quantity=trade['quantity'],
+                    price=trade['price'],
+                    amount=trade['amount'],
+                    currency=trade.get('currency', 'USD'),
+                )
+
+                # Check for duplicate by tx_hash
+                if Transaction.objects.filter(tx_hash=tx_hash).exists():
+                    logger.debug(f"Duplicate transaction (hash match): {tx_hash}")
                     skipped_count += 1
                     continue
-                except Transaction.DoesNotExist:
-                    pass
 
                 # Create transaction
                 try:
@@ -150,6 +178,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                         currency=trade.get('currency', 'USD'),
                         exchange_rate_cad=rate,
                         amount_cad=amount_cad,
+                        tx_hash=tx_hash,
                     )
                     imported_count += 1
                 except Exception as e:

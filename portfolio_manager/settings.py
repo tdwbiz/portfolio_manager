@@ -120,6 +120,16 @@ DATABASES = {
     }
 }
 
+# Use SQLite for testing when running `manage.py test`
+# This avoids MSSQL permission issues with test database creation
+if os.getenv('DJANGO_TESTING'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {

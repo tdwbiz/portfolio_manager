@@ -7,13 +7,60 @@ Used by both:
 
 import logging
 import os
+import re
 import threading
 import time
+
+import fitz  # PyMuPDF
 
 from django.conf import settings
 from django.core.management import call_command
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_pdf(file_path: str) -> str:
+    """Classify a PDF file by examining its content (not just filename).
+
+    Reads the first page's text and looks for keywords to determine if it's
+    an annual report or a monthly statement.
+
+    Args:
+        file_path: Path to the PDF file.
+
+    Returns:
+        'annual' or 'statement'.
+    """
+    try:
+        doc = fitz.open(file_path)
+        first_page = doc[0]
+        text = first_page.get_text().lower()
+        doc.close()
+
+        annual_keywords = ['annual report', 'annual summary', 'year-end', 'annual performance']
+        statement_keywords = ['monthly statement', 'statement', 'as of', 'period end']
+
+        for kw in annual_keywords:
+            if kw in text:
+                return 'annual'
+
+        for kw in statement_keywords:
+            if kw in text:
+                return 'statement'
+
+        # Fallback: check filename
+        basename = os.path.basename(file_path).lower()
+        if 'annual' in basename:
+            return 'annual'
+
+    except Exception as e:
+        logger.warning(f"_classify_pdf: failed to read {file_path}: {e}")
+
+    # Default fallback to filename-based classification
+    basename = os.path.basename(file_path).lower()
+    if 'annual' in basename:
+        return 'annual'
+    return 'statement'
 
 
 def _poll_once(inbox_dir: str) -> None:
@@ -29,9 +76,17 @@ def _poll_once(inbox_dir: str) -> None:
         except Exception as e:
             logger.error(f"watcher: auto_import failed: {e}")
     if all_pdf_files:
-        # Separate annual reports from statement PDFs
-        annual_files = [f for f in all_pdf_files if f.lower().startswith('annual report')]
-        statement_files = [f for f in all_pdf_files if not f.lower().startswith('annual report')]
+        # Classify PDFs by content (not just filename)
+        annual_files = []
+        statement_files = []
+        for f in all_pdf_files:
+            full_path = os.path.join(inbox_dir, f)
+            classification = _classify_pdf(full_path)
+            if classification == 'annual':
+                annual_files.append(f)
+            else:
+                statement_files.append(f)
+
         if annual_files:
             logger.info(f"watcher: found {len(annual_files)} Annual Report PDF(s) — running annual report import")
             try:

@@ -2,11 +2,13 @@
 
 ## Environment
 - **Python:** `C:\AI-DevTeam\ai-env\Scripts\python.exe`
-- **Virtual env:** `C:\AI-DevTeam\ai-env\`
+- **Virtual env:** `C:\AI-DevTeam\ai-env\` — **this is the ONLY virtual environment. DO NOT create or use any other venv.**
 - **Django:** 5.1.15
 - **Production DB:** MSSQL (configured in `settings.py`)
 - **Test DB:** SQLite in-memory (`settings_test.py`)
 - **Terminal shell:** PowerShell (`pwsh`) — do NOT use bash
+
+> **Note:** The `venv/` folder in this project has been removed. Always use `ai-env` for everything.
 
 ## Key Commands
 ```powershell

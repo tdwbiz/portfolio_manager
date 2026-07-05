@@ -45,9 +45,20 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 - `main` — production
 - Feature branches: `feature/phase*-...`, `feature_misc_outstanding_items`
 
-## Phase D (In Progress)
-Implementation plan at `specs/PhaseD/PHASED_IMPLEMENTATION_PLAN.md`
-Items: D1 (Portfolio Summary), D2 (Performance Chart), D3 (Dashboard Summary), D4 (Total Return), D5 (Branding), D6 (Top Movers), D7 (Dividends Tracker)
+## Phase D (COMPLETE)
+**All 7 items implemented and tested (122/122 tests pass, 0 regressions).**
+- D1: Portfolio Summary — account/category subtotals, allocation %, currency breakdown (`portfolio_summary.html`, `group_positions_by_account`, `group_positions_by_category`)
+- D2: Performance Chart — cost basis, benchmark, income overlay, date range, chart type selector (`portfolio_chart.html`, `compute_cost_basis_series`, `compute_income_series`, `compute_series_by_account`)
+- D3: Dashboard Dollar Summary — market value, P&L, YTD income cards (`dashboard.html`, dashboard view)
+- D4: Total Return — realised + income + return cards (`portfolio_summary.html`, row 2)
+- D5: Brand & UI — `tsmoney.css`, favicon, site banner, footer, `.page-header` on all templates, `:root` CSS variables
+- D6: Top Movers — gainers/losers widget on dashboard (`get_top_movers` in `core/utils/portfolio.py`)
+- D7: Dividends Tracker — `DividendSchedule` model, `get_upcoming_dividends`, upcoming dividends widget on dashboard
+
+**Branch:** `feature_misc_outstanding_items` (merged to `dev`)
+
+## Phase D History
+Phase D was implemented in a previous session. The code, views, templates, models, and tests were already present when we started `feature_phaseD_coding`. We verified all 122 tests pass with 0 regressions. No new code was written — only infrastructure (AGENTS.md, global_agents.md, zed settings, ai-env config, migration 0016).
 
 ## Memory & Skill Management
 

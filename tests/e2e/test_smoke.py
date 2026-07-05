@@ -2,7 +2,7 @@
 Comprehensive smoke tests for the portfolio_manager application.
 Quick health checks to verify the application is running and responsive.
 """
-import pytest
+
 import time
 
 
@@ -19,7 +19,7 @@ class TestSmoke:
         try:
             page.goto("/health/")
             assert page.response_status() == 200
-        except:
+        except Exception:
             # Health endpoint may not exist
             pass
 
@@ -28,7 +28,7 @@ class TestSmoke:
         page.goto("/")
         # Check if CSS and JS load
         css_links = page.query_selector_all('link[rel="stylesheet"]')
-        js_scripts = page.query_selector_all('script[src]')
+        js_scripts = page.query_selector_all("script[src]")
         # At least some assets should be present
         assert len(css_links) + len(js_scripts) > 0
 
@@ -49,6 +49,8 @@ class TestSmoke:
     def test_no_console_errors(self, page):
         """Test that there are no JavaScript console errors on homepage."""
         errors = []
-        page.on("console", lambda msg: errors.append(msg) if msg.type == "error" else None)
+        page.on(
+            "console", lambda msg: errors.append(msg) if msg.type == "error" else None
+        )
         page.goto("/")
         assert len(errors) == 0, f"Console errors detected: {[e.text for e in errors]}"

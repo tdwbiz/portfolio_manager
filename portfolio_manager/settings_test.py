@@ -1,21 +1,21 @@
 """Test settings — uses SQLite so tests run without an MSSQL server."""
 
+import tempfile
+
 from .settings import *  # noqa: F401,F403
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ':memory:',
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": ":memory:",
     }
 }
 
 # Amibroker export watch folder (temp dir for tests)
-import tempfile
-
-AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix='amibroker_')
+AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix="amibroker_")
 
 # VL model settings for tests
-VL_MODEL_BASE_URL = 'http://localhost:11440/v1'
+VL_MODEL_BASE_URL = "http://localhost:11440/v1"
 
 # yFinance fetch settings
 YFINANCE_DEFAULT_HISTORY_YEARS = 10

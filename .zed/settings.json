@@ -1,0 +1,23 @@
+{
+  "languages": {
+    "Python": {
+      "language_servers": ["pyright", "ruff", "default"]
+    }
+  },
+  "lsp": {
+    "pyright": {
+      "settings": {
+        "pyright.disableCustomTypeVars": false,
+        "python.analysis": {
+          "autoImportCompletions": true,
+          "autoSearchPaths": true,
+          "extraPaths": [
+            "C:/AI-DevTeam/ai-env/Lib/site-packages"
+          ],
+          "typeCheckingMode": "basic",
+          "stubPath": "typings"
+        }
+      }
+    }
+  }
+}

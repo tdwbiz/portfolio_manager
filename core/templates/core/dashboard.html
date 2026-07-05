@@ -8,6 +8,89 @@
     <p class="text-muted">Welcome to your portfolio management dashboard</p>
 </div>
 
+<!-- Dollar Summary Cards (D3) -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <i class="bi bi-currency-exchange" style="font-size: 2rem; color: var(--primary-color);"></i>
+                <div class="stat-label mt-2">Total Market Value (CAD)</div>
+                <div class="stat-value">${{ total_market_value_cad|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <i class="bi bi-graph-up" style="font-size: 2rem; color: {% if total_unrealised_pnl_cad >= 0 %}var(--success-color){% else %}var(--danger-color){% endif %};"></i>
+                <div class="stat-label mt-2">Unrealised P&L (CAD)</div>
+                <div class="stat-value {% if total_unrealised_pnl_cad >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    ${{ total_unrealised_pnl_cad|floatformat:2 }}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <i class="bi bi-piggy-bank" style="font-size: 2rem; color: var(--success-color);"></i>
+                <div class="stat-label mt-2">YTD Income (CAD)</div>
+                <div class="stat-value text-success">${{ ytd_income_cad|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Top Movers Widget (D6) -->
+{% if top_movers.gainers or top_movers.losers %}
+<div class="row g-4 mb-4">
+    {% if top_movers.gainers %}
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-trophy"></i> Top Gainers (30d)
+            </div>
+            <table class="table table-sm mb-0">
+                <thead></thead>
+                    <tr><th>Symbol</th><th class="text-end">Change</th></tr>
+                </thead>
+                <tbody>
+                    {% for m in top_movers.gainers %}
+                    <tr>
+                        <td><strong>{{ m.symbol }}</strong></td>
+                        <td class="text-success text-end">+{{ m.pct_change|floatformat:1 }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    {% if top_movers.losers %}
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-danger text-white">
+                <i class="bi bi-arrow-down-circle"></i> Top Losers (30d)
+            </div>
+            <table class="table table-sm mb-0">
+                <thead>
+                    <tr><th>Symbol</th><th class="text-end">Change</th></tr>
+                </thead>
+                <tbody>
+                    {% for m in top_movers.losers %}
+                    <tr>
+                        <td><strong>{{ m.symbol }}</strong></td>
+                        <td class="text-danger text-end">{{ m.pct_change|floatformat:1 }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- Statistics Cards -->
 <div class="row g-4 mb-4">
     <div class="col-md-4">
@@ -199,4 +282,51 @@
         </div>
     </div>
 </div>
+
+<!-- Upcoming Dividends Widget (D7) -->
+{% if upcoming_dividends %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-calendar-event"></i> Upcoming Dividends (Next 30 Days)
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Pay Date</th>
+                                <th>Shares</th>
+                                <th>Per Share (CAD)</th>
+                                <th class="text-end">Total (CAD)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in upcoming_dividends %}
+                            <tr>
+                                <td><strong>{{ d.symbol }}</strong></td>
+                                <td><span class="badge bg-info">{{ d.type_display }}</span></td>
+                                <td>{{ d.pay_date|date:"M d, Y" }}</td>
+                                <td>{{ d.shares_held|floatformat:0 }}</td>
+                                <td>${{ d.amount_cad|floatformat:4 }}</td>
+                                <td class="text-success text-end"><strong>${{ d.total_cad|floatformat:2 }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-light">
+                                <td colspan="5" class="text-end"><strong>Total Expected (CAD):</strong></td>
+                                <td class="text-success text-end"><strong>${{ total_upcoming_cad|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

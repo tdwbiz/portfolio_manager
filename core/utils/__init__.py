@@ -15,32 +15,34 @@ Modules:
 
 # From currencies.py
 from .currencies import (
-    POSITION_TRANSACTION_TYPES,
     CASH_EQUIV_CAD,
     CASH_EQUIV_USD,
+    POSITION_TRANSACTION_TYPES,
 )
 
 # From dates.py
 from .dates import generate_date_series
 
-# From prices.py
-from .prices import (
-    load_prices_from_db,
-    load_prices_from_yfinance,
-    fetch_last_prices,
-    enrich_positions_with_prices,
-)
-
 # From portfolio.py
 from .portfolio import (
-    compute_portfolio_value_series,
-    compute_realised_pnl,
     compute_cost_basis_series,
     compute_income_series,
-    compute_series_by_account,
+    compute_portfolio_value_series,
     compute_positions,
+    compute_realised_pnl,
+    compute_series_by_account,
+    get_top_movers,
+    get_upcoming_dividends,
     group_positions_by_account,
     group_positions_by_category,
+)
+
+# From prices.py
+from .prices import (
+    enrich_positions_with_prices,
+    fetch_last_prices,
+    load_prices_from_db,
+    load_prices_from_yfinance,
 )
 
 # Backward-compatibility aliases for functions that had leading underscores
@@ -51,27 +53,28 @@ _load_prices_from_yfinance = load_prices_from_yfinance
 
 __all__ = [
     # currencies
-    'POSITION_TRANSACTION_TYPES',
-    'CASH_EQUIV_CAD',
-    'CASH_EQUIV_USD',
+    "POSITION_TRANSACTION_TYPES",
+    "CASH_EQUIV_CAD",
+    "CASH_EQUIV_USD",
     # dates
-    'generate_date_series',
-    '_generate_date_series',
+    "generate_date_series",
+    "_generate_date_series",
     # prices
-    'load_prices_from_db',
-    'load_prices_from_yfinance',
-    'fetch_last_prices',
-    'enrich_positions_with_prices',
-    '_load_prices_from_db',
-    '_load_prices_from_yfinance',
+    "load_prices_from_db",
+    "load_prices_from_yfinance",
+    "fetch_last_prices",
+    "enrich_positions_with_prices",
+    "_load_prices_from_db",
+    "_load_prices_from_yfinance",
     # portfolio
-    'compute_portfolio_value_series',
-    'compute_realised_pnl',
-    'compute_cost_basis_series',
-    'compute_income_series',
-    'compute_series_by_account',
-    'compute_positions',
-    'group_positions_by_account',
-    'group_positions_by_category',
+    "compute_portfolio_value_series",
+    "compute_realised_pnl",
+    "compute_cost_basis_series",
+    "compute_income_series",
+    "compute_series_by_account",
+    "compute_positions",
+    "group_positions_by_account",
+    "group_positions_by_category",
+    "get_top_movers",
+    "get_upcoming_dividends",
 ]
-

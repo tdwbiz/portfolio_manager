@@ -1,6 +1,6 @@
 # Phase E — Implementation Plan
 
-**Goal:** Fix symbol resolution for yfinance and implement configurable fixed-price handling.
+**Goal:** Fix symbol resolution for yfinance, implement fixed-price handling, and reconcile CSV transactions with RBC PDF data.
 
 ---
 
@@ -8,80 +8,144 @@
 
 | # | Item | Spec | Priority | Effort |
 |---|------|------|----------|--------|
-| E1 | Symbol resolution function + SecurityUniverse integration | 01_symbol_resolution_and_fixed_prices | 🔴 High | 1 session |
-| E2 | FixedPriceConfig model + admin UI (Option A) | 01_symbol_resolution_and_fixed_prices | 🟡 Medium | 0.5 session |
+| E1 | Symbol resolution + fixed prices | 01_symbol_resolution_and_fixed_prices | 🔴 High | 1 session |
+| E3-A | Gap analysis report | 02_transaction_reconciliation_and_statement_generation | 🟡 Medium | 0.5 session |
+| E3-B | Generate monthly statements from transactions | 02_transaction_reconciliation_and_statement_generation | 🔴 High | 1 session |
+| E3-C | Generate annual reports from transactions | 02_transaction_reconciliation_and_statement_generation | 🟡 Medium | 0.5 session |
+| E3-D | Reconciliation engine (CSV vs RBC PDF) | 02_transaction_reconciliation_and_statement_generation | 🔴 High | 1.5 sessions |
+
+**Estimated total: ~5 sessions**
 
 ---
 
-## Execution Order: E1 → E2
-
-E1 depends on SecurityUniverse being readable. E2 is independent but builds on E1's pattern.
+## Execution Order: E1 → E3-A → E3-B → E3-C → E3-D
 
 ---
 
 ## Detailed Breakdown
 
-### E1: Symbol Resolution
+### E1: Symbol Resolution + Fixed Prices
+
+**Spec:** `01_symbol_resolution_and_fixed_prices.md`
 
 **What to build:**
-- `resolve_yahoo_symbol(symbol, primary_currency)` in `core/utils/prices.py`
-- `get_fixed_price(symbol)` in `core/utils/prices.py` — queries SecurityUniverse or FixedPriceConfig
-- Update `fetch_last_prices()` to resolve symbols before yfinance calls
-- Update `load_prices_from_yfinance()` to resolve symbols before yf.download()
-- Update `get_top_movers()` in `core/utils/portfolio.py`
+- `resolve_yahoo_symbol(symbol, primary_currency)` — adds `.TO` for CAD symbols
+- `FixedPriceConfig` model (in `core/models.py`) — configurable fixed prices, admin editable
+- `get_fixed_price(symbol)` — returns fixed price from model, skips yfinance
+- Update `fetch_last_prices()`, `load_prices_from_yfinance()`, `get_top_movers()` to use resolution
 
 **Key logic:**
-```python
-def resolve_yahoo_symbol(symbol, primary_currency=None):
-    # If primary_currency is CAD and no suffix → append .TO
-    # If primary_currency is USD → return as-is
-    # If already has suffix (e.g., .TO, .X) → return as-is
-    # If symbol is fixed-price → return None
+```
+CAD symbol (VDY) → VDY.TO (for yfinance)
+USD symbol (AAPL) → AAPL (no change)
+Already suffixed (VFV.TO) → VFV.TO (no change)
+Fixed price (RBF2010) → return Decimal('10.00'), skip yfinance
 ```
 
-### E2: FixedPriceConfig Model (Option A — Chosen)
+---
 
-**Model** (in `core/models.py`):
-```python
-class FixedPriceConfig(models.Model):
-    symbol = models.CharField(max_length=50, unique=True)
-    price_cad = models.DecimalField(max_digits=12, decimal_places=6, default=0)
-    price_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
-    currency = models.CharField(max_length=3, default='CAD')
-    notes = models.TextField(blank=True)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-```
+### E3-A: Gap Analysis Report
 
-**Admin** (in `core/admin.py`): Register with symbol, currency, price_cad, price_usd fields. Pre-populate with RBF2010 (CAD 10) and RBF2014 (USD 10).
+**Spec:** `02_transaction_reconciliation_and_statement_generation.md`
+
+**What to build:**
+- View `gap_analysis()` — shows per-account completeness metrics
+- Template `gap_analysis.html` — table with earliest dates, gap counts, coverage %
+- URL: `/accounts/gap-analysis/`
+- **No new models** — reads existing `core_transaction` and `core_rbc_*` tables
+
+**Output columns:**
+- account_id, earliest_csv_date, earliest_continuous_start/end, days_missing_continuous, earliest_rbc_dates, csv_coverage_pct
+
+---
+
+### E3-B: Monthly Statement Generation
+
+**Spec:** `02_transaction_reconciliation_and_statement_generation.md`
+
+**What to build:**
+- New model `CoreMonthlyStatement` — one row per (account, month, currency)
+- Fields: beginning/ending market value, buys, sells, dividends, interest, commission, net flow
+- New management command `generate_monthly_statements`
+- New view `generate_monthly_statements()` — UI to trigger generation
+- New utility function in `core/utils/statements.py`
+
+**Generation logic:**
+1. Group transactions by account, month, currency
+2. Compute beginning MV from prior month's ending MV
+3. Sum buys, sells, income, commission for each month
+4. Store in `CoreMonthlyStatement`
+
+---
+
+### E3-C: Annual Report Generation
+
+**Spec:** `02_transaction_reconciliation_and_statement_generation.md`
+
+**What to build:**
+- New model `CoreAnnualReport` — one row per (account, year, currency)
+- Fields: beginning/ending value, deposits, withdrawals, net return, invested amount
+- New management command `generate_annual_reports`
+- New view `generate_annual_reports()` — UI to trigger generation
+- Aggregates from `CoreMonthlyStatement` (not raw transactions)
+
+---
+
+### E3-D: Reconciliation Engine
+
+**Spec:** `02_transaction_reconciliation_and_statement_generation.md`
+
+**What to build:**
+- New model `CoreReconciliation` — tracks matches/discrepancies
+- Fields: CSV values vs RBC values for beginning/ending, buys/sells, income, transactions
+- Fields: matching (bool), discrepancy_amount, discrepancy_notes
+- New management command `reconcile`
+- New view `reconcile_account()` — UI to trigger reconciliation
+- New utility function in `core/utils/reconciliation.py`
+- Gap filling strategy: flag CSV gaps where RBC has data
+
+**Reconciliation logic:**
+1. Load CSV-generated monthly/annual statements
+2. Load RBC PDF monthly/annual statements
+3. Compare values month/quarter
+4. Record matches and discrepancies
+5. Flag gaps requiring manual review
 
 ---
 
 ## Testing
 
-| D1: ~5 new tests in `core/tests/test_prices.py`
-| D2: ~2 new tests (model admin + CRUD)
+| Item | Tests |
+|------|-------|
+| E1 | ~5 new tests in `core/tests/test_prices.py` |
+| E3-A | ~3 new tests (gap analysis edge cases) |
+| E3-B | ~3 new tests (single month, multi-month, idempotent) |
+| E3-C | ~1 new test (annual aggregation) |
+| E3-D | ~5 new tests (match, discrepancy, RBC-only, CSV-only, gap flagging) |
 
-**Total: ~7 new tests**
+**Total: ~17 new tests**
 
 ---
 
 ## Migration Impact
 
-- **E1:** No migration needed (code-only)
-- **E2:** Yes — new `FixedPriceConfig` model requires migration
+| Item | Migration |
+|------|-----------|
+| E1 | No migration (code-only) |
+| E3-A | No migration (report only) |
+| E3-B | Yes — `CoreMonthlyStatement` model |
+| E3-C | Yes — `CoreAnnualReport` model |
+| E3-D | Yes — `CoreReconciliation` model |
 
 ---
 
 ## Success Criteria
 
-1. `VDY` resolves to `VDY.TO` when `primary_currency='CAD'`
-2. `AAPL` stays `AAPL` when `primary_currency='USD'`
-3. `VFV.TO` stays `VFV.TO` (already suffixed)
-4. `RBF2010` returns fixed CAD 10 without yfinance
-5. `RBF2014` returns fixed USD 10 without yfinance
-6. All 122 existing tests pass
-7. 7+ new tests pass
-8. No more "No price available for VDY" warnings
-9. Admin can add/edit/remove fixed-price entries
+1. `VDY` resolves to `VDY.TO` for yfinance queries
+2. `RBF2010` returns CAD 10 from `FixedPriceConfig`, no yfinance call
+3. Gap analysis shows earliest dates and missing day counts per account
+4. Monthly statements generated from transactions with correct beginning/ending values
+5. Annual reports aggregated from monthly statements
+6. Reconciliation identifies matches and discrepancies between CSV and RBC data
+7. All 122 existing tests pass + 17 new tests pass = 139 total
+8. No regressions

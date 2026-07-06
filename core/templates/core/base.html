@@ -1,195 +1,399 @@
 {% load static %}
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ branding.company_name }}{% endblock %}</title>
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/jpeg" href="{% static 'core/img/tsmoney_icon.jpg' %}">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>
+            {% block title %}{{ branding.company_name }}{% endblock %}
+        </title>
 
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <!-- TS Money brand stylesheet -->
-    <link rel="stylesheet" href="{% static 'core/css/tsmoney.css' %}">
+        <!-- Favicon -->
+        <link
+            rel="icon"
+            type="image/jpeg"
+            href="{% static 'core/img/tsmoney_icon.jpg' %}"
+        />
 
-    <style>
-      /* Dynamic CSS variables from BrandingConfig — override brand defaults if admin changed them */
-      :root {
-        --primary-color: {{ branding.primary_color }};
-        --secondary-color: {{ branding.secondary_color }};
-        --success-color: {{ branding.success_color }};
-        --danger-color: {{ branding.danger_color }};
-        --navbar-bg: {{ branding.navbar_bg_color }};
-        --navbar-text: {{ branding.navbar_text_color }};
-        --footer-bg: {{ branding.footer_bg_color }};
-      }
-    </style>
+        <!-- Bootstrap 5 CSS -->
+        <link
+            href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+            rel="stylesheet"
+        />
+        <!-- Bootstrap Icons -->
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css"
+        />
+        <!-- Chart.js -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <!-- TS Money brand stylesheet -->
+        <link rel="stylesheet" href="{% static 'core/css/tsmoney.css' %}" />
 
-    {% block extra_css %}{% endblock %}
-</head>
-<body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="{% url 'dashboard' %}">
-                {% if branding.show_logo and branding.company_logo_url %}
-                <img src="{{ branding.company_logo_url }}" alt="{{ branding.company_name }}">
-                {% endif %}
-                {{ branding.company_name }}
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
-                            <i class="bi bi-speedometer2"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'portfolio_summary' %}active{% endif %}" href="{% url 'portfolio_summary' %}">
-                            <i class="bi bi-briefcase"></i> Portfolio
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'portfolio_chart' %}active{% endif %}" href="{% url 'portfolio_chart' %}">
-                            <i class="bi bi-graph-up"></i> Performance
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'realised_pnl' %}active{% endif %}" href="{% url 'realised_pnl' %}">
-                            <i class="bi bi-cash-coin"></i> Realised P&L
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'income_summary' %}active{% endif %}" href="{% url 'income_summary' %}">
-                            <i class="bi bi-piggy-bank"></i> Income
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'transaction_list' %}active{% endif %}" href="{% url 'transaction_list' %}">
-                            <i class="bi bi-list-check"></i> Transactions
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'accounts_list' %}active{% endif %}" href="{% url 'accounts_list' %}">
-                            <i class="bi bi-bank"></i> Accounts
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'import_history' %}active{% endif %}" href="{% url 'import_history' %}">
-                            <i class="bi bi-upload"></i> Import History
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.resolver_match.url_name == 'annual_reports' %}active{% endif %}" href="{% url 'annual_reports' %}">
-                            <i class="bi bi-file-earmark-text"></i> Annual Reports
-                        </a>
-                    </li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="riskDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-exclamation-triangle"></i> Risk
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="riskDropdown">
-                            <li><a class="dropdown-item" href="{% url 'risk:dashboard' %}"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
-                            <li><a class="dropdown-item" href="{% url 'risk:heatmap' %}"><i class="bi bi-grid-3x3"></i> Heat Map</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{% url 'risk:owner_summary' 'TOM' %}"><i class="bi bi-person"></i> TOM Summary</a></li>
-                            <li><a class="dropdown-item" href="{% url 'risk:owner_summary' 'SUSAN' %}"><i class="bi bi-person"></i> SUSAN Summary</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="reportsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="reportsDropdown">
-                            <li><a class="dropdown-item" href="{% url 'realised_pnl' %}"><i class="bi bi-cash-coin"></i> Realised P&L</a></li>
-                            <li><a class="dropdown-item" href="{% url 'income_summary' %}"><i class="bi bi-piggy-bank"></i> Income Summary</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{% url 'tax_summary' %}"><i class="bi bi-receipt"></i> Annual Tax Summary</a></li>
-                        </ul>
-                    </li>
-                    {% if user.is_staff %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="/admin/" target="_blank">
-                            <i class="bi bi-gear"></i> Admin
-                        </a>
-                    </li>
+        <style>
+            /* Dynamic CSS variables from BrandingConfig — override brand defaults if admin changed them */
+            :root {
+              --primary-color: {{ branding.primary_color }};
+              --secondary-color: {{ branding.secondary_color }};
+              --success-color: {{ branding.success_color }};
+              --danger-color: {{ branding.danger_color }};
+              --navbar-bg: {{ branding.navbar_bg_color }};
+              --navbar-text: {{ branding.navbar_text_color }};
+              --footer-bg: {{ branding.footer_bg_color }};
+            }
+        </style>
+
+        {% block extra_css %}{% endblock %}
+    </head>
+    <body>
+        <!-- Navigation -->
+        <nav class="navbar navbar-expand-lg navbar-dark">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="{% url 'dashboard' %}">
+                    {% if branding.show_logo and branding.company_logo_url %}
+                    <img
+                        src="{{ branding.company_logo_url }}"
+                        alt="{{ branding.company_name }}"
+                    />
+                    {% endif %} {{ branding.company_name }}
+                </a>
+                <button
+                    class="navbar-toggler"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#navbarNav"
+                >
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+                                href="{% url 'dashboard' %}"
+                            >
+                                <i class="bi bi-speedometer2"></i> Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'portfolio_summary' %}active{% endif %}"
+                                href="{% url 'portfolio_summary' %}"
+                            >
+                                <i class="bi bi-briefcase"></i> Portfolio
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'portfolio_chart' %}active{% endif %}"
+                                href="{% url 'portfolio_chart' %}"
+                            >
+                                <i class="bi bi-graph-up"></i> Performance
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'realised_pnl' %}active{% endif %}"
+                                href="{% url 'realised_pnl' %}"
+                            >
+                                <i class="bi bi-cash-coin"></i> Realised P&L
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'income_summary' %}active{% endif %}"
+                                href="{% url 'income_summary' %}"
+                            >
+                                <i class="bi bi-piggy-bank"></i> Income
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'transaction_list' %}active{% endif %}"
+                                href="{% url 'transaction_list' %}"
+                            >
+                                <i class="bi bi-list-check"></i> Transactions
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'accounts_list' %}active{% endif %}"
+                                href="{% url 'accounts_list' %}"
+                            >
+                                <i class="bi bi-bank"></i> Accounts
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'import_history' %}active{% endif %}"
+                                href="{% url 'import_history' %}"
+                            >
+                                <i class="bi bi-upload"></i> Import History
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'annual_reports' %}active{% endif %}"
+                                href="{% url 'annual_reports' %}"
+                            >
+                                <i class="bi bi-file-earmark-text"></i> Annual
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a
+                                class="nav-link dropdown-toggle"
+                                href="#"
+                                id="riskDropdown"
+                                role="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                            >
+                                <i class="bi bi-exclamation-triangle"></i> Risk
+                            </a>
+                            <ul
+                                class="dropdown-menu dropdown-menu-end"
+                                aria-labelledby="riskDropdown"
+                            >
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'risk:dashboard' %}"
+                                        ><i class="bi bi-speedometer2"></i>
+                                        Dashboard</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'risk:heatmap' %}"
+                                        ><i class="bi bi-grid-3x3"></i> Heat
+                                        Map</a
+                                    >
+                                </li>
+                                <li><hr class="dropdown-divider" /></li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'risk:owner_summary' 'TOM' %}"
+                                        ><i class="bi bi-person"></i> TOM
+                                        Summary</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'risk:owner_summary' 'SUSAN' %}"
+                                        ><i class="bi bi-person"></i> SUSAN
+                                        Summary</a
+                                    >
+                                </li>
+                            </ul>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a
+                                class="nav-link dropdown-toggle"
+                                href="#"
+                                id="reportsDropdown"
+                                role="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                            >
+                                <i class="bi bi-file-earmark-bar-graph"></i>
+                                Reports
+                            </a>
+                            <ul
+                                class="dropdown-menu dropdown-menu-end"
+                                aria-labelledby="reportsDropdown"
+                            >
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'realised_pnl' %}"
+                                        ><i class="bi bi-cash-coin"></i>
+                                        Realised P&L</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'income_summary' %}"
+                                        ><i class="bi bi-piggy-bank"></i> Income
+                                        Summary</a
+                                    >
+                                </li>
+                                <li><hr class="dropdown-divider" /></li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'tax_summary' %}"
+                                        ><i class="bi bi-receipt"></i> Annual
+                                        Tax Summary</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'annual_reports' %}"
+                                        ><i class="bi bi-file-earmark-text"></i>
+                                        RBC Annual Reports</a
+                                    >
+                                </li>
+                            </ul>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a
+                                class="nav-link dropdown-toggle"
+                                href="#"
+                                id="dataToolsDropdown"
+                                role="button"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
+                            >
+                                <i class="bi bi-tools"></i> Data Tools
+                            </a>
+                            <ul
+                                class="dropdown-menu dropdown-menu-end"
+                                aria-labelledby="dataToolsDropdown"
+                            >
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'gap_analysis' %}"
+                                        ><i class="bi bi-clipboard-data"></i>
+                                        Gap Analysis</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'generate_monthly_statements' %}"
+                                        ><i class="bi bi-calendar-check"></i>
+                                        Monthly Statements</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'generate_annual_reports' %}"
+                                        ><i
+                                            class="bi bi-file-earmark-bar-graph"
+                                        ></i>
+                                        Annual Reports</a
+                                    >
+                                </li>
+                                <li><hr class="dropdown-divider" /></li>
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'reconcile' %}"
+                                        ><i class="bi bi-balance"></i>
+                                        Reconciliation</a
+                                    >
+                                </li>
+                            </ul>
+                        </li>
+                        {% if user.is_staff %}
+                        <li class="nav-item">
+                            <a class="nav-link" href="/admin/" target="_blank">
+                                <i class="bi bi-gear"></i> Admin
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                    {% if user.is_authenticated %}
+                    <ul class="navbar-nav">
+                        <li class="nav-item dropdown">
+                            <a
+                                class="nav-link dropdown-toggle"
+                                href="#"
+                                id="userDropdown"
+                                role="button"
+                                data-bs-toggle="dropdown"
+                            >
+                                <i class="bi bi-person-circle"></i> {{
+                                user.username }}
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li>
+                                    <a
+                                        class="dropdown-item"
+                                        href="{% url 'logout' %}"
+                                        ><i class="bi bi-box-arrow-right"></i>
+                                        Sign Out</a
+                                    >
+                                </li>
+                            </ul>
+                        </li>
+                    </ul>
                     {% endif %}
-                </ul>
-                {% if user.is_authenticated %}
-                <ul class="navbar-nav">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-person-circle"></i> {{ user.username }}
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{% url 'logout' %}"><i class="bi bi-box-arrow-right"></i> Sign Out</a></li>
-                        </ul>
-                    </li>
-                </ul>
-                {% endif %}
-            </div>
-        </div>
-    </nav>
-
-    <!-- Site Banner -->
-    <div class="site-banner">
-        <img src="{% static 'core/img/tsmoney_banner.jpg' %}" class="banner-logo" alt="TS Money">
-    </div>
-
-    <!-- Main Content -->
-    <div class="main-content">
-        <div class="container-fluid">
-            {% if branding.show_tagline and branding.tagline %}
-            <div class="row mb-3">
-                <div class="col">
-                    <p class="tagline text-center">{{ branding.tagline }}</p>
                 </div>
             </div>
-            {% endif %}
-            
-            <!-- Messages -->
-            {% if messages %}
-            <div class="row mb-3">
-                <div class="col">
-                    {% for message in messages %}
-                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </nav>
+
+        <!-- Site Banner -->
+        <div class="site-banner">
+            <img
+                src="{% static 'core/img/tsmoney_banner.jpg' %}"
+                class="banner-logo"
+                alt="TS Money"
+            />
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="container-fluid">
+                {% if branding.show_tagline and branding.tagline %}
+                <div class="row mb-3">
+                    <div class="col">
+                        <p class="tagline text-center">
+                            {{ branding.tagline }}
+                        </p>
                     </div>
-                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <!-- Messages -->
+                {% if messages %}
+                <div class="row mb-3">
+                    <div class="col">
+                        {% for message in messages %}
+                        <div
+                            class="alert alert-{{ message.tags }} alert-dismissible fade show"
+                            role="alert"
+                        >
+                            {{ message }}
+                            <button
+                                type="button"
+                                class="btn-close"
+                                data-bs-dismiss="alert"
+                            ></button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="content-wrapper">
+                    {% block content %}{% endblock %}
                 </div>
             </div>
-            {% endif %}
-            
-            <div class="content-wrapper">
-                {% block content %}{% endblock %}
-            </div>
         </div>
-    </div>
 
-    <!-- Footer -->
-    <footer>
-      <div class="container-fluid text-center">
-        <p>
-          {% if branding.footer_text %}{{ branding.footer_text }}{% else %}
-          &copy; {% now "Y" %} TS Money &mdash; invest like you mean it
-          {% endif %}
-        </p>
-      </div>
-    </footer>
+        <!-- Footer -->
+        <footer>
+            <div class="container-fluid text-center">
+                <p>
+                    {% if branding.footer_text %}{{ branding.footer_text }}{%
+                    else %} &copy; {% now "Y" %} TS Money &mdash; invest like
+                    you mean it {% endif %}
+                </p>
+            </div>
+        </footer>
 
-    <!-- Bootstrap JS Bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    
-    {% block extra_js %}{% endblock %}
-</body>
+        <!-- Bootstrap JS Bundle -->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+        {% block extra_js %}{% endblock %}
+    </body>
 </html>

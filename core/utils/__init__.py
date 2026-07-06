@@ -7,8 +7,11 @@ implemented in focused sub-modules but re-exported here so existing imports
 Modules:
     currencies: Cash-equivalent fund constants and transaction type tuples.
     dates: Date series generation utilities.
+    gap_analysis: Gap analysis and data completeness metrics.
     prices: Price loading, caching, and fetching utilities.
     portfolio: Portfolio valuation, position management, and time-series calculations.
+    statements: Monthly and annual statement generation.
+    reconciliation: CSV vs RBC PDF reconciliation engine.
 """
 
 # Re-export everything that was previously available from core.utils

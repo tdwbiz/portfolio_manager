@@ -703,3 +703,235 @@ class DividendSchedule(models.Model):
     def amount_cad_per_share(self) -> Decimal:
         """Return amount per share in CAD."""
         return self.amount_per_share * self.exchange_rate_cad
+
+
+class FixedPriceConfig(models.Model):
+    """Configurable fixed prices for securities that don't have market prices.
+
+    Used for closed-end funds, trusts, or other instruments where yfinance
+    cannot fetch prices. Prices are set manually and cached.
+    """
+
+    symbol = models.CharField(max_length=50, unique=True)
+    price_cad = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    price_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    currency = models.CharField(max_length=3, default="CAD")
+    notes = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "core_fixed_price_config"
+        ordering = ["symbol"]
+
+    def __str__(self):
+        return f"{self.symbol} ({self.currency})"
+
+    @property
+    def active_price(self):
+        """Return the price in the configured currency."""
+        if self.currency == "USD":
+            return self.price_usd
+        return self.price_cad
+
+
+class CoreMonthlyStatement(models.Model):
+    """Monthly statement generated from core_transaction data.
+
+    Replaces RBC monthly statement data when CSV is available and complete.
+    One row per (account, month, currency).
+    """
+
+    CURRENCY_CHOICES = [("CAD", "CAD"), ("USD", "USD")]
+
+    account = models.ForeignKey(
+        "Account",
+        on_delete=models.CASCADE,
+        related_name="core_monthly_statements",
+    )
+    statement_month = models.DateField(help_text="First day of the month")
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default="CAD",
+    )
+
+    # Portfolio value metrics
+    beginning_market_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    ending_market_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+
+    # Transaction totals for the month
+    total_buys = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_sells = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_dividends = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_interest = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_commission = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+
+    # Derived
+    net_flow = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_transactions = models.IntegerField(default=0)
+
+    # Tracking
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "core_monthly_statement"
+        unique_together = [("account", "statement_month", "currency")]
+        ordering = ["-statement_month"]
+        indexes = [
+            models.Index(fields=["account", "statement_month"]),
+        ]
+
+    def __str__(self):
+        return f"{self.account} — {self.statement_month.strftime('%Y-%m')} [{self.currency}]"
+
+
+class CoreAnnualReport(models.Model):
+    """Annual report generated from core_transaction data.
+
+    Replaces RBC annual report data when CSV is available and complete.
+    One row per (account, year, currency).
+    """
+
+    CURRENCY_CHOICES = [("CAD", "CAD"), ("USD", "USD")]
+
+    account = models.ForeignKey(
+        "Account",
+        on_delete=models.CASCADE,
+        related_name="core_annual_reports",
+    )
+    report_year = models.IntegerField(help_text="Calendar year")
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default="CAD",
+    )
+
+    # Balance metrics
+    beginning_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    ending_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    deposits = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    withdrawals = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    net_investment_return = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    amount_invested = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+
+    # Summary totals
+    total_buys = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_sells = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_income = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_commission = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_transactions = models.IntegerField(default=0)
+
+    generated_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "core_annual_report"
+        unique_together = [("account", "report_year", "currency")]
+        ordering = ["-report_year"]
+        indexes = [
+            models.Index(fields=["account", "report_year"]),
+        ]
+
+    def __str__(self):
+        return f"{self.account} — {self.report_year} [{self.currency}]"
+
+
+class CoreReconciliation(models.Model):
+    """Reconciliation result between CSV-generated and RBC PDF data.
+
+    Tracks matches and discrepancies for each account/month/year.
+    """
+
+    TYPE_CHOICES = [("monthly", "Monthly"), ("annual", "Annual")]
+
+    account = models.ForeignKey(
+        "Account",
+        on_delete=models.CASCADE,
+        related_name="core_reconciliations",
+    )
+    reconciliation_type = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES,
+    )
+    period_start = models.DateField(help_text="Start of period")
+    period_end = models.DateField(help_text="End of period")
+
+    # CSV values
+    csv_beginning_value = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True
+    )
+    csv_ending_value = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    csv_total_buys = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    csv_total_sells = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    csv_total_income = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    csv_total_transactions = models.IntegerField(null=True)
+
+    # RBC values
+    rbc_beginning_value = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True
+    )
+    rbc_ending_value = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    rbc_total_buys = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    rbc_total_sells = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    rbc_total_income = models.DecimalField(max_digits=15, decimal_places=2, null=True)
+    rbc_total_transactions = models.IntegerField(null=True)
+
+    # Discrepancy tracking
+    matching = models.BooleanField(default=False)
+    discrepancy_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    discrepancy_notes = models.TextField(blank=True, default="")
+
+    reconciled_at = models.DateTimeField(auto_now_add=True)
+    reconciled_by = models.CharField(max_length=100, blank=True, default="auto")
+
+    class Meta:
+        db_table = "core_reconciliation"
+        unique_together = [
+            ("account", "reconciliation_type", "period_start", "period_end")
+        ]
+        ordering = ["-period_start"]
+        indexes = [
+            models.Index(fields=["account", "reconciliation_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.account} {self.reconciliation_type} {self.period_start}"

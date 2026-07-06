@@ -60,18 +60,38 @@ def load_prices_from_db(symbols: list[str], start, end):
 def load_prices_from_yfinance(symbols: list[str], start, end):
     """Download closing prices from yfinance for the given symbols and date range.
 
+    Symbols are resolved to yfinance-compatible tickers (e.g., VDY → VDY.TO)
+    before fetching, then columns are mapped back to original symbol names.
+
     Returns a DataFrame with DatetimeIndex and symbols as columns, or None on failure.
     """
     try:
+        # Resolve symbols for yfinance
+        resolved_map = {}  # original → resolved
+        resolved_symbols = []
+        for sym in symbols:
+            try:
+                from risk.models import SecurityUniverse
+
+                su = SecurityUniverse.objects.filter(symbol=sym).first()
+                primary_currency = su.primary_currency if su else None
+            except Exception:
+                primary_currency = None
+            resolved = resolve_yahoo_symbol(sym, primary_currency)
+            resolved_map[resolved] = sym
+            resolved_symbols.append(resolved)
+
         cache_key = f"hist_prices_{','.join(sorted(symbols))}_{start}_{end}"
         df = cache.get(cache_key)
         if df is not None and not df.empty:
             logger.info("Using cached yfinance prices")
             return df
 
-        logger.info(f"Fetching {len(symbols)} symbols from yfinance: {start} → {end}")
+        logger.info(
+            f"Fetching {len(resolved_symbols)} symbols from yfinance: {start} → {end}"
+        )
         raw_df = yf.download(
-            symbols,
+            resolved_symbols,
             start=start.strftime("%Y-%m-%d"),
             end=(end + __import__("datetime").timedelta(days=1)).strftime("%Y-%m-%d"),
             auto_adjust=True,
@@ -80,16 +100,22 @@ def load_prices_from_yfinance(symbols: list[str], start, end):
         if raw_df is None or raw_df.empty:
             return None
 
+        # Extract Close prices
         if isinstance(raw_df.columns, pd.MultiIndex):
             lvl0 = raw_df.columns.get_level_values(0)
             if "Close" in lvl0:
                 df = raw_df["Close"]
             else:
                 df = raw_df.xs("Close", axis=1, level=1)
-        elif len(symbols) == 1:
-            df = raw_df[["Close"]].rename(columns={"Close": symbols[0]})
+        elif len(resolved_symbols) == 1:
+            df = raw_df[["Close"]].rename(columns={"Close": resolved_symbols[0]})
         else:
             df = raw_df.get("Close", raw_df)
+
+        # Map resolved columns back to original symbols
+        col_map = {k: v for k, v in resolved_map.items() if k in df.columns}
+        if col_map:
+            df = df.rename(columns=col_map)
 
         cache.set(cache_key, df, settings.HISTORICAL_PRICE_CACHE_TIMEOUT)
         return df
@@ -138,6 +164,58 @@ def _get_current_price(ticker_obj, symbol: str):
     return None
 
 
+def resolve_yahoo_symbol(symbol: str, primary_currency: str | None = None) -> str:
+    """Resolve a database symbol to its yfinance-compatible ticker.
+
+    Rules:
+    - If primary_currency is 'CAD' and symbol doesn't already have a suffix, append '.TO'
+    - If primary_currency is 'USD', return symbol as-is
+    - If symbol already has a suffix (contains '.', or is 'USDCAD=X'), return as-is
+    - If primary_currency is None and symbol starts with '$', return as-is (crypto)
+    - Default: return symbol as-is (assume USD)
+
+    Examples:
+        resolve_yahoo_symbol('VDY', 'CAD') → 'VDY.TO'
+        resolve_yahoo_symbol('VDY.TO', 'CAD') → 'VDY.TO' (no change)
+        resolve_yahoo_symbol('AAPL', 'USD') → 'AAPL'
+        resolve_yahoo_symbol('USDCAD=X', 'CAD') → 'USDCAD=X' (no change)
+    """
+    # Never modify FX or already-suffixed symbols
+    if symbol == "USDCAD=X" or "." in symbol or symbol.startswith("$"):
+        return symbol
+
+    # If primary_currency is CAD and no suffix, add .TO
+    if primary_currency and primary_currency.upper() == "CAD":
+        return f"{symbol}.TO"
+
+    # Default: return as-is (assume USD/international)
+    return symbol
+
+
+def get_fixed_price(symbol: str) -> Decimal | None:
+    """Look up a fixed price from FixedPriceConfig model.
+
+    Returns the active_price (in configured currency) if the symbol exists
+    and is active, otherwise returns None.
+
+    Examples:
+        get_fixed_price('RBF2010') → Decimal('10.000000')
+        get_fixed_price('AAPL') → None
+    """
+    try:
+        from core.models import FixedPriceConfig
+
+        config = FixedPriceConfig.objects.filter(
+            symbol=symbol,
+            is_active=True,
+        ).first()
+        if config:
+            return config.active_price
+    except Exception:
+        pass
+    return None
+
+
 def fetch_last_prices(symbols: list[str], cache_timeout=None) -> dict[str, Decimal]:
     """Fetch latest prices for given symbols using yfinance.
 
@@ -173,17 +251,37 @@ def fetch_last_prices(symbols: list[str], cache_timeout=None) -> dict[str, Decim
         )
         for sym in uncached_symbols:
             try:
-                ticker_obj = yf.Ticker(sym)
-                # Try multiple methods to get the current price.
-                # fast_info.last_price can crash in yfinance 1.3.0
-                # (AttributeError on _dividends), so fall back to
-                # .info and .history as backup strategies.
-                price = _get_current_price(ticker_obj, sym)
+                # Check if this is a fixed-price security
+                fixed = get_fixed_price(sym)
+                if fixed is not None:
+                    cache.set(f"price_{sym}", fixed, cache_timeout)
+                    cached_prices[sym] = fixed
+                    logger.info(f"OK Fixed price for {sym}: {fixed}")
+                    continue
+
+                # Resolve symbol for yfinance (e.g., VDY → VDY.TO)
+                # We need primary_currency from SecurityUniverse
+                try:
+                    from risk.models import SecurityUniverse
+
+                    su = SecurityUniverse.objects.filter(symbol=sym).first()
+                    primary_currency = su.primary_currency if su else None
+                except Exception:
+                    primary_currency = None
+
+                yahoo_sym = resolve_yahoo_symbol(sym, primary_currency)
+
+                ticker_obj = yf.Ticker(yahoo_sym)
+                price = _get_current_price(ticker_obj, yahoo_sym)
                 if price is not None:
                     price = Decimal(str(price))
-                    cache.set(f"price_{sym}", price, cache_timeout)
+                    cache.set(
+                        f"price_{sym}", price, cache_timeout
+                    )  # cache by ORIGINAL symbol
                     cached_prices[sym] = price
-                    logger.info(f"OK Fetched price for {sym}: {price}")
+                    logger.info(
+                        f"OK Fetched price for {sym} (resolved: {yahoo_sym}): {price}"
+                    )
                 else:
                     logger.warning(f"✗ No price available for {sym}")
             except Exception as e:

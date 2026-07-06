@@ -5,11 +5,15 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.cache import cache
+from django.shortcuts import render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from core.models import TransactionType
+from core.models import Account, TransactionType
 from core.utils import fetch_last_prices as utils_fetch_last_prices  # noqa: F401
+from core.utils.gap_analysis import all_accounts_gap_analysis
+from core.utils.reconciliation import reconcile_account as reconcile_fn
+from core.utils.statements import generate_annual_reports, generate_monthly_statements
 
 logger = logging.getLogger(__name__)
 
@@ -229,3 +233,103 @@ def health_check(request):
     from django.http import JsonResponse
 
     return JsonResponse({"status": "ok", "timestamp": timezone.now().isoformat()})
+
+
+def gap_analysis(request):
+    """Show per-account data completeness report."""
+    data = all_accounts_gap_analysis()
+    return render(
+        request,
+        "core/gap_analysis.html",
+        {
+            "results": data,
+        },
+    )
+
+
+def generate_monthly_statements_view(request):
+    """Generate or regenerate monthly statements for an account."""
+    account_id = request.GET.get("account")
+    message = ""
+    stmts = []
+
+    if account_id:
+        try:
+            account = Account.objects.get(account_id=account_id)
+            stmts = generate_monthly_statements(account)
+            message = f"Generated {len(stmts)} monthly statements for {account}."
+        except Account.DoesNotExist:
+            message = f"Account '{account_id}' not found."
+
+    accounts = Account.objects.all()
+    return render(
+        request,
+        "core/generate_statements.html",
+        {
+            "accounts": accounts,
+            "selected_account": account_id,
+            "message": message,
+            "statements": stmts[:50],  # Show last 50
+        },
+    )
+
+
+def generate_annual_reports_view(request):
+    """Generate or regenerate annual reports for an account."""
+    account_id = request.GET.get("account")
+    message = ""
+    reports = []
+
+    if account_id:
+        try:
+            account = Account.objects.get(account_id=account_id)
+            reports = generate_annual_reports(account)
+            message = f"Generated {len(reports)} annual reports for {account}."
+        except Account.DoesNotExist:
+            message = f"Account '{account_id}' not found."
+
+    accounts = Account.objects.all()
+    return render(
+        request,
+        "core/generate_annual.html",
+        {
+            "accounts": accounts,
+            "selected_account": account_id,
+            "message": message,
+            "reports": reports[:50],  # Show last 50
+        },
+    )
+
+
+def reconcile_view(request):
+    """Reconcile CSV-generated data against RBC PDF data."""
+    account_id = request.GET.get("account")
+    period_type = request.GET.get("type", "monthly")
+    message = ""
+    reconciliations = []
+
+    if account_id:
+        try:
+            account = Account.objects.get(account_id=account_id)
+            reconciliations = reconcile_fn(account, period_type=period_type)
+            matches = sum(1 for r in reconciliations if r.matching)
+            discrepancies = sum(1 for r in reconciliations if not r.matching)
+            message = (
+                f"Reconciled {len(reconciliations)} periods for {account}: "
+                f"{matches} matches, {discrepancies} discrepancies."
+            )
+        except Account.DoesNotExist:
+            message = f"Account '{account_id}' not found."
+
+    accounts = Account.objects.all()
+    return render(
+        request,
+        "core/reconciliation.html",
+        {
+            "accounts": accounts,
+            "selected_account": account_id,
+            "period_type": period_type,
+            "message": message,
+            "reconciliations": reconciliations[:100],
+        },
+    )

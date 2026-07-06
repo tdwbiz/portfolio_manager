@@ -2,7 +2,13 @@ from django.urls import path
 
 from imports import views as import_views
 
-from .views import health_check
+from .views import (
+    gap_analysis,
+    generate_annual_reports_view,
+    generate_monthly_statements_view,
+    health_check,
+    reconcile_view,
+)
 
 # Account views
 from .views_accounts import (
@@ -82,4 +88,20 @@ urlpatterns = [
     ),
     path("annual-reports/", annual_reports_view, name="annual_reports"),
     path("health/", health_check, name="health_check"),
+    path("accounts/gap-analysis/", gap_analysis, name="gap_analysis"),
+    path(
+        "accounts/generate-monthly-statements/",
+        generate_monthly_statements_view,
+        name="generate_monthly_statements",
+    ),
+    path(
+        "accounts/generate-annual-reports/",
+        generate_annual_reports_view,
+        name="generate_annual_reports",
+    ),
+    path(
+        "accounts/reconcile/",
+        reconcile_view,
+        name="reconcile",
+    ),
 ]

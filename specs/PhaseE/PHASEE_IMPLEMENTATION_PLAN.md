@@ -9,7 +9,7 @@
 | # | Item | Spec | Priority | Effort |
 |---|------|------|----------|--------|
 | E1 | Symbol resolution function + SecurityUniverse integration | 01_symbol_resolution_and_fixed_prices | 🔴 High | 1 session |
-| E2 | FixedPriceConfig model + admin UI | 01_symbol_resolution_and_fixed_prices | 🟡 Medium | 0.5 session |
+| E2 | FixedPriceConfig model + admin UI (Option A) | 01_symbol_resolution_and_fixed_prices | 🟡 Medium | 0.5 session |
 
 ---
 
@@ -39,9 +39,9 @@ def resolve_yahoo_symbol(symbol, primary_currency=None):
     # If symbol is fixed-price → return None
 ```
 
-### E2: FixedPriceConfig Model
+### E2: FixedPriceConfig Model (Option A — Chosen)
 
-**Model:**
+**Model** (in `core/models.py`):
 ```python
 class FixedPriceConfig(models.Model):
     symbol = models.CharField(max_length=50, unique=True)
@@ -50,16 +50,18 @@ class FixedPriceConfig(models.Model):
     currency = models.CharField(max_length=3, default='CAD')
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 ```
 
-**Admin:** Register in `core/admin.py` with symbol, currency, price fields.
+**Admin** (in `core/admin.py`): Register with symbol, currency, price_cad, price_usd fields. Pre-populate with RBF2010 (CAD 10) and RBF2014 (USD 10).
 
 ---
 
 ## Testing
 
-- **D1:** ~5 new tests in `core/tests/test_prices.py`
-- **D2:** ~2 new tests (model admin)
+| D1: ~5 new tests in `core/tests/test_prices.py`
+| D2: ~2 new tests (model admin + CRUD)
 
 **Total: ~7 new tests**
 

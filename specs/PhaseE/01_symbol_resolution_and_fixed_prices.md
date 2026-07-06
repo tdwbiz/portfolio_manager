@@ -39,22 +39,17 @@ def resolve_yahoo_symbol(symbol: str, primary_currency: str | None = None) -> st
 
 Create a configurable list for fixed-price securities. This should NOT be hardcoded in the price fetching code.
 
-**Option A:** Use a new model `FixedPriceConfig` with fields:
-- `symbol` (CharField)
-- `price_cad` (DecimalField)
-- `price_usd` (DecimalField)  
+**Chosen: Option A** — Use a new model `FixedPriceConfig` with fields:
+- `symbol` (CharField, unique)
+- `price_cad` (DecimalField, max_digits=12, decimal_places=6, default=0)
+- `price_usd` (DecimalField, max_digits=12, decimal_places=6, default=0)
 - `currency` (CharField — 'CAD' or 'USD')
 - `notes` (TextField, blank)
+- `is_active` (BooleanField, default=True)
+- `created_at` (DateTimeField, auto_now_add=True)
+- `updated_at` (DateTimeField, auto_now=True)
 
-**Option B:** Use a settings variable in `settings.py`:
-```python
-FIXED_PRICES = {
-    "RBF2010": {"price_cad": 10.0, "currency": "CAD"},
-    "RBF2014": {"price_usd": 10.0, "currency": "USD"},
-}
-```
-
-**Preferred: Option A** (model-based, editable via admin). If creating a new model is too heavy, use Option B.
+**Rationale:** Model-based approach allows admin users to add/edit/remove fixed-price entries without code changes. The model lives in the `core` app alongside `BrandingConfig` and `DividendSchedule`.
 
 ### 3. Update `fetch_last_prices`
 
@@ -120,10 +115,9 @@ Transaction (symbol='RBF2010')
 |------|---------|
 | `core/utils/prices.py` | Add `resolve_yahoo_symbol()`, add `get_fixed_price()`, update `fetch_last_prices()`, update `load_prices_from_yfinance()` |
 | `core/utils/portfolio.py` | Update `get_top_movers()` to resolve symbols |
-| `core/models.py` | Add `FixedPriceConfig` model (if Option A chosen) |
+| `core/models.py` | Add `FixedPriceConfig` model |
+| `core/admin.py` | Register `FixedPriceConfig` admin |
 | `risk/models.py` | — (read-only, `SecurityUniverse.primary_currency`) |
-| `risk/admin.py` | Register `FixedPriceConfig` admin (if new model) |
-| `portfolio_manager/settings.py` | Add `FIXED_PRICES` (if Option B chosen) |
 | `core/tests/test_prices.py` | New test file for symbol resolution and fixed prices |
 
 ---

@@ -60,6 +60,40 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 ## Phase D History
 Phase D was implemented in a previous session. The code, views, templates, models, and tests were already present when we started `feature_phaseD_coding`. We verified all 122 tests pass with 0 regressions. No new code was written — only infrastructure (AGENTS.md, global_agents.md, zed settings, ai-env config, migration 0016).
 
+## Phase E (IN PROGRESS — E1, E3-A COMPLETE; E3-B, E3-C, E3-D JUST IMPLEMENTED)
+**Current test count: 138 tests (122 existing + 16 new), 0 regressions.**
+
+### E1: Symbol Resolution + Fixed Prices ✅
+- `resolve_yahoo_symbol(symbol, primary_currency)` — adds `.TO` for CAD symbols
+- `FixedPriceConfig` model — admin-editable fixed prices for RBF2010 (CAD 10), RBF2014 (USD 10)
+- `get_fixed_price(symbol)` — skips yfinance for fixed-price securities
+- Updated `fetch_last_prices()` and `load_prices_from_yfinance()` to use resolution
+
+### E3-A: Gap Analysis Report ✅
+- `core/utils/gap_analysis.py` — finds longest continuous run, counts gaps
+- View at `/accounts/gap-analysis/` — shows per-account data completeness
+
+### E3-B: Monthly Statement Generation ✅
+- `CoreMonthlyStatement` model — one row per (account, month, currency)
+- `generate_monthly_statements(account)` — aggregates transactions by month
+- Management command: `generate_monthly_statements`
+- View at `/accounts/generate-monthly-statements/`
+
+### E3-C: Annual Report Generation ✅
+- `CoreAnnualReport` model — one row per (account, year, currency)
+- `generate_annual_reports(account)` — aggregates from monthly statements
+- Management command: `generate_annual_reports`
+- View at `/accounts/generate-annual-reports/`
+
+### E3-D: Reconciliation Engine ✅
+- `CoreReconciliation` model — CSV vs RBC comparison results
+- `reconcile_monthly()`, `reconcile_annual()` — compare CSV vs RBC with $1 threshold
+- Management command: `reconcile`
+- View at `/accounts/reconcile/`
+
+**Branch:** `feature_phaseE_changes_and_fixes`
+**Migration:** `0023_coreannualreport_coremonthlystatement_and_more.py`
+
 ## Memory & Skill Management
 
 ### Global AGENTS.md (`C:\Users\tdwdev\.agents\AGENTS.md`)

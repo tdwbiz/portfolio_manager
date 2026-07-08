@@ -64,62 +64,60 @@ def reconcile_monthly(
         csv_statements = csv_statements.filter(statement_month__lte=to_date)
         rbc_statements = rbc_statements.filter(statement_date__lte=to_date)
 
-    # Build a lookup of RBC statements by date and currency
+    # Build lookups by date and currency
+    csv_lookup = {}
+    for stmt in csv_statements:
+        key = (stmt.statement_month, stmt.currency)
+        csv_lookup[key] = stmt
+
     rbc_lookup = {}
     for rbc in rbc_statements:
         key = (rbc.statement_date, rbc.currency)
         rbc_lookup[key] = rbc
 
+    # Collect all unique (date, currency) pairs from both sources
+    all_keys = sorted(set(csv_lookup.keys()) | set(rbc_lookup.keys()))
+
     generated = []
 
-    for stmt in csv_statements.order_by("statement_month", "currency"):
-        # Find matching RBC statement (match by month-end or close date)
-        rbc = rbc_lookup.get((stmt.statement_month, stmt.currency))
+    for period_date, currency in all_keys:
+        stmt = csv_lookup.get((period_date, currency))
+        rbc = rbc_lookup.get((period_date, currency))
 
-        # Compare beginning value
-        csv_begin = stmt.beginning_market_value
+        # CSV values (may be None if no CSV statement for this period)
+        csv_begin = stmt.beginning_market_value if stmt else None
+        csv_end = stmt.ending_market_value if stmt else None
+        csv_buys = stmt.total_buys if stmt else None
+        csv_sells = stmt.total_sells if stmt else None
+        csv_income = (stmt.total_dividends + stmt.total_interest) if stmt else None
+        csv_tx_count = stmt.total_transactions if stmt else None
+
+        # RBC values (may be None if no RBC statement for this period)
         rbc_begin = rbc.begin_total_market_value if rbc else None
-        begin_match, begin_diff = _compare_decimals(csv_begin, rbc_begin)
-
-        # Compare ending value
-        csv_end = stmt.ending_market_value
         rbc_end = rbc.end_total_market_value if rbc else None
-        end_match, end_diff = _compare_decimals(csv_end, rbc_end)
-
-        # Compare total buys
-        csv_buys = stmt.total_buys
-        # RBC monthly statements don't break out buys/sells by transaction type;
-        # only begin/end market values are available
-        rbc_buys = None
-
-        # Compare total sells
-        csv_sells = stmt.total_sells
+        rbc_buys = None  # RBC monthly doesn't break out buys
         rbc_sells = None
-
-        # Compare total income (dividends + interest)
-        csv_income = stmt.total_dividends + stmt.total_interest
         rbc_income = None
-
-        # Compare transaction count
-        csv_tx_count = stmt.total_transactions
         rbc_tx_count = None
 
-        # Overall match: both beginning and ending must match
-        is_matching = begin_match and end_match
+        # Overall match: both beginning and ending must match and both sources must exist
+        is_matching = False
+        if stmt and rbc:
+            begin_match, begin_diff = _compare_decimals(csv_begin, rbc_begin)
+            end_match, end_diff = _compare_decimals(csv_end, rbc_end)
+            is_matching = begin_match and end_match
 
         # Total discrepancy
+        _, begin_diff = _compare_decimals(csv_begin, rbc_begin)
+        _, end_diff = _compare_decimals(csv_end, rbc_end)
         total_diff = begin_diff + end_diff
-        if rbc_buys is not None:
-            _, buys_diff = _compare_decimals(csv_buys, rbc_buys)
-            total_diff += buys_diff
-        if rbc_sells is not None:
-            _, sells_diff = _compare_decimals(csv_sells, rbc_sells)
-            total_diff += sells_diff
 
         notes_parts = []
-        if rbc is None:
-            notes_parts.append("No matching RBC statement found")
-        else:
+        if not stmt:
+            notes_parts.append("No CSV monthly statement for this period")
+        if not rbc:
+            notes_parts.append("No RBC statement for this period")
+        if stmt and rbc:
             if not begin_match:
                 notes_parts.append(
                     f"Beginning value differs: CSV={csv_begin}, RBC={rbc_begin}"
@@ -131,13 +129,13 @@ def reconcile_monthly(
 
         notes = "; ".join(notes_parts) if notes_parts else ""
 
-        period_end = stmt.statement_month + timedelta(days=31)
+        period_end = period_date + timedelta(days=31)
 
         with transaction.atomic():
             rec, created = CoreReconciliation.objects.update_or_create(
                 account=account,
                 reconciliation_type="monthly",
-                period_start=stmt.statement_month,
+                period_start=period_date,
                 period_end=period_end,
                 defaults={
                     "csv_beginning_value": csv_begin,
@@ -162,7 +160,7 @@ def reconcile_monthly(
         generated.append(rec)
         status = "MATCH" if is_matching else "DISCREPANCY"
         logger.info(
-            f"Reconciled monthly: {account} {stmt.statement_month} [{status}] "
+            f"Reconciled monthly: {account} {period_date} [{status}] "
             f"diff=${total_diff:.2f}"
         )
 
@@ -194,56 +192,64 @@ def reconcile_annual(
         csv_reports = csv_reports.filter(report_year__lte=to_year)
         rbc_reports = rbc_reports.filter(report_year__lte=to_year)
 
-    # Build RBC lookup by year and currency
+    # Build lookups by year and currency
+    csv_lookup = {}
+    for report in csv_reports:
+        key = (report.report_year, report.currency)
+        csv_lookup[key] = report
+
     rbc_lookup = {}
     for rbc in rbc_reports:
         key = (rbc.report_year, rbc.currency)
         rbc_lookup[key] = rbc
 
+    # Collect all unique (year, currency) pairs from both sources
+    all_keys = sorted(set(csv_lookup.keys()) | set(rbc_lookup.keys()))
+
     generated = []
 
-    for report in csv_reports.order_by("report_year", "currency"):
-        rbc = rbc_lookup.get((report.report_year, report.currency))
+    for report_year, currency in all_keys:
+        report = csv_lookup.get((report_year, currency))
+        rbc = rbc_lookup.get((report_year, currency))
 
-        # Compare beginning value
-        csv_begin = report.beginning_value
+        # CSV values (may be None if no CSV report for this period)
+        csv_begin = report.beginning_value if report else None
+        csv_end = report.ending_value if report else None
+        csv_buys = report.deposits if report else None
+        csv_sells = report.withdrawals if report else None
+        csv_income = report.total_income if report else None
+        csv_tx_count = report.total_transactions if report else None
+
+        # RBC values (may be None if no RBC report for this period)
         rbc_begin = rbc.bal_beginning_value if rbc else None
-        begin_match, begin_diff = _compare_decimals(csv_begin, rbc_begin)
-
-        # Compare ending value
-        csv_end = report.ending_value
         rbc_end = rbc.bal_ending_value if rbc else None
-        end_match, end_diff = _compare_decimals(csv_end, rbc_end)
-
-        # Compare total buys (deposits in RBC terms)
-        csv_buys = report.total_buys
         rbc_buys = rbc.bal_deposits_in if rbc else None
-
-        # Compare sells (withdrawals)
-        csv_sells = report.total_sells
         rbc_sells = rbc.bal_withdrawals_out if rbc else None
-
-        # Compare income (net return)
-        csv_income = report.total_income
         rbc_income = rbc.bal_net_return if rbc else None
 
-        is_matching = begin_match and end_match
-
-        total_diff = begin_diff + end_diff
-        if rbc_buys is not None:
+        # Overall match: both sources must exist and values must agree
+        is_matching = False
+        if report and rbc:
+            begin_match, begin_diff = _compare_decimals(csv_begin, rbc_begin)
+            end_match, end_diff = _compare_decimals(csv_end, rbc_end)
+            is_matching = begin_match and end_match
             _, buys_diff = _compare_decimals(csv_buys, rbc_buys)
-            total_diff += buys_diff
-        if rbc_sells is not None:
+            total_diff = begin_diff + end_diff + buys_diff
             _, sells_diff = _compare_decimals(csv_sells, rbc_sells)
             total_diff += sells_diff
-        if rbc_income is not None:
             _, income_diff = _compare_decimals(csv_income, rbc_income)
             total_diff += income_diff
+        else:
+            _, begin_diff = _compare_decimals(csv_begin, rbc_begin)
+            _, end_diff = _compare_decimals(csv_end, rbc_end)
+            total_diff = begin_diff + end_diff
 
         notes_parts = []
-        if rbc is None:
-            notes_parts.append("No matching RBC annual report found")
-        else:
+        if not report:
+            notes_parts.append("No CSV annual report for this period")
+        if not rbc:
+            notes_parts.append("No RBC annual report for this period")
+        if report and rbc:
             if not begin_match:
                 notes_parts.append(
                     f"Beginning value differs: CSV={csv_begin}, RBC={rbc_begin}"
@@ -255,8 +261,8 @@ def reconcile_annual(
 
         notes = "; ".join(notes_parts) if notes_parts else ""
 
-        period_start = date(report.report_year, 1, 1)
-        period_end = date(report.report_year, 12, 31)
+        period_start = date(report_year, 1, 1)
+        period_end = date(report_year, 12, 31)
 
         with transaction.atomic():
             rec, created = CoreReconciliation.objects.update_or_create(
@@ -270,7 +276,7 @@ def reconcile_annual(
                     "csv_total_buys": csv_buys,
                     "csv_total_sells": csv_sells,
                     "csv_total_income": csv_income,
-                    "csv_total_transactions": report.total_transactions,
+                    "csv_total_transactions": csv_tx_count,
                     "rbc_beginning_value": rbc_begin,
                     "rbc_ending_value": rbc_end,
                     "rbc_total_buys": rbc_buys,
@@ -287,7 +293,7 @@ def reconcile_annual(
         generated.append(rec)
         status = "MATCH" if is_matching else "DISCREPANCY"
         logger.info(
-            f"Reconciled annual: {account} {report.report_year} [{status}] "
+            f"Reconciled annual: {account} {report_year} [{status}] "
             f"diff=${total_diff:.2f}"
         )
 

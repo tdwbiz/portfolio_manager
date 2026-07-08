@@ -315,7 +315,7 @@ class ReconciliationTests(TestCase):
         self.assertGreater(recs[0].discrepancy_amount, Decimal("0.00"))
 
     def test_reconciliation_rbc_only(self):
-        """RBC has data but CSV doesn't — no reconciliation record for missing CSV."""
+        """RBC has data but CSV doesn't — reconciliation notes missing CSV."""
         RbcMonthly.objects.create(
             account=self.account,
             file_name="test.pdf",
@@ -326,7 +326,9 @@ class ReconciliationTests(TestCase):
         )
 
         recs = reconcile_monthly(self.account)
-        self.assertEqual(len(recs), 0)
+        self.assertEqual(len(recs), 1)
+        self.assertFalse(recs[0].matching)
+        self.assertIn("No CSV", recs[0].discrepancy_notes)
 
     def test_reconciliation_csv_only(self):
         """CSV has data but RBC doesn't — reconciliation notes the missing RBC."""
@@ -348,7 +350,7 @@ class ReconciliationTests(TestCase):
         recs = reconcile_monthly(self.account)
         self.assertEqual(len(recs), 1)
         self.assertFalse(recs[0].matching)
-        self.assertIn("No matching RBC statement", recs[0].discrepancy_notes)
+        self.assertIn("No RBC statement", recs[0].discrepancy_notes)
 
     def test_reconciliation_idempotent(self):
         """Running reconciliation twice produces same count."""

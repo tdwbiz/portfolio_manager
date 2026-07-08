@@ -102,13 +102,13 @@ def count_months_without_transactions(tx_dates, start_date, end_date):
 def account_gap_analysis(account_id):
     """Return completeness metrics for a single account."""
     try:
-        account = Account.objects.get(pk=account_id)
+        account = Account.objects.get(account_id=account_id)
     except Account.DoesNotExist:
         return None
 
     # Get all transaction dates
     tx_dates_list = list(
-        Transaction.objects.filter(account_id=account.account_id)
+        Transaction.objects.filter(account__account_id=account.account_id)
         .values_list("date", flat=True)
         .distinct()
         .order_by("date")
@@ -158,15 +158,15 @@ def account_gap_analysis(account_id):
 
     # RBC dates
     earliest_rbc_stmt = RbcMonthly.objects.filter(
-        account_id=account.account_id
+        account__account_id=account.account_id
     ).aggregate(Min("statement_date"))["statement_date__min"]
 
     earliest_rbc_tx = RbcMonthlyTransaction.objects.filter(
-        rbc_monthly__account_id=account.account_id
+        rbc_monthly__account__account_id=account.account_id
     ).aggregate(Min("date"))["date__min"]
 
     earliest_rbc_annual = RbcAnnual.objects.filter(
-        account_id=account.account_id
+        account__account_id=account.account_id
     ).aggregate(Min("report_year"))["report_year__min"]
 
     return {

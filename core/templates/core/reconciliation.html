@@ -48,42 +48,42 @@
         <div class="table-responsive">
             <table class="table table-striped table-hover">
                 <thead>
-                   </thead> <tr></tr>
-                        <th>Account</th></th>
-                        <th>Period</th></th>
+                   </thead> <tr>
+                        <th>Account</th>
+                        <th>Period</th>
                         <th>Type</th>
-                        <th>CSV</th> Ending</th>
+                        <th>CSV Ending</th>
                         <th>RBC Ending</th>
-                        <th>CSV</th> Buys</th>
+                        <th>CSV Buys</th>
                         <th>RBC Buys</th>
-                        <th>CSV</th> Income</th>
+                        <th>CSV Income</th>
                         <th>RBC Income</th>
                         <th>Status</th>
-                        <th></th>Discrepancy</th>
-                        <th></th>Notes</th>
+                        <th>Discrepancy</th>
+                        <th>Notes</th>
                     </tr>
                 </thead>
                 <tbody>
-                   </tbody> {% for rec in reconciliations %}
-                    <tr></tr>
+                    {% for rec in reconciliations %}
+                    <tr>
                         <td>{{ rec.account.account_id }}</td>
-                        <td>{{ rec.period_start|date:"Y-m-d" }} — {{ rec.period_end|date:"Y-m-d" }}</td>
+                        <td>{{ rec.period_start|date:"Y-m-d" }} &mdash; {{ rec.period_end|date:"Y-m-d" }}</td>
                         <td>{{ rec.get_reconciliation_type_display }}</td>
-                        <td>{{ rec.csv_ending_value|default:"—" }}</td>
-                        <td>{{ rec.rbc_ending_value|default:"—" }}</td>
-                        <td>{{ rec.csv_total_buys|default:"—" }}</td>
-                        <td>{{ rec.rbc_total_buys|default:"—" }}</td>
-                        <td>{{ rec.csv_total_income|default:"—" }}</td>
-                        <td>{{ rec.rbc_total_income|default:"—" }}</td>
+                        <td>{{ rec.csv_ending_value|default:"&mdash;" }}</td>
+                        <td>{{ rec.rbc_ending_value|default:"&mdash;" }}</td>
+                        <td>{{ rec.csv_total_buys|default:"&mdash;" }}</td>
+                        <td>{{ rec.rbc_total_buys|default:"&mdash;" }}</td>
+                        <td>{{ rec.csv_total_income|default:"&mdash;" }}</td>
+                        <td>{{ rec.rbc_total_income|default:"&mdash;" }}</td>
                         <td>
-                           </td> {% if rec.matching %}
+                            {% if rec.matching %}
                             <span class="badge bg-success">Match</span>
                             {% else %}
                             <span class="badge bg-danger">Discrepancy</span>
                             {% endif %}
                         </td>
                         <td>${{ rec.discrepancy_amount|floatformat:2 }}</td>
-                        <td><small>{{ rec.discrepancy_notes|default:"—" }}</small></td>
+                        <td><small>{{ rec.discrepancy_notes|default:"&mdash;" }}</small></td>
                     </tr>
                     {% endfor %}
                 </tbody>

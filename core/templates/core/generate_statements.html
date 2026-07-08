@@ -42,22 +42,22 @@
             <table class="table table-striped table-hover">
                 <thead></thead>
                     <tr>
-                       </tr> <th></th>Account</th>
-                        <th></th>Month</th>
+                        <th>Account</th>
+                        <th>Month</th>
                         <th>Currency</th>
-                        <th></th>Beginning MV</th>
-                        <th>Ending MV</th></th>
-                        <th></th>Buys</th>
+                        <th>Beginning MV</th>
+                        <th>Ending MV</th>
+                        <th>Buys</th>
                         <th>Sells</th>
-                        <th></th>Dividends</th>
-                        <th>Interest</th></th>
-                        <th>Comm</th>.</th>
+                        <th>Dividends</th>
+                        <th>Interest</th>
+                        <th>Commission</th>
                         <th>TX Count</th>
                     </tr>
                 </thead>
                 <tbody>
-                   </tbody> {% for stmt in statements %}
-                    <tr></tr>
+                    {% for stmt in statements %}
+                    <tr>
                         <td>{{ stmt.account.account_id }}</td>
                         <td>{{ stmt.statement_month|date:"Y-m" }}</td>
                         <td>{{ stmt.currency }}</td>

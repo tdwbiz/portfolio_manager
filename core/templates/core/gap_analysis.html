@@ -13,28 +13,28 @@
             <table class="table table-striped table-hover">
                 <thead>
                    </thead> <tr>
-                        <</tr>th>Account</th>
-                        <th>Ear</th>liest CSV</th>
-                        <th>Earliest</th> Continuous</th>
-                        <th></th>Days Missing (Continuous)</th>
-                        <th></th>Months w/ TX</th>
-                        <th></th>Months w/o TX</th>
+                        <th>Account</th>
+                        <th>Earliest CSV</th>
+                        <th>Earliest Continuous</th>
+                        <th>Days Missing (Continuous)</th>
+                        <th>Months w/ TX</th>
+                        <th>Months w/o TX</th>
                         <th>Coverage %</th>
-                        <th>Ear</th>liest RBC Stmt</th>
-                        <th></th>Earliest RBC TX</th>
-                        <th>Earliest</th> RBC Annual</th>
+                        <th>Earliest RBC Stmt</th>
+                        <th>Earliest RBC TX</th>
+                        <th>Earliest RBC Annual</th>
                     </tr>
                 </thead>
-                <tbody></tbody>
+                <tbody>
                     {% for r in results %}
-                    <tr></tr>
+                    <tr>
                         <td><strong>{{ r.account_id }}</strong></td>
-                        <td>{{ r.earliest_csv_date|default:"—" }}</td>
-                        <td>{{ r.continuous_start|default:"—" }} to {{ r.continuous_end|default:"—" }}</td>
-                        <td>{{ r.days_missing_continuous|default:"—" }}</td>
+                        <td>{{ r.earliest_csv_date|default:"&mdash;" }}</td>
+                        <td>{{ r.continuous_start|default:"&mdash;" }} to {{ r.continuous_end|default:"&mdash;" }}</td>
+                        <td>{{ r.days_missing_continuous|default:"&mdash;" }}</td>
                         <td>{{ r.total_months_with_tx }}</td>
                         <td>{{ r.total_months_without_tx }}</td>
-                        <td></td>
+                        <td>
                             {% if r.csv_coverage_pct >= 90 %}
                             <span class="badge bg-success">{{ r.csv_coverage_pct }}%</span>
                             {% elif r.csv_coverage_pct >= 50 %}
@@ -43,12 +43,12 @@
                             <span class="badge bg-danger">{{ r.csv_coverage_pct }}%</span>
                             {% endif %}
                         </td>
-                        <td>{{ r.earliest_rbc_statement|default:"—" }}</td>
-                        <td>{{ r.earliest_rbc_transaction|default:"—" }}</td>
-                        <td>{{ r.earliest_rbc_annual|default:"—" }}</td>
+                        <td>{{ r.earliest_rbc_statement|default:"&mdash;" }}</td>
+                        <td>{{ r.earliest_rbc_transaction|default:"&mdash;" }}</td>
+                        <td>{{ r.earliest_rbc_annual|default:"&mdash;" }}</td>
                     </tr>
                     {% empty %}
-                    <tr></tr>
+                    <tr>
                         <td colspan="10" class="text-center">No accounts found.</td>
                     </tr>
                     {% endfor %}

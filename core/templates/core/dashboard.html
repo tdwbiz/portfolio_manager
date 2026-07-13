@@ -150,7 +150,13 @@
                                 <td><strong>{{ account.account_id }}</strong></td>
                                 <td>{{ account.name }}</td>
                                 <td><span class="badge bg-primary">{{ account.get_broker_display }}</span></td>
-                                <td><span class="badge bg-secondary">{{ account.currency }}</span></td>
+                                <td>
+                                    {% for cur in account.currencies.all %}
+                                    <span class="badge bg-secondary me-1">{{ cur.currency }}</span>
+                                    {% empty %}
+                                    <span class="badge bg-secondary">{{ account.currency|default:"—" }}</span>
+                                    {% endfor %}
+                                </td>
                                 <td><span class="badge bg-info">{{ account.get_category_display }}</span></td>
                                 <td>{{ account.owner|default:"—" }}</td>
                                 <td>{{ account.transaction_count }}</td>

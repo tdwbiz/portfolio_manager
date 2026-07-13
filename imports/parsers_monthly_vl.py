@@ -92,6 +92,16 @@ JSON schema:
           "percentage": number or 0
         }
       ],
+      "holdings": [
+        {
+          "security": "e.g. VANGUARD FTSE CDN HIGH, RBC INVESTMENT SAVINGS",
+          "symbol": "e.g. VDY, RBF2010",
+          "quantity": number or 0,
+          "book_cost": number or 0,
+          "market_price": number or 0,
+          "market_value": number or 0
+        }
+      ],
       "transactions": [
         {
           "date": "YYYY-MM-DD",
@@ -166,6 +176,18 @@ Rules:
   
   Common mistake: Do NOT return 1.000000 if you cannot find the exchange rate.
   Return null instead. The system will handle null values correctly.
+
+- **CRITICAL: each individual holding (security) in the "Asset Review" or "Market Value" table**
+  Every row in the Holdings/Asset Review table is one security. For EACH row, extract:
+    - security: full name (e.g. "VANGUARD FTSE CDN HIGH")
+    - symbol: ticker (e.g. "VDY")
+    - quantity: number of shares/units (e.g. 1617, 245.833)
+    - book_cost: book value (e.g. 90232.06)
+    - market_price: price per share/unit (e.g. 71.190)
+    - market_value: total market value of that security (e.g. 115114.23)
+  Each holding row goes into the "holdings" array — one object per security.
+  - Do NOT merge holdings — each row is a separate object.
+  - If a row has no ticker symbol, leave symbol empty.
 
 - Include ALL transactions visible on ALL pages provided.
 """
@@ -297,6 +319,17 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 'percentage':   _to_decimal(b.get('percentage', 0)),
             })
 
+        holdings = []
+        for h in sec.get('holdings') or []:
+            holdings.append({
+                'security':     str(h.get('security') or ''),
+                'symbol':       str(h.get('symbol') or ''),
+                'quantity':     _to_decimal(h.get('quantity', 0)),
+                'book_cost':    _to_decimal(h.get('book_cost', 0)),
+                'market_price': _to_decimal(h.get('market_price', 0)),
+                'market_value': _to_decimal(h.get('market_value', 0)),
+            })
+
         transactions = []
         for tx in sec.get('transactions') or []:
             tx_date_str = tx.get('date')
@@ -338,6 +371,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             'begin_total_market_value':  begin_total_mv,
             'end_total_market_value':    end_total_mv,
             'balances':            balances,
+            'holdings':            holdings,
             'transactions':        transactions,
         })
 

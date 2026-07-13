@@ -2,7 +2,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
-from core.models import Account
+from core.models import Account, AccountCurrency
 from core.forms import AccountForm
 
 
@@ -35,9 +35,8 @@ class AccountCRUDTests(TestCase):
             'broker': 'IB',
             'category': 'TAXABLE',
             'owner': '',
-            'currency': 'USD',
-            'starting_balance': '500.00',
         })
+        # Redirects to account_edit page to set up currencies
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Account.objects.filter(account_id='NEW001').exists())
 
@@ -60,14 +59,25 @@ class AccountCRUDTests(TestCase):
         self.assertContains(response, self.account.name)
 
     def test_account_edit_post_valid(self):
+        # Create a currency sub-account for the formset
+        AccountCurrency.objects.create(
+            account=self.account, currency='USD',
+            starting_balance=Decimal('1000.00'),
+        )
         response = self.client.post(reverse('account_edit', kwargs={'account_id': self.account.account_id}), {
             'account_id': self.account.account_id,
             'name': 'Updated Name',
             'broker': 'IB',
             'category': self.account.category,
             'owner': self.account.owner,
-            'currency': 'USD',
-            'starting_balance': '1000.00',
+            'currencies-TOTAL_FORMS': '1',
+            'currencies-INITIAL_FORMS': '1',
+            'currencies-MIN_NUM_FORMS': '0',
+            'currencies-MAX_NUM_FORMS': '1000',
+            'currencies-0-id': AccountCurrency.objects.get(account=self.account, currency='USD').pk,
+            'currencies-0-currency': 'USD',
+            'currencies-0-starting_balance': '1000.00',
+            'currencies-0-starting_balance_date': '',
         })
         self.assertEqual(response.status_code, 302)
         self.account.refresh_from_db()

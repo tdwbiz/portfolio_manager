@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,11 +10,16 @@ from django.shortcuts import render
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from core.models import Account, TransactionType
+from core.models import Account, CoreAnnualReport, CoreMonthlyStatement, TransactionType
 from core.utils import fetch_last_prices as utils_fetch_last_prices  # noqa: F401
 from core.utils.gap_analysis import all_accounts_gap_analysis
 from core.utils.reconciliation import reconcile_account as reconcile_fn
-from core.utils.statements import generate_annual_reports, generate_monthly_statements
+from core.utils.statements import (
+    batch_generate_all_statements,
+    generate_annual_reports,
+    generate_monthly_statements,
+    reverse_generate_monthly_statements,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,16 +254,46 @@ def gap_analysis(request):
 
 
 def generate_monthly_statements_view(request):
-    """Generate or regenerate monthly statements for an account."""
+    """Show or regenerate monthly statements for an account.
+
+    GET without 'regenerate': show existing statements.
+    GET with 'regenerate=1': regenerate from transactions.
+    GET with 'batch=1': batch-generate from RBC anchor.
+    """
     account_id = request.GET.get("account")
+    regenerate = request.GET.get("regenerate", "") == "1"
+    batch = request.GET.get("batch", "") == "1"
     message = ""
     stmts = []
 
     if account_id:
         try:
             account = Account.objects.get(account_id=account_id)
-            stmts = generate_monthly_statements(account)
-            message = f"Generated {len(stmts)} monthly statements for {account}."
+
+            if regenerate:
+                stmts = generate_monthly_statements(account)
+                message = f"Regenerated {len(stmts)} monthly statements for {account}."
+            elif batch:
+                stmts, _ = batch_generate_all_statements(account)
+                message = (
+                    f"Batch-generated {len(stmts)} monthly statements (anchored from RBC) "
+                    f"for {account}."
+                )
+            else:
+                # Show existing statements
+                stmts = CoreMonthlyStatement.objects.filter(account=account).order_by(
+                    "-statement_month", "currency"
+                )[:100]
+                if stmts:
+                    message = (
+                        f"Showing {stmts.count()} existing monthly statements for {account}."
+                    )
+                else:
+                    message = (
+                        f"No monthly statements found for {account}. "
+                        f"Click 'Regenerate' to create from transactions, "
+                        f"or 'Batch from RBC' to anchor from RBC data."
+                    )
         except Account.DoesNotExist:
             message = f"Account '{account_id}' not found."
 
@@ -269,22 +305,45 @@ def generate_monthly_statements_view(request):
             "accounts": accounts,
             "selected_account": account_id,
             "message": message,
-            "statements": stmts[:50],  # Show last 50
+            "statements": list(stmts),
+            "regenerate": regenerate,
+            "batch": batch,
         },
     )
 
 
 def generate_annual_reports_view(request):
-    """Generate or regenerate annual reports for an account."""
+    """Show or regenerate annual reports for an account.
+
+    GET without 'regenerate': show existing reports.
+    GET with 'regenerate=1': regenerate from monthly statements.
+    """
     account_id = request.GET.get("account")
+    regenerate = request.GET.get("regenerate", "") == "1"
     message = ""
     reports = []
 
     if account_id:
         try:
             account = Account.objects.get(account_id=account_id)
-            reports = generate_annual_reports(account)
-            message = f"Generated {len(reports)} annual reports for {account}."
+
+            if regenerate:
+                reports = generate_annual_reports(account)
+                message = f"Regenerated {len(reports)} annual reports for {account}."
+            else:
+                # Show existing reports
+                reports = CoreAnnualReport.objects.filter(account=account).order_by(
+                    "-report_year", "currency"
+                )[:100]
+                if reports:
+                    message = (
+                        f"Showing {reports.count()} existing annual reports for {account}."
+                    )
+                else:
+                    message = (
+                        f"No annual reports found for {account}. "
+                        f"Click 'Regenerate' to create from monthly statements."
+                    )
         except Account.DoesNotExist:
             message = f"Account '{account_id}' not found."
 
@@ -296,7 +355,8 @@ def generate_annual_reports_view(request):
             "accounts": accounts,
             "selected_account": account_id,
             "message": message,
-            "reports": reports[:50],  # Show last 50
+            "reports": list(reports),
+            "regenerate": regenerate,
         },
     )
 
@@ -331,5 +391,114 @@ def reconcile_view(request):
             "period_type": period_type,
             "message": message,
             "reconciliations": reconciliations[:100],
+        },
+    )
+
+
+def reverse_statements_view(request):
+    """Generate monthly statements going backwards from an anchor month."""
+    account_id = request.GET.get("account")
+    message = ""
+    stmts = []
+
+    if request.method == "POST":
+        account_id = request.POST.get("account")
+        anchor_month_str = request.POST.get("anchor_month")
+        cad_end = request.POST.get("ending_cad")
+        usd_end = request.POST.get("ending_usd")
+
+        try:
+            account = Account.objects.get(account_id=account_id)
+        except Account.DoesNotExist:
+            message = f"Account '{account_id}' not found."
+            accounts = Account.objects.all()
+            return render(
+                request,
+                "core/reverse_statements.html",
+                {
+                    "accounts": accounts,
+                    "selected_account": account_id,
+                    "message": message,
+                },
+            )
+
+        if not anchor_month_str:
+            message = "Please select an anchor month."
+            accounts = Account.objects.all()
+            return render(
+                request,
+                "core/reverse_statements.html",
+                {
+                    "accounts": accounts,
+                    "selected_account": account_id,
+                    "message": message,
+                },
+            )
+
+        # Parse anchor month (format: YYYY-MM)
+        match = re.match(r'^(\d{4})-(\d{2})$', anchor_month_str)
+        if not match:
+            message = "Invalid anchor month format (expected YYYY-MM)."
+            accounts = Account.objects.all()
+            return render(
+                request,
+                "core/reverse_statements.html",
+                {
+                    "accounts": accounts,
+                    "selected_account": account_id,
+                    "message": message,
+                },
+            )
+        anchor_date = date(int(match.group(1)), int(match.group(2)), 1)
+
+        # Build ending balances
+        from decimal import Decimal, InvalidOperation
+
+        ending_balances = {}
+        if cad_end:
+            try:
+                ending_balances["CAD"] = Decimal(cad_end)
+            except InvalidOperation:
+                message = "Invalid CAD ending balance."
+                accounts = Account.objects.all()
+                return render(
+                    request,
+                    "core/reverse_statements.html",
+                    {
+                        "accounts": accounts,
+                        "selected_account": account_id,
+                        "message": message,
+                    },
+                )
+        if usd_end:
+            try:
+                ending_balances["USD"] = Decimal(usd_end)
+            except InvalidOperation:
+                message = "Invalid USD ending balance."
+                accounts = Account.objects.all()
+                return render(
+                    request,
+                    "core/reverse_statements.html",
+                    {
+                        "accounts": accounts,
+                        "selected_account": account_id,
+                        "message": message,
+                    },
+                )
+
+        stmts = reverse_generate_monthly_statements(
+            account, anchor_date, ending_balances
+        )
+        message = f"Generated {len(stmts)} reverse monthly statements for {account}."
+
+    accounts = Account.objects.all()
+    return render(
+        request,
+        "core/reverse_statements.html",
+        {
+            "accounts": accounts,
+            "selected_account": account_id,
+            "message": message,
+            "statements": stmts[:50],
         },
     )

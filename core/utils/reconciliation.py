@@ -36,6 +36,11 @@ def _compare_decimals(a: Decimal | None, b: Decimal | None) -> tuple[bool, Decim
     return diff <= DISCREPANCY_THRESHOLD, diff
 
 
+def _to_month_start(d: date) -> date:
+    """Convert any date to the first day of its month."""
+    return d.replace(day=1)
+
+
 def reconcile_monthly(
     account: Account,
     from_date: date | None = None,
@@ -43,39 +48,51 @@ def reconcile_monthly(
 ) -> list[CoreReconciliation]:
     """Reconcile CSV-generated monthly statements against RBC PDF data.
 
-    For each month that has a CoreMonthlyStatement, find the matching
-    RbcMonthly statement and compare key values.
+    Matches by (month_start, currency) — RBC statement_date is converted
+    to month_start for comparison.
 
     Args:
         account: The Account to reconcile.
-        from_date: Optional start date.
-        to_date: Optional end date.
+        from_date: Optional start date (will be converted to month_start).
+        to_date: Optional end date (will be converted to month_start).
 
     Returns:
         List of CoreReconciliation records.
     """
+    # Convert filter dates to month_start
+    if from_date:
+        from_date = _to_month_start(from_date)
+    if to_date:
+        to_date = _to_month_start(to_date)
+
     csv_statements = CoreMonthlyStatement.objects.filter(account=account)
     rbc_statements = RbcMonthly.objects.filter(account=account)
 
     if from_date:
         csv_statements = csv_statements.filter(statement_month__gte=from_date)
+        # RBC statement_date >= from_date
         rbc_statements = rbc_statements.filter(statement_date__gte=from_date)
     if to_date:
         csv_statements = csv_statements.filter(statement_month__lte=to_date)
+        # RBC statement_date <= to_date
         rbc_statements = rbc_statements.filter(statement_date__lte=to_date)
 
-    # Build lookups by date and currency
+    # Build lookups by (month_start, currency)
     csv_lookup = {}
     for stmt in csv_statements:
         key = (stmt.statement_month, stmt.currency)
         csv_lookup[key] = stmt
 
-    rbc_lookup = {}
+    # Group RBC statements by (month_start, currency) and keep the latest
+    rbc_by_month = {}
     for rbc in rbc_statements:
-        key = (rbc.statement_date, rbc.currency)
-        rbc_lookup[key] = rbc
+        key = (_to_month_start(rbc.statement_date), rbc.currency)
+        if key not in rbc_by_month or rbc.statement_date > rbc_by_month[key].statement_date:
+            rbc_by_month[key] = rbc
 
-    # Collect all unique (date, currency) pairs from both sources
+    rbc_lookup = rbc_by_month
+
+    # Collect all unique (month_start, currency) pairs from both sources
     all_keys = sorted(set(csv_lookup.keys()) | set(rbc_lookup.keys()))
 
     generated = []

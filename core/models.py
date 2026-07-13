@@ -78,12 +78,47 @@ class TransactionType(models.Model):
         return f"{self.code} — {self.label}"
 
 
+class AccountCurrency(models.Model):
+    """Sub-account representing one currency within an Account.
+
+    An Account (e.g. 'TOM ADVISOR') may have multiple sub-accounts
+    for different currencies (CAD, USD). Each sub-account has its own
+    starting balance and tracks per-currency statements.
+
+    This aligns the Account model with how the rest of the system already
+    handles multi-currency: CoreMonthlyStatement, CoreAnnualReport,
+    RbcMonthly, RbcAnnual, and Transaction all have their own `currency`
+    field alongside the account FK.
+    """
+
+    CURRENCY_CHOICES = [("CAD", "CAD"), ("USD", "USD")]
+
+    account = models.ForeignKey(
+        "Account",
+        on_delete=models.CASCADE,
+        related_name="currencies",
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+    )
+    starting_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    starting_balance_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [("account", "currency")]
+        ordering = ["currency"]
+
+    def __str__(self):
+        return f"{self.account.account_id} ({self.currency})"
+
+
 class Account(models.Model):
     BROKER_CHOICES = [("IB", "Interactive Brokers"), ("RBC", "RBC Brokerage")]
     CATEGORY_CHOICES = [
         ("RRSP", "RRSP (Retirement)"),
-        ("LIRA", "LIRA (Locked-In Retirement)"),
-        ("TFSA", "TFSA (Tax-Free)"),
+        ("LIRA", "Locked-In Retirement"),
+        ("TFSA", "Tax-Free"),
         ("TAXABLE", "Taxable"),
         ("RESP", "RESP (Education)"),
         ("OTHER", "Other"),
@@ -93,7 +128,15 @@ class Account(models.Model):
     )  # e.g. "TOM IB", "TS JOINT", "RBC-123456"
     name = models.CharField(max_length=100)  # human display name, editable
     broker = models.CharField(max_length=3, choices=BROKER_CHOICES)
-    currency = models.CharField(max_length=3, default="USD")
+    # DEPRECATED: Use AccountCurrency instead. Kept for backward compat.
+    # After migration, this reflects the dominant currency or 'MIX' for multi-currency.
+    # Note: max_length=3 due to existing database column constraint.
+    currency = models.CharField(
+        max_length=3,
+        default="CAD",
+        help_text="DEPRECATED: Use AccountCurrency sub-accounts instead. "
+        "Auto-set to dominant currency after migration.",
+    )
     category = models.CharField(
         max_length=10,
         choices=CATEGORY_CHOICES,
@@ -106,8 +149,18 @@ class Account(models.Model):
         default="",
         help_text='Person or entity this account belongs to (e.g. "Tom", "Wife", "Joint")',
     )
-    starting_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    starting_balance_date = models.DateField(null=True, blank=True)
+    # DEPRECATED: Use AccountCurrency.starting_balance instead.
+    starting_balance = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="DEPRECATED: Use AccountCurrency sub-accounts instead.",
+    )
+    starting_balance_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="DEPRECATED: Use AccountCurrency sub-accounts instead.",
+    )
     exclude_from_risk = models.BooleanField(
         default=False,
         help_text="When True, this account is excluded from risk calculations",
@@ -121,6 +174,16 @@ class Account(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.broker})"
+
+    @property
+    def currency_labels(self):
+        """Return list of currency labels for this account."""
+        return list(self.currencies.values_list("currency", flat=True))
+
+    @property
+    def has_multi_currency(self):
+        """True if this account has more than one currency sub-account."""
+        return self.currencies.count() > 1
 
 
 class PositionHistory(models.Model):
@@ -375,6 +438,35 @@ class RbcMonthlyTransaction(models.Model):
 
     def __str__(self):
         return f"{self.activity_type} {self.date} — {self.description[:50]}"
+
+
+class RbcMonthlyHolding(models.Model):
+    """Each individual security/holding from an RBC PDF Asset Review table.
+
+    One row per security per statement — captures quantity, book cost,
+    price, and market value for each ticker.
+    Renamed from PdfHolding in migration 0026.
+    """
+
+    rbc_monthly = models.ForeignKey(
+        RbcMonthly,
+        on_delete=models.CASCADE,
+        related_name="holdings",
+    )
+    currency = models.CharField(max_length=3, default="CAD")
+    security = models.CharField(max_length=200, help_text="Full security name")
+    symbol = models.CharField(max_length=50, blank=True, default="", help_text="Ticker symbol")
+    quantity = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))
+    book_cost = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
+    market_price = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))
+    market_value = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        ordering = ["symbol"]
+
+    def __str__(self):
+        sym = f" [{self.symbol}]" if self.symbol else ""
+        return f"{self.rbc_monthly} — {self.security}{sym}: {self.market_value}"
 
 
 class FileImportLog(models.Model):
@@ -787,6 +879,9 @@ class CoreMonthlyStatement(models.Model):
         max_digits=15, decimal_places=2, default=Decimal("0.00")
     )
     total_transactions = models.IntegerField(default=0)
+    ending_cash_balance = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="Cash balance at end of statement month (per-currency)")
 
     # Tracking
     generated_at = models.DateTimeField(auto_now_add=True)

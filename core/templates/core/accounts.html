@@ -32,6 +32,9 @@ Money{% endblock %} {% block content %}
     <a href="{% url 'reconcile' %}" class="btn btn-outline-warning btn-sm">
         <i class="bi bi-balance"></i> Reconciliation
     </a>
+    <a href="{% url 'reverse_statements' %}" class="btn btn-outline-dark btn-sm">
+        <i class="bi bi-arrow-return-left"></i> Reverse Statements
+    </a>
 </div>
 
 <div class="table-responsive">
@@ -58,9 +61,11 @@ Money{% endblock %} {% block content %}
                 <td><strong>{{ account.name|default:"\u2014" }}</strong></td>
                 <td>{{ account.get_broker_display|default:"\u2014" }}</td>
                 <td>
-                    <span class="badge bg-secondary"
-                        >{{ account.currency }}</span
-                    >
+                    {% for cur in account.currencies.all %}
+                    <span class="badge bg-secondary me-1">{{ cur.currency }}</span>
+                    {% empty %}
+                    <span class="badge bg-secondary">{{ account.currency|default:"\u2014" }}</span>
+                    {% endfor %}
                 </td>
                 <td>{{ account.get_category_display|default:"\u2014" }}</td>
                 <td>{{ account.owner|default:"\u2014" }}</td>

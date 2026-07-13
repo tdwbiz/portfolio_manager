@@ -301,19 +301,29 @@ Manage brokerage accounts across different owners and categories.
 | **Account ID** | Unique identifier (e.g., "TOM IB", "TS JOINT", "RBC-123456") |
 | **Name** | Human-readable display name |
 | **Broker** | Interactive Brokers or RBC |
-| **Currency** | Default currency (CAD, USD) |
 | **Category** | RRSP, LIRA, TFSA, TAXABLE, RESP, OTHER |
 | **Owner** | Person/entity (Tom, Susan, Joint) |
-| **Starting Balance** | Initial account value |
-| **Starting Balance Date** | Date of starting balance |
 | **Exclude from Risk** | When enabled, excludes from risk calculations |
+
+#### Account Currencies (Sub-Accounts)
+
+Accounts can hold positions and transactions in multiple currencies (CAD and USD). Each currency has its own **starting balance** and is tracked separately in monthly/annual statements.
+
+When editing an account, you'll see a **Currency Sub-Accounts** section where you can:
+- Define the starting balance for each currency (CAD, USD)
+- Set the starting balance date
+- Add or remove currencies as needed
+
+The account detail page shows a **Sub-Account Currencies** table with per-currency starting balances. Multi-currency accounts display a "Multi-Currency" badge.
+
+> **Note:** The older "Currency" and "Starting Balance" fields on accounts are deprecated. All currency-aware operations now use the `AccountCurrency` sub-account model.
 
 #### Account Actions
 
-- **List**: View all accounts with summary stats
-- **Detail**: View account positions, transactions, and performance
-- **Create**: Add new account
-- **Edit**: Modify account details
+- **List**: View all accounts with summary stats and currency badges
+- **Detail**: View account positions, transactions, per-currency balances, and performance
+- **Create**: Add new account (you'll be redirected to set up currencies)
+- **Edit**: Modify account details and currency sub-accounts
 - **Delete**: Remove account (with cascade handling)
 
 ### 3.3 Transactions
@@ -369,6 +379,94 @@ Visualize portfolio performance over time.
 - Historical portfolio value over time
 - Monthly data points
 - AJAX-powered data loading
+
+### 3.7 Monthly & Annual Statements
+
+Generate financial statements from your transaction data. Statements are per-currency (each account can have separate CAD and USD statements).
+
+**Access**: http://localhost:8000/accounts/generate-monthly-statements/
+
+#### Forward Statement Generation
+
+The system walks forward from the earliest transaction, computing ending market values for each month and currency using a net cash flow approach:
+
+```
+net_flow = sum of all transaction amounts (buys/withdrawals/taxes are negative, sells/dividends/deposits are positive)
+ending = beginning + net_flow
+```
+
+1. Select an account
+2. Existing statements are displayed automatically
+3. Click "Batch from RBC" to generate from RBC anchor data, or "Regenerate" to recalculate from transactions
+
+> **Note:** Transaction amounts follow CSV sign convention — buys and withdrawals are negative (money out), sells and income are positive (money in). Commissions are already included in the `amount_cad` field and are not added separately.
+
+1. Select an account
+2. Click "Generate Monthly Statements"
+3. Statements are created for each (account, month, currency) combination
+
+#### Reverse Statement Generation
+
+When you have a **known ending balance** for a specific month (e.g., from an RBC statement), you can generate all prior months going backwards:
+
+**Access**: http://localhost:8000/accounts/reverse-statements/
+
+1. Select the account
+2. Pick the **anchor month** (the month where you know the ending balance)
+3. Enter the known ending balance per currency
+4. Click "Generate Backwards"
+
+The system walks backwards from the anchor month, computing beginning values:
+
+```
+net_flow = sum of all transaction amounts for the month
+beginning = ending - net_flow
+```
+
+This is useful when:
+- CSV data has gaps (missing months/years)
+- You want to anchor from a verified RBC statement balance
+- You need to generate statements for prior years
+- You need to reconstruct historical statements from a known RBC reconciliation point
+
+This is useful when:
+- CSV data has gaps (missing months/years)
+- You want to anchor from a verified RBC statement balance
+- You need to generate statements for prior years
+
+#### Batch Generation from RBC (Recommended)
+
+The easiest way to generate all statements is to use **batch generation from RBC data**. This anchors each account's latest month from the RBC `end_total_market_value`, reverse-generates all prior monthly statements, then forward-generates annual reports.
+
+**Via UI**: On the Monthly Statements page, select an account and click "Batch from RBC".
+
+**Via command line** (processes all accounts):
+```powershell
+python manage.py batch_generate_statements
+```
+
+**For a specific account with dry run**:
+```powershell
+python manage.py batch_generate_statements --account 90000002 --dry-run
+```
+
+#### Annual Reports
+
+Annual reports aggregate monthly statement data into yearly summaries. Select an account to view existing reports, then click "Regenerate" to recalculate from monthly statements.
+
+**Access**: http://localhost:8000/accounts/generate-annual-reports/
+
+### 3.8 Reconciliation
+
+Compare CSV-imported data against RBC PDF statements to find discrepancies.
+
+**Access**: http://localhost:8000/accounts/reconcile/
+
+Compares:
+- Monthly: CoreMonthlyStatement vs RbcMonthly
+- Annual: CoreAnnualReport vs RbcAnnual
+
+Discrepancies greater than $1.00 are flagged.
 
 ### 3.6 Reports
 
@@ -641,7 +739,29 @@ python manage.py daily_risk_refresh
 | `seed_regime_sensitivity` | Seed regime sensitivity data |
 | `seed_historical_scenarios` | Seed historical scenarios |
 
-### 6.4 Maintenance
+### 6.4 Statement Generation
+
+| Command | Description |
+|---------|-------------|
+| `batch_generate_statements` | Generate all statements from RBC anchors (recommended) |
+| `generate_monthly_statements` | Generate monthly statements for a specific account |
+| `generate_annual_reports` | Generate annual reports for a specific account |
+| `reconcile` | Reconcile CSV vs RBC data |
+
+**Batch generation** (processes all accounts, or use `--account ID` for one):
+```powershell
+python manage.py batch_generate_statements
+python manage.py batch_generate_statements --account 90000002
+python manage.py batch_generate_statements --account 90000002 --dry-run
+```
+
+**Single account**:
+```powershell
+python manage.py generate_monthly_statements --account 90000002
+python manage.py generate_annual_reports --account 90000002
+```
+
+### 6.5 Maintenance
 
 | Command | Description |
 |---------|-------------|
@@ -649,7 +769,7 @@ python manage.py daily_risk_refresh
 | `merge_duplicate_accounts` | Merge duplicate account records |
 | `audit_retention_check` | Audit data retention compliance |
 
-### 6.5 Data Audit
+### 6.6 Data Audit
 
 The audit command runs **10 comprehensive checks** to verify data integrity after RBC PDF imports. Run this after every import to catch issues early.
 

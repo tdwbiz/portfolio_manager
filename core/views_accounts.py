@@ -9,8 +9,8 @@ from django.conf import settings
 from django.db.models import Sum, Count
 from decimal import Decimal
 
-from core.models import Account, Transaction
-from core.forms import AccountForm
+from core.models import Account, AccountCurrency, Transaction
+from core.forms import AccountForm, AccountCurrencyFormSet
 from core.views import CASH_ACTIVITY_TRANSACTION_TYPES, POSITION_TRANSACTION_TYPES
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,9 @@ def accounts_list(request):
 def account_detail(request, account_id):
     account = get_object_or_404(Account, account_id=account_id)
     transactions = Transaction.objects.filter(account=account).order_by('-date')
+
+    # Get sub-account currencies
+    currencies = account.currencies.all()
 
     # Compute balance summary
     total_cash_flow_cad = transactions.aggregate(
@@ -73,6 +76,7 @@ def account_detail(request, account_id):
 
     return render(request, 'core/account_detail.html', {
         'account': account,
+        'currencies': currencies,
         'total_cash_flow_cad': total_cash_flow_cad,
         'ending_balance_cad': ending_balance_cad,
         'cash_by_type': cash_by_type,
@@ -86,11 +90,11 @@ def account_create(request):
     if request.method == 'POST':
         form = AccountForm(request.POST)
         if form.is_valid():
-            form.save()
-            return redirect('accounts_list')
+            account = form.save()
+            return redirect('account_edit', account_id=account.account_id)
     else:
         form = AccountForm()
-    
+
     return render(request, 'core/account_form.html', {
         'form': form,
         'title': 'Add Account',
@@ -100,19 +104,21 @@ def account_create(request):
 @login_required
 def account_edit(request, account_id):
     account = get_object_or_404(Account, account_id=account_id)
-    
+
     if request.method == 'POST':
         form = AccountForm(request.POST, instance=account)
-        form.fields['account_id'].disabled = True
-        if form.is_valid():
+        currency_formset = AccountCurrencyFormSet(request.POST, instance=account)
+        if form.is_valid() and currency_formset.is_valid():
             form.save()
+            currency_formset.save()
             return redirect('account_detail', account_id=account.account_id)
     else:
         form = AccountForm(instance=account)
-        form.fields['account_id'].disabled = True
-    
+        currency_formset = AccountCurrencyFormSet(instance=account)
+
     return render(request, 'core/account_form.html', {
         'form': form,
+        'currency_formset': currency_formset,
         'title': 'Edit Account',
     })
 

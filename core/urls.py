@@ -8,6 +8,7 @@ from .views import (
     generate_monthly_statements_view,
     health_check,
     reconcile_view,
+    reverse_statements_view,
 )
 
 # Account views
@@ -91,6 +92,11 @@ urlpatterns = [
         "accounts/reconcile/",
         reconcile_view,
         name="reconcile",
+    ),
+    path(
+        "accounts/reverse-statements/",
+        reverse_statements_view,
+        name="reverse_statements",
     ),
     path("accounts/new/", account_create, name="account_create"),
     path("accounts/<str:account_id>/", account_detail, name="account_detail"),

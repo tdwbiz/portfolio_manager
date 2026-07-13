@@ -9,6 +9,52 @@
 <form method="post">
     {% csrf_token %}
     {{ form.as_p }}
+
+    {% if currency_formset %}
+    <h3>Currency Sub-Accounts</h3>
+    <p class="text-muted">Define starting balances for each currency held in this account.</p>
+    {{ currency_formset.management_form }}
+    {% for form in currency_formset %}
+    <div class="card mb-2">
+        <div class="card-body">
+            {% for field in form.hidden_fields %}
+                {{ field }}
+            {% endfor %}
+            <div class="row g-2">
+                <div class="col-md-3">
+                    {{ form.currency.label_tag }}
+                    {{ form.currency }}
+                    {% if form.currency.errors %}
+                    <div class="text-danger small">{{ form.currency.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.starting_balance.label_tag }}
+                    {{ form.starting_balance }}
+                    {% if form.starting_balance.errors %}
+                    <div class="text-danger small">{{ form.starting_balance.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.starting_balance_date.label_tag }}
+                    {{ form.starting_balance_date }}
+                    {% if form.starting_balance_date.errors %}
+                    <div class="text-danger small">{{ form.starting_balance_date.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-3 align-self-end">
+                    {% if form.DELETE %}
+                        {{ form.DELETE.label_tag }}
+                        {{ form.DELETE }}
+                        <span class="text-danger small">Delete this currency</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
     <button type="submit" class="btn btn-primary">Save Account</button>
 </form>
 <a href="{% url 'accounts_list' %}" class="btn btn-outline-secondary">Cancel</a>

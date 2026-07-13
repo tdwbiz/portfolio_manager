@@ -15,7 +15,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 from decimal import Decimal
 
-from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
+from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyHolding, RbcMonthlyTransaction
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 
 import re
@@ -175,6 +175,7 @@ class Command(BaseCommand):
         statements_created = 0
         transactions_imported = 0
         balances_recorded = 0
+        holdings_recorded = 0
         duplicates_skipped = 0
         errors = 0
 
@@ -330,6 +331,21 @@ class Command(BaseCommand):
                     )
                     file_balances_total += 1
 
+                # Create RbcMonthlyHolding records (each individual security in Asset Review table)
+                for h in parsed.get('holdings', []):
+                    RbcMonthlyHolding.objects.create(
+                        rbc_monthly=rbc_monthly,
+                        currency=currency,
+                        security=h.get('security', ''),
+                        symbol=h.get('symbol', ''),
+                        quantity=h.get('quantity', Decimal('0.00')),
+                        book_cost=h.get('book_cost', Decimal('0.00')),
+                        market_price=h.get('market_price', Decimal('0.00')),
+                        market_value=h.get('market_value', Decimal('0.00')),
+                    )
+                    file_holdings_total += 1
+                    holdings_recorded += 1
+
                 # Create RbcMonthlyTransaction records
                 for tx in parsed.get('transactions', []):
                     RbcMonthlyTransaction.objects.create(
@@ -352,7 +368,8 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.SUCCESS(
                         f'Imported [{currency}]: {pdf_file.name} -> {file_statements_total} statements, '
-                        f'{file_transactions_total} transactions, {file_balances_total} balances'
+                        f'{file_transactions_total} transactions, {file_balances_total} balances, '
+                        f'{file_holdings_total} holdings'
                     )
                 )
 
@@ -430,6 +447,7 @@ class Command(BaseCommand):
             statements_created += file_statements_total
             transactions_imported += file_transactions_total
             balances_recorded += file_balances_total
+            holdings_recorded += file_holdings_total
 
             # Move files based on success/failure
             if not dry_run and move_files:
@@ -456,6 +474,7 @@ class Command(BaseCommand):
             f'Statements created: {statements_created}\n'
             f'Transactions imported: {transactions_imported}\n'
             f'Balances recorded:  {balances_recorded}\n'
+            f'Holdings recorded:  {holdings_recorded}\n'
             f'Duplicates skipped: {duplicates_skipped}\n'
             f'Errors:             {errors}\n'
             f'Log file:           {log_file_path}\n'

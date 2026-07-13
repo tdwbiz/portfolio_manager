@@ -40,6 +40,34 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 - **Django ORM:** pyright doesn't understand Django's runtime metaclass magic. Use `typeCheckingMode: "basic"` in pyright config.
 - **Known false positives:** `logging.handlers` import (string ref in LOGGING dict), `utils_fetch_last_prices` re-export — both have `noqa: F401`.
 
+### Currency Handling (Phase E3-E + E4)
+- **10 of 13 accounts are multi-currency** (CAD + USD). The old `Account.currency` field was misleading.
+- **`AccountCurrency` model** — each (account, currency) pair is a sub-account with its own `starting_balance` and `starting_balance_date`.
+- **`Account.currency` is deprecated** — after migration it reflects the dominant currency or 'MIX' for multi-currency (max_length=3 constraint).
+- **`Account.starting_balance` is deprecated** — moved to `AccountCurrency.starting_balance`.
+- **All transaction-aware operations** (monthly statements, reconciliation, risk) already used per-currency dimensions on `CoreMonthlyStatement`, `CoreAnnualReport`, `RbcMonthly`, and `Transaction`.
+- **`AccountForm`** no longer includes `currency`, `starting_balance`, `starting_balance_date` — use `AccountCurrencyFormSet` instead.
+- **Reverse statement generation** uses the formula: `beginning = ending - net_flow` where `net_flow = sum(amount_cad)`.
+- **Auto-detection** for reverse generation tries RbcMonthly data first, then falls back to `AccountCurrency.starting_balance`.
+- **Template references** to `account.currency` should now use `account.currencies.all` to show currency badges per sub-account.
+- **CSV sign convention:** Buys/WDRAW/TAX are **negative** `amount_cad` (money out). Sells/DEP/DIV/INT are **positive** `amount_cad` (money in). Commission is **already included** in `amount_cad` — never add separately.
+- **Forward formula:** `ending = beginning + net_flow` (net_flow = sum of all amount_cad).
+- **Reverse formula:** `beginning = ending - net_flow`.
+- **Display fields** (`total_buys`, `total_commission`) stored as absolute magnitudes (positive numbers).
+- **`distinct("currency")` is PostgreSQL-only** — use per-currency subqueries for SQLite/SQL Server compatibility.
+
+### Statement Generation Formula (CSV Sign Convention)
+- All amounts come from CSV import with signed values
+- `BUY` = negative (money out to buy shares)
+- `SELL` = positive (money in from selling)
+- `WDRAW` = negative (withdrawal)
+- `DEP` = positive (deposit)
+- `DIV`/`DIST`/`INT` = positive (income)
+- `TAX` = negative (tax withheld)
+- `net_flow = sum(tx.amount_cad for tx in month_txs)`
+- `ending = beginning + net_flow`
+- Commission is already included in `amount_cad` — do NOT add it separately
+
 ## Branch Strategy
 - `dev` — active development branch
 - `main` — production
@@ -60,8 +88,8 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 ## Phase D History
 Phase D was implemented in a previous session. The code, views, templates, models, and tests were already present when we started `feature_phaseD_coding`. We verified all 122 tests pass with 0 regressions. No new code was written — only infrastructure (AGENTS.md, global_agents.md, zed settings, ai-env config, migration 0016).
 
-## Phase E (IN PROGRESS — E1, E3-A COMPLETE; E3-B, E3-C, E3-D JUST IMPLEMENTED)
-**Current test count: 138 tests (122 existing + 16 new), 0 regressions.**
+## Phase E (COMPLETE — E1, E3-A, E3-B, E3-C, E3-D, E3-E, E4 ALL IMPLEMENTED)
+**Current test count: 183 tests (148 existing + 35 new), 0 regressions.**
 
 ### E1: Symbol Resolution + Fixed Prices ✅
 - `resolve_yahoo_symbol(symbol, primary_currency)` — adds `.TO` for CAD symbols
@@ -91,8 +119,48 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - Management command: `reconcile`
 - View at `/accounts/reconcile/`
 
+### E3-E: Account Currency Refactor (Sub-Account Model) ✅
+- `AccountCurrency` model — sub-accounts per (account, currency) with own starting balance
+- `Account.currency` deprecated — set to dominant currency or 'MIX' after migration (max_length=3 constraint)
+- `Account.starting_balance` / `starting_balance_date` deprecated — moved to sub-account
+- Migration `0024_alter_*` + `0025_populate_account_currencies` — detects currencies from Transaction/RbcMonthly, creates sub-accounts, computes starting balances
+- `AccountForm` no longer includes deprecated fields; `AccountCurrencyFormSet` handles currency inlines
+- `AccountAdmin` has `AccountCurrencyInline` (TabularInline)
+- Templates show currency badges from sub-accounts, not single `account.currency`
+- Account edit view handles both `AccountForm` and `AccountCurrencyFormSet`
+- Account create redirects to edit page (to set up currencies)
+- View at `/accounts/<id>/edit/` includes currency sub-account editor
+
+### E4: Reverse Statement Generation ✅
+- `reverse_generate_monthly_statements(account, anchor_month, ending_balances)` in `core/utils/statements.py`
+- Walks backwards from a known ending balance, computing beginning values
+- Auto-detects ending balances from RbcMonthly data or AccountCurrency starting_balance
+- View at `/accounts/reverse-statements/` — form with account, anchor month, ending balances per currency
+- Template at `core/templates/core/reverse_statements.html`
+- Link added to accounts page quick tools
+
+### Batch Statement Generation (NEW)
+- `batch_generate_all_statements(account)` in `core/utils/statements.py`
+- Anchors from RBC `end_total_market_value` per currency, reverse-generates monthly, then forward-generates annual
+- Creates placeholder (zero-activity) statements when no transactions exist but RBC data is present
+- Management command: `python manage.py batch_generate_statements [--account ID] [--dry-run]`
+- Views at `/accounts/generate-monthly-statements/` and `/accounts/generate-annual-reports/`
+- **Default behavior:** shows existing statements (no regeneration)
+- **Regenerate:** add `?regenerate=1` to force recalculation from transactions
+- **Batch from RBC:** add `?batch=1` to anchor from RBC data and fill gaps
+
 **Branch:** `feature_phaseE_changes_and_fixes`
-**Migration:** `0023_coreannualreport_coremonthlystatement_and_more.py`
+**Migrations:** `0023_coreannualreport_coremonthlystatement_and_more.py`, `0024_alter_*`, `0025_populate_account_currencies.py`
+
+## Bug Fixes & Gotchas
+- **Migration numbering:** Data migration must be `0025_` not `0024_` to avoid conflicts with schema migration `0024_alter_*`.
+- **Production DB max_length=3:** `Account.currency` column has `max_length=3` — use `'MIX'` (3 chars), NOT `'MIXED'` (5 chars). Use `Account.objects.filter(pk=pk).update(currency=...)` instead of `account.save()` to avoid SQL Server truncation errors when column was previously wider.
+- **Naive datetime warning:** Suppressed in `settings_test.py` — Django `auto_now_add=True` fields can trigger warnings during tests when TZ support is active.
+- **Template bug:** Fixed malformed HTML in `accounts.html` — currency badge span was empty with stray `</span>`.
+- **Transaction requires statement FK:** Always create `BrokerStatement` in tests before creating `Transaction`.
+- **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
+- **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
+- **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
 
 ## Memory & Skill Management
 

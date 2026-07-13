@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Account,
+    AccountCurrency,
     BrandingConfig,
     BrokerStatement,
     CoreAnnualReport,
@@ -12,6 +13,7 @@ from .models import (
     RbcAnnual,
     RbcMonthly,
     RbcMonthlyBalance,
+    RbcMonthlyHolding,
     RbcMonthlyTransaction,
     Transaction,
     TransactionType,
@@ -66,6 +68,13 @@ class BrokerStatementAdmin(admin.ModelAdmin):
     search_fields = ["source", "raw_filename"]
 
 
+class AccountCurrencyInline(admin.TabularInline):
+    model = AccountCurrency
+    extra = 0
+    fields = ["currency", "starting_balance", "starting_balance_date"]
+    readonly_fields = []
+
+
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
     list_display = [
@@ -75,10 +84,10 @@ class AccountAdmin(admin.ModelAdmin):
         "category",
         "owner",
         "currency",
-        "starting_balance",
     ]
     search_fields = ["account_id", "name", "owner"]
     list_filter = ["broker", "category", "owner"]
+    inlines = [AccountCurrencyInline]
 
 
 @admin.register(Transaction)
@@ -136,6 +145,22 @@ class RbcMonthlyAdmin(admin.ModelAdmin):
     list_filter = ["account"]
     search_fields = ["account_number", "file_name"]
     date_hierarchy = "statement_date"
+
+
+@admin.register(RbcMonthlyHolding)
+class RbcMonthlyHoldingAdmin(admin.ModelAdmin):
+    list_display = [
+        "rbc_monthly",
+        "currency",
+        "security",
+        "symbol",
+        "quantity",
+        "book_cost",
+        "market_price",
+        "market_value",
+    ]
+    list_filter = ["currency", "rbc_monthly"]
+    search_fields = ["security", "symbol"]
 
 
 @admin.register(RbcAnnual)

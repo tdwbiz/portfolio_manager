@@ -1,5 +1,9 @@
 from django import forms
-from core.models import Account
+from django.contrib import admin
+from django.forms import inlineformset_factory
+from decimal import Decimal
+
+from core.models import Account, AccountCurrency
 
 
 class AccountForm(forms.ModelForm):
@@ -7,8 +11,26 @@ class AccountForm(forms.ModelForm):
         model = Account
         fields = [
             'account_id', 'name', 'broker', 'category', 'owner',
-            'currency', 'starting_balance', 'starting_balance_date'
         ]
-        widgets = {
-            'starting_balance_date': forms.DateInput(attrs={'type': 'date'}),
-        }
+        # Removed deprecated: currency, starting_balance, starting_balance_date
+
+
+class AccountCurrencyInlineFormSet(inlineformset_factory(
+    Account, AccountCurrency,
+    fields=['currency', 'starting_balance', 'starting_balance_date'],
+    extra=0,
+    can_delete=True,
+)):
+    """Formset for editing AccountCurrency sub-accounts on the account edit form."""
+
+    starting_balance = forms.DecimalField(
+        max_digits=15, decimal_places=2, required=False, initial=Decimal('0')
+    )
+
+
+AccountCurrencyFormSet = inlineformset_factory(
+    Account, AccountCurrency,
+    fields=['currency', 'starting_balance', 'starting_balance_date'],
+    extra=0,
+    can_delete=True,
+)

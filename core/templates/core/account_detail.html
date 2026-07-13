@@ -7,14 +7,45 @@
   <p class="text-muted">Account details and transaction history</p>
 </div>
 <p>
-    <strong>Account ID:</strong> {{ account.account_id }} &nbsp;|&nbsp;
-    <strong>Broker:</strong> {{ account.get_broker_display }} &nbsp;|&nbsp;
-    <strong>Base Currency:</strong> {{ account.currency }}
+    <strong>Account ID:</strong> {{ account.account_id }} &nbsp;|
+    <strong>Broker</strong>:</strong> {{ account.get_broker_display }} &nbsp;|
+    <strong>Currencies:</strong>
+    {% for cur in currencies %}
+    <span class="badge bg-secondary me-1">{{ cur.currency }}</span>
+    {% empty %}
+    <span class="badge bg-secondary">{{ account.currency|default:"—" }}</span>
+    {% endfor %}
+    {% if account.has_multi_currency %}
+    &nbsp;<span class="badge bg-info">Multi-Currency</span>
+    {% endif %}
 </p>
 <p>
     <strong>Category:</strong> {{ account.get_category_display }} &nbsp;|&nbsp;
     <strong>Owner:</strong> {{ account.owner|default:"—" }}
 </p>
+
+<!-- ── Sub-account currencies ──────────────────────────────────────────── -->
+{% if currencies %}
+<h2>Sub-Account Currencies</h2>
+<table style="width:auto;">
+    <thead>
+        <tr>
+            <th>Currency</th>
+            <th style="text-align:right;">Starting Balance</th>
+            <th style="text-align:right;">Starting Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for cur in currencies %}
+        <tr>
+            <td><strong>{{ cur.currency }}</strong></td>
+            <td style="text-align:right;">{{ cur.starting_balance }}</td>
+            <td style="text-align:right;">{{ cur.starting_balance_date|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 
 <!-- ── Balance summary ─────────────────────────────────────────────────── -->
 <h2>Balance Summary (CAD)</h2>

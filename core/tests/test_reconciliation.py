@@ -49,7 +49,13 @@ class MonthlyStatementGenerationTests(TestCase):
         commission=Decimal("0"),
         currency="CAD",
     ):
-        """Helper to create a transaction."""
+        """Helper to create a transaction.
+
+        Uses CSV sign convention:
+        - BUY/WDRAW/TAX = negative amount (money out)
+        - SELL/DEP/DIV/INT = positive amount (money in)
+        - Commission is already included in amount_cad
+        """
         return Transaction.objects.create(
             statement=self.statement,
             account=self.account,
@@ -67,36 +73,41 @@ class MonthlyStatementGenerationTests(TestCase):
 
     def test_generate_single_month(self):
         """A single BUY transaction generates one monthly statement."""
-        self._make_tx(3, 15, "AAPL", "BUY", Decimal("1950.00"), Decimal("9.99"))
+        # BUY is negative amount (money out). Commission already in amount_cad.
+        # amount_cad = -1950 (buy), commission is included in this value
+        self._make_tx(3, 15, "AAPL", "BUY", Decimal("-1950.00"))
 
         stmts = generate_monthly_statements(self.account)
         self.assertEqual(len(stmts), 1)
         stmt = stmts[0]
         self.assertEqual(stmt.statement_month, date(2024, 3, 1))
         self.assertEqual(stmt.currency, "CAD")
+        # total_buys stored as absolute magnitude
         self.assertEqual(stmt.total_buys, Decimal("1950.00"))
-        self.assertEqual(stmt.total_commission, Decimal("9.99"))
+        self.assertEqual(stmt.total_commission, Decimal("0"))
         self.assertEqual(stmt.beginning_market_value, Decimal("0.00"))
-        # Ending = 0 + 1950 - 0 + 0 + 0 - 9.99 = 1940.01
-        self.assertEqual(stmt.ending_market_value, Decimal("1940.01"))
-        # Commission is also tracked separately
-        self.assertEqual(stmt.total_commission, Decimal("9.99"))
+        # net_flow = -1950, ending = 0 + (-1950) = -1950
+        self.assertEqual(stmt.ending_market_value, Decimal("-1950.00"))
+        self.assertEqual(stmt.total_commission, Decimal("0"))
 
     def test_generate_multi_month(self):
         """Transactions in multiple months create separate statements."""
-        self._make_tx(1, 10, "AAPL", "BUY", Decimal("1950.00"), Decimal("5.00"))
-        self._make_tx(2, 15, "GOOGL", "BUY", Decimal("1300.00"), Decimal("5.00"))
+        # BUYs are negative amounts
+        self._make_tx(1, 10, "AAPL", "BUY", Decimal("-1950.00"))
+        self._make_tx(2, 15, "GOOGL", "BUY", Decimal("-1300.00"))
 
         stmts = generate_monthly_statements(self.account)
         self.assertEqual(len(stmts), 2)
 
         jan = stmts[0]
         self.assertEqual(jan.statement_month, date(2024, 1, 1))
-        self.assertEqual(jan.ending_market_value, Decimal("1945.00"))
+        # net_flow = -1950, ending = 0 + (-1950) = -1950
+        self.assertEqual(jan.ending_market_value, Decimal("-1950.00"))
 
         feb = stmts[1]
         self.assertEqual(feb.statement_month, date(2024, 2, 1))
-        self.assertEqual(feb.beginning_market_value, Decimal("1945.00"))
+        # beginning = jan ending = -1950
+        self.assertEqual(feb.beginning_market_value, Decimal("-1950.00"))
         self.assertEqual(feb.total_buys, Decimal("1300.00"))
 
     def test_generate_with_dividends_and_interest(self):
@@ -137,15 +148,16 @@ class MonthlyStatementGenerationTests(TestCase):
         self.assertEqual(stmt.total_interest, Decimal("50.00"))
 
     def test_generate_sell_transactions(self):
-        """SELL transactions subtract from market value."""
-        self._make_tx(3, 15, "AAPL", "SELL", Decimal("2080.00"), Decimal("9.99"))
+        """SELL transactions add to market value (positive cash flow)."""
+        # SELL is positive amount (money in)
+        self._make_tx(3, 15, "AAPL", "SELL", Decimal("2080.00"))
 
         stmts = generate_monthly_statements(self.account)
         self.assertEqual(len(stmts), 1)
         stmt = stmts[0]
         self.assertEqual(stmt.total_sells, Decimal("2080.00"))
-        # Ending = 0 + 0 - 2080 + 0 + 0 - 9.99 = -2089.99
-        self.assertEqual(stmt.ending_market_value, Decimal("-2089.99"))
+        # net_flow = +2080, ending = 0 + 2080 = 2080
+        self.assertEqual(stmt.ending_market_value, Decimal("2080.00"))
 
     def test_generate_idempotent(self):
         """Running generation twice updates existing records (update_or_create)."""

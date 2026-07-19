@@ -36,6 +36,7 @@ from core.models import (
     RbcAnnual,
     RbcMonthly,
     RbcMonthlyBalance,
+    RbcMonthlyHolding,
     RbcMonthlyTransaction,
 )
 from imports.classify_pdf_vl import classify_pdf
@@ -126,6 +127,7 @@ class Command(BaseCommand):
         imported_monthly_stmts = 0
         imported_transactions = 0
         imported_balances = 0
+        imported_holdings = 0
         duplicates = 0
         errors = 0
 
@@ -153,12 +155,13 @@ class Command(BaseCommand):
 
             elif doc_type == 'monthly':
                 classified_monthly += 1
-                stmts, txns, bals, errs, json_sections, err_msgs = self._process_monthly(
+                stmts, txns, bals, holdings, errs, json_sections, err_msgs = self._process_monthly(
                     pdf_file, dry_run
                 )
                 imported_monthly_stmts += stmts
                 imported_transactions += txns
                 imported_balances += bals
+                imported_holdings += holdings
                 errors += errs
 
                 json_data = {
@@ -240,6 +243,7 @@ class Command(BaseCommand):
             f'Monthly statements:      {imported_monthly_stmts}\n'
             f'Transactions imported:   {imported_transactions}\n'
             f'Balances recorded:       {imported_balances}\n'
+            f'Holdings recorded:       {imported_holdings}\n'
             f'Duplicates skipped:      {duplicates}\n'
             f'Errors:                  {errors}\n'
             f'JSON logs:               {json_dir}\n'
@@ -351,11 +355,11 @@ class Command(BaseCommand):
 
     def _process_monthly(
         self, pdf_file: Path, dry_run: bool
-    ) -> tuple[int, int, int, int, list]:
+    ) -> tuple[int, int, int, int, int, list]:
         """Parse and import a monthly statement PDF.
 
         Returns (statements_created, transactions_imported, balances_recorded,
-                 error_count, json_sections).
+                 holdings_recorded, error_count, json_sections).
         """
         try:
             parsed_list = parse_rbc_monthly_vl(str(pdf_file))
@@ -363,7 +367,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
                 self._log_import(pdf_file.name, 0, 'error', str(exc))
-            return 0, 0, 0, 1, [], [str(exc)]
+            return 0, 0, 0, 0, 1, [], [str(exc)]
 
         if dry_run:
             for parsed in parsed_list:
@@ -375,12 +379,13 @@ class Command(BaseCommand):
                         f'{len(parsed["balances"])} balances'
                     )
                 )
-            return len(parsed_list), 0, 0, 0, []
+            return len(parsed_list), 0, 0, 0, 0, []
 
         account = None
         stmts_created = 0
         txns_imported = 0
         bals_imported = 0
+        holdings_imported = 0
         file_errors = []
         json_sections = []
 
@@ -431,8 +436,9 @@ class Command(BaseCommand):
                 end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
             )
 
-            for bal in parsed.get('balances', []):
-                RbcMonthlyBalance.objects.create(
+            # Bulk create balances
+            balances_to_create = [
+                RbcMonthlyBalance(
                     rbc_monthly=rbc_monthly,
                     currency=currency,
                     account_type=bal['account_type'],
@@ -441,34 +447,57 @@ class Command(BaseCommand):
                     market_value=bal.get('market_value', Decimal('0.00')),
                     percentage=bal.get('percentage', Decimal('0.00')),
                 )
-                bals_imported += 1
+                for bal in parsed.get('balances', [])
+            ]
+            if balances_to_create:
+                RbcMonthlyBalance.objects.bulk_create(balances_to_create)
+            bals_imported += len(balances_to_create)
 
-            for tx in parsed.get('transactions', []):
-                raw_symbol = tx.get('symbol', '') or ''
-                # VL model sometimes puts the full security name in symbol;
-                # real ticker symbols are never longer than 20 chars.
-                symbol = raw_symbol[:20] if len(raw_symbol) <= 20 else ''
-                RbcMonthlyTransaction.objects.create(
+            # Bulk create holdings
+            holdings_to_create = [
+                RbcMonthlyHolding(
+                    rbc_monthly=rbc_monthly,
+                    currency=currency,
+                    security=h.get('security', ''),
+                    symbol=h.get('symbol', '')[:200],
+                    quantity=h.get('quantity', Decimal('0.0000')),
+                    book_cost=h.get('book_cost', Decimal('0.00')),
+                    market_price=h.get('market_price', Decimal('0.0000')),
+                    market_value=h.get('market_value', Decimal('0.00')),
+                )
+                for h in parsed.get('holdings', [])
+            ]
+            if holdings_to_create:
+                RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
+            holdings_imported += len(holdings_to_create)
+
+            # Bulk create transactions
+            txs_to_create = [
+                RbcMonthlyTransaction(
                     rbc_monthly=rbc_monthly,
                     date=tx['date'],
-                    activity_type=tx['activity_type'],
-                    description=tx['description'],
-                    symbol=symbol,
+                    activity_type=tx['activity_type'][:100],
+                    description=tx['description'][:500],
+                    symbol=(tx.get('symbol', '') or '')[:200],
                     quantity=tx.get('quantity') or Decimal('0.0000'),
                     price=tx.get('price') or Decimal('0.0000'),
                     debit=tx.get('debit') or Decimal('0.00'),
                     credit=tx.get('credit') or Decimal('0.00'),
                     currency=tx.get('currency', currency),
                     commission=tx.get('commission') or Decimal('0.00'),
-                    notes=tx.get('notes', ''),
+                    notes=tx.get('notes', '')[:200],
                 )
-                txns_imported += 1
+                for tx in parsed.get('transactions', [])
+            ]
+            if txs_to_create:
+                RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
+            txns_imported += len(txs_to_create)
 
             stmts_created += 1
             self.stdout.write(
                 self.style.SUCCESS(
                     f'  Imported monthly [{currency}]: {statement_date} — '
-                    f'{len(parsed["transactions"])} txns, {len(parsed["balances"])} balances'
+                    f'{len(parsed.get("transactions", []))} txns, {len(parsed.get("balances", []))} balances, {len(parsed.get("holdings", []))} holdings'
                 )
             )
 
@@ -503,7 +532,7 @@ class Command(BaseCommand):
             else:
                 self._log_import(pdf_file.name, txns_imported, 'success', '')
 
-        return stmts_created, txns_imported, bals_imported, error_count, json_sections, error_messages
+        return stmts_created, txns_imported, bals_imported, holdings_imported, error_count, json_sections, error_messages
 
     # ------------------------------------------------------------------
     # Helpers

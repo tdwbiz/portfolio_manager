@@ -1,7 +1,7 @@
-"""Thin OpenAI-compatible client for the Qwen2.5-VL vision-language model.
+"""Thin OpenAI-compatible client for the gemma-gen vision-language model.
 
 Sends one or more PDF pages (as base64 PNG images) and a structured prompt to
-the llama.cpp server on port 11440, then extracts the JSON response.
+the llama.cpp server on port 11441, then extracts the JSON response.
 
 Hard error on failure — no fallback to regex.
 """
@@ -9,11 +9,17 @@ import base64
 import json
 import logging
 import re
+import socket
 import time
+from typing import Any
 
-from openai import OpenAI
+import httpx
+from openai import OpenAI, APIConnectionError, APITimeoutError
 
 logger = logging.getLogger(__name__)
+
+# Module-level client for connection diagnostics
+_vl_http_client: httpx.Client | None = None
 
 
 class VLParseError(Exception):
@@ -21,12 +27,30 @@ class VLParseError(Exception):
 
 
 class VLClient:
-    """Client for the Qwen2.5-VL vision-language model on port 11440."""
+    """Client for the gemma-gen vision-language model on port 11441."""
 
     def __init__(self, base_url: str, model: str, timeout: int = 120, max_retries: int = 2):
-        self._client = OpenAI(base_url=base_url, api_key='not-used', timeout=timeout)
+        # Disable OpenAI library's built-in retries — we handle retries ourselves with full logging
+        import httpx
+        self._httpx_client = httpx.Client(
+            timeout=httpx.Timeout(timeout, connect=30),
+            limits=httpx.Limits(max_connections=1, keepalive_expiry=5),
+        )
+        self._client = OpenAI(
+            base_url=base_url,
+            api_key='not-used',
+            timeout=timeout,
+            http_client=self._httpx_client,
+            max_retries=0,  # We manage retries ourselves
+        )
         self._model = model
         self._max_retries = max_retries
+        self._base_url = base_url
+        self._timeout = timeout
+        # Log connection info on init
+        logger.info("VLClient: connecting to %s model=%s timeout=%ds retries=%d",
+                     base_url, model, timeout, max_retries)
+        self._diag_connection(base_url)
 
     def extract_json(self, pages: list[str], prompt: str) -> dict:
         """Send pages + prompt to the VL model and return parsed JSON.
@@ -59,40 +83,115 @@ class VLClient:
                 },
             })
 
+        # Log payload size for diagnostics
+        total_b64_size = sum(len(p) for p in pages)
+        prompt_len = len(prompt)
+        logger.info("VLClient: payload = %d pages, prompt=%d chars, images=%d KB total",
+                     len(pages), prompt_len, total_b64_size // 1024)
+
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 1):
+            t0 = time.monotonic()
             try:
-                logger.debug("VLClient: sending %d page(s) to %s (attempt %d/%d)",
-                             len(pages), self._model, attempt, self._max_retries)
-                response = self._client.chat.completions.create(
-                    model=self._model,
-                    messages=[{"role": "user", "content": content}],
-                    temperature=0.1,
-                    max_tokens=8192,
-                )
+                logger.info("VLClient: attempt %d/%d starting", attempt, self._max_retries)
+                kwargs: dict[str, Any] = {
+                    "model": self._model,
+                    "messages": [{"role": "user", "content": content}],
+                    "temperature": 0.1,
+                    "max_tokens": 8192,
+                }
+                response = self._client.chat.completions.create(**kwargs)
+                elapsed = time.monotonic() - t0
                 text = response.choices[0].message.content or ''
-                logger.debug("VLClient raw response: %s", text[:500])
+                logger.info("VLClient: attempt %d got response in %.1fs, content=%d chars",
+                            attempt, elapsed, len(text))
+
+                # Check for empty response
+                if not text.strip():
+                    raise VLParseError(
+                        f"VL model returned empty response (attempt {attempt})"
+                    )
+
+                # Log first/last 200 chars for debugging
+                if len(text) > 400:
+                    logger.debug("VLClient raw response start: %s", text[:200])
+                    logger.debug("VLClient raw response end: %s", text[-200:])
+                else:
+                    logger.debug("VLClient raw response: %s", text)
 
                 # Extract JSON from the response — model may wrap it in ```json ... ```
                 parsed = self._extract_json_from_text(text)
-                logger.info("VLClient: parsed JSON successfully on attempt %d", attempt)
+                logger.info("VLClient: parsed JSON successfully on attempt %d (%.1fs total)",
+                            attempt, time.monotonic() - t0)
                 return parsed
 
+            except APIConnectionError as exc:
+                elapsed = time.monotonic() - t0
+                last_error = exc
+                logger.error("VLClient: attempt %d APIConnectionError after %.1fs — %s",
+                             attempt, elapsed, exc)
+                # Log extra detail about the error
+                if hasattr(exc, 'request') and exc.request:
+                    logger.error("VLClient: request method=%s url=%s",
+                                 exc.request.method, exc.request.url)
+                if hasattr(exc, 'code'):
+                    logger.error("VLClient: HTTP status code=%s", exc.code)
+                if attempt < self._max_retries:
+                    wait = 5
+                    logger.info("VLClient: waiting %ds before retry", wait)
+                    time.sleep(wait)
+
+            except APITimeoutError as exc:
+                elapsed = time.monotonic() - t0
+                last_error = exc
+                logger.error("VLClient: attempt %d timeout after %.1fs — %s",
+                             attempt, elapsed, exc)
+                if attempt < self._max_retries:
+                    wait = 5
+                    logger.info("VLClient: waiting %ds before retry", wait)
+                    time.sleep(wait)
+
             except (VLParseError, json.JSONDecodeError) as exc:
+                elapsed = time.monotonic() - t0
                 last_error = exc
-                logger.warning("VLClient: attempt %d failed — %s", attempt, exc)
+                logger.warning("VLClient: attempt %d parse error after %.1fs — %s",
+                               attempt, elapsed, exc)
                 if attempt < self._max_retries:
-                    time.sleep(2)
+                    wait = 2
+                    logger.info("VLClient: waiting %ds before retry", wait)
+                    time.sleep(wait)
+
             except Exception as exc:
+                elapsed = time.monotonic() - t0
                 last_error = exc
-                logger.error("VLClient: HTTP/transport error on attempt %d — %s", attempt, exc)
+                logger.error("VLClient: attempt %d unexpected error after %.1fs — %s: %s",
+                             attempt, elapsed, type(exc).__name__, exc)
                 if attempt < self._max_retries:
-                    time.sleep(2)
+                    wait = 5
+                    logger.info("VLClient: waiting %ds before retry", wait)
+                    time.sleep(wait)
 
         raise VLParseError(
             f"VL model failed to return valid JSON after {self._max_retries} attempt(s). "
             f"Last error: {last_error}"
         )
+
+    @staticmethod
+    def _diag_connection(base_url: str):
+        """Quick connectivity diagnostic on init."""
+        try:
+            parts = base_url.rstrip('/')
+            # Extract host:port from URL like http://127.0.0.1:11440/v1
+            slash = parts.index('/', len('http://'))
+            host_port = parts[slash-1:]
+            # Try to reach /v1/models endpoint
+            with httpx.Client(timeout=5) as client:
+                resp = client.get(f"{base_url}/models")
+                logger.info("VLClient: connection test OK — status=%d models=%s",
+                            resp.status_code,
+                            [m['name'] for m in resp.json().get('models', [])])
+        except Exception as exc:
+            logger.error("VLClient: connection test FAILED — %s", exc)
 
     @staticmethod
     def _extract_json_from_text(text: str) -> dict:
@@ -107,5 +206,9 @@ class VLClient:
             end = text.rfind('}')
             if start != -1 and end != -1 and end > start:
                 text = text[start:end + 1]
+
+        # Fix common JSON errors from LLM output
+        # Remove trailing commas before } or ]
+        text = re.sub(r',\s*([\]}])', r'\1', text)
 
         return json.loads(text)

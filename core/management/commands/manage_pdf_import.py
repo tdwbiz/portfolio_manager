@@ -176,6 +176,7 @@ class Command(BaseCommand):
         transactions_imported = 0
         balances_recorded = 0
         holdings_recorded = 0
+        file_holdings_total = 0
         duplicates_skipped = 0
         errors = 0
 
@@ -318,9 +319,9 @@ class Command(BaseCommand):
                     end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
                 )
 
-                # Create RbcMonthlyBalance records
-                for bal in parsed.get('balances', []):
-                    RbcMonthlyBalance.objects.create(
+                # Bulk create RbcMonthlyBalance records
+                balances_to_create = [
+                    RbcMonthlyBalance(
                         rbc_monthly=rbc_monthly,
                         currency=currency,
                         account_type=bal['account_type'],
@@ -329,40 +330,52 @@ class Command(BaseCommand):
                         market_value=bal.get('market_value', Decimal('0.00')),
                         percentage=bal.get('percentage', Decimal('0.00')),
                     )
-                    file_balances_total += 1
+                    for bal in parsed.get('balances', [])
+                ]
+                if balances_to_create:
+                    RbcMonthlyBalance.objects.bulk_create(balances_to_create)
+                file_balances_total += len(balances_to_create)
 
-                # Create RbcMonthlyHolding records (each individual security in Asset Review table)
-                for h in parsed.get('holdings', []):
-                    RbcMonthlyHolding.objects.create(
+                # Bulk create RbcMonthlyHolding records
+                holdings_to_create = [
+                    RbcMonthlyHolding(
                         rbc_monthly=rbc_monthly,
                         currency=currency,
                         security=h.get('security', ''),
-                        symbol=h.get('symbol', ''),
+                        symbol=h.get('symbol', '')[:200],
                         quantity=h.get('quantity', Decimal('0.00')),
                         book_cost=h.get('book_cost', Decimal('0.00')),
                         market_price=h.get('market_price', Decimal('0.00')),
                         market_value=h.get('market_value', Decimal('0.00')),
                     )
-                    file_holdings_total += 1
-                    holdings_recorded += 1
+                    for h in parsed.get('holdings', [])
+                ]
+                if holdings_to_create:
+                    RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
+                file_holdings_total += len(holdings_to_create)
+                holdings_recorded += len(holdings_to_create)
 
-                # Create RbcMonthlyTransaction records
-                for tx in parsed.get('transactions', []):
-                    RbcMonthlyTransaction.objects.create(
+                # Bulk create RbcMonthlyTransaction records
+                txs_to_create = [
+                    RbcMonthlyTransaction(
                         rbc_monthly=rbc_monthly,
                         date=tx['date'],
-                        activity_type=tx['activity_type'],
-                        description=tx['description'],
-                        symbol=tx.get('symbol', ''),
+                        activity_type=tx['activity_type'][:100],
+                        description=tx['description'][:500],
+                        symbol=tx.get('symbol', '')[:200],
                         quantity=tx.get('quantity') or Decimal('0.00'),
                         price=tx.get('price') or Decimal('0.00'),
                         debit=tx.get('debit') or Decimal('0.00'),
                         credit=tx.get('credit') or Decimal('0.00'),
                         currency=tx.get('currency', currency),
                         commission=tx.get('commission') or Decimal('0.00'),
-                        notes=tx.get('notes', ''),
+                        notes=tx.get('notes', '')[:200],
                     )
-                    file_transactions_total += 1
+                    for tx in parsed.get('transactions', [])
+                ]
+                if txs_to_create:
+                    RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
+                file_transactions_total += len(txs_to_create)
 
                 file_statements_total += 1
                 self.stdout.write(
@@ -373,14 +386,13 @@ class Command(BaseCommand):
                     )
                 )
 
-            # Save JSON output for this PDF
-            json_filename = pdf_file.stem + '.json'
-            json_path = json_dir / json_filename
-
             # Check if this is an Annual Report (no transactions, no balances, just text)
-            is_annual_report = (file_statements_total == 0 and 
-                                file_balances_total == 0 and 
-                                file_transactions_total == 0)
+            # Note: duplicates are skipped but still have valid parsed data, so check parsed_list
+            has_parsed_data = any(
+                parsed.get('transactions') or parsed.get('balances') or parsed.get('holdings')
+                for parsed in parsed_list
+            ) if parsed_list else False
+            is_annual_report = not has_parsed_data
             
             # Annual Reports are valid but have no account number - handle specially
             if is_annual_report:
@@ -390,38 +402,44 @@ class Command(BaseCommand):
                     )
                 )
 
-            json_data = {
-                'filename': pdf_file.name,
-                'processed_at': datetime.now().isoformat(),
-                'is_annual_report': is_annual_report,
-                'sections': [],
-                'errors': file_errors,
-            }
-
-            for parsed in parsed_list:
-                section_data = {
-                    'currency': parsed.get('currency', 'CAD'),
-                    'statement_date': str(parsed.get('statement_date')) if parsed.get('statement_date') else None,
-                    'last_statement_date': str(parsed.get('last_statement_date')) if parsed.get('last_statement_date') else None,
-                    'account_number': parsed.get('account_number', ''),
-                    'fx_rate': str(parsed.get('fx_rate')) if parsed.get('fx_rate') is not None else None,
-                    'begin_total_market_value': str(parsed.get('begin_total_market_value', 0)),
-                    'end_total_market_value': str(parsed.get('end_total_market_value', 0)),
-                    'balances_count': len(parsed.get('balances', [])),
-                    'transactions_count': len(parsed.get('transactions', [])),
-                    'income_summary': parsed.get('income_summary', {}),
-                    'contribution_summary': parsed.get('contribution_summary', {}),
-                    'is_annual_report_section': is_annual_report,
-                    'balances': parsed.get('balances', []),
-                    'transactions': parsed.get('transactions', []),
-                }
-                json_data['sections'].append(section_data)
-
+            # Save JSON log only when there are errors
             if file_errors:
+                json_filename = pdf_file.stem + '.json'
+                json_path = json_dir / json_filename
+
+                json_data = {
+                    'filename': pdf_file.name,
+                    'processed_at': datetime.now().isoformat(),
+                    'is_annual_report': is_annual_report,
+                    'sections': [],
+                    'errors': file_errors,
+                }
+
+                for parsed in parsed_list:
+                    section_data = {
+                        'currency': parsed.get('currency', 'CAD'),
+                        'statement_date': str(parsed.get('statement_date')) if parsed.get('statement_date') else None,
+                        'last_statement_date': str(parsed.get('last_statement_date')) if parsed.get('last_statement_date') else None,
+                        'account_number': parsed.get('account_number', ''),
+                        'fx_rate': str(parsed.get('fx_rate')) if parsed.get('fx_rate') is not None else None,
+                        'begin_total_market_value': str(parsed.get('begin_total_market_value', 0)),
+                        'end_total_market_value': str(parsed.get('end_total_market_value', 0)),
+                        'balances_count': len(parsed.get('balances', [])),
+                        'holdings_count': len(parsed.get('holdings', [])),
+                        'transactions_count': len(parsed.get('transactions', [])),
+                        'income_summary': parsed.get('income_summary', {}),
+                        'contribution_summary': parsed.get('contribution_summary', {}),
+                        'is_annual_report_section': is_annual_report,
+                        'balances': parsed.get('balances', []),
+                        'holdings': parsed.get('holdings', []),
+                        'transactions': parsed.get('transactions', []),
+                    }
+                    json_data['sections'].append(section_data)
+
                 json_data['error'] = file_errors
 
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(json_data, f, indent=2, default=str)
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, default=str)
 
             # Create FileImportLog entry (once per file)
             if not dry_run:

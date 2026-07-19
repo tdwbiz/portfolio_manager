@@ -57,6 +57,22 @@ EXTRACTION_PROMPT = """\
 You are a financial data extraction assistant. The attached images are pages
 from an RBC (Royal Bank of Canada) Annual Investment Performance Report PDF.
 
+IMPORTANT: The PDF contains TWO reports:
+1. "Annual investment performance report" (pages 1-3 typically)
+   - Shows "Change in account value" table with Beginning market value,
+     Deposits, Withdrawals, Net investment return, Ending market value
+   - Shows "Summary of amount invested compared to market value"
+   - Shows "Money-weighted rate of return" (Past 1 year, 3 years, etc.)
+   - Has sections for "Your Canadian dollar account" and/or "Your U.S. dollar account"
+2. "Annual charges and compensation report" (pages 4-6 typically)
+   - Shows charges paid by you (Operating charges, Transaction charges)
+   - Shows compensation received from third parties (Trailing commission, etc.)
+   - Has separate (CAD) and (USD) subsections
+
+CRITICAL: You MUST look at ALL pages to find both CAD and USD data.
+The USD section is on a DIFFERENT page than the CAD section.
+Look for "Your U.S. dollar account" or "(USD)" headings on every page.
+
 Extract the following fields and return ONLY a valid JSON object — no
 markdown, no prose, no code fences. Do not add any keys not listed here.
 If a value is not present, use null.
@@ -95,8 +111,33 @@ JSON schema:
 Rules:
 - All monetary amounts are stored as positive numbers (withdrawals too).
 - Performance percentages are plain numbers, e.g. 15.93 for 15.93%.
-- If there is no USD section, set "usd" to null.
 - report_year is the year in report_period_end.
+
+*** HOW TO FIND USD DATA ***
+- Scan ALL pages for "Your U.S. dollar account" heading
+- The USD "Change in account value" table has the same columns as CAD:
+  Beginning market value, Deposits and transfers-in, Withdrawals and transfers-out,
+  Net investment return, Ending market value at December 31, YYYY (USD)
+- USD performance rates are in a "Money-weighted rate of return" table
+  that appears AFTER the USD account section
+- USD charges are on a later page under "Paid by you (USD)" section
+- USD compensation is on a later page under "Compensation we received from
+  third parties (USD)" section
+- If you find ANY USD data, populate the "usd" section — do NOT set it to null
+  unless you have checked ALL pages and confirmed there is truly no USD data.
+
+*** HOW TO FIND CHARGES ***
+- Look for "Annual charges and compensation report" (starts on a separate page)
+- Under "Paid by you (CAD)": find Operating charges, Transaction charges (Commissions)
+- Under "Paid by you (USD)": same structure
+- Under "Compensation we received from third parties": find Trailing commission
+- chg_operating = Total operating charges
+- chg_commissions = Commissions Equities/options
+- chg_total_transaction = Total transaction charges
+- chg_total_paid = Total paid by you
+- comp_trailing = Trailing commission
+- comp_other = Other compensation (if any)
+- comp_total = Total compensation we received
 """
 
 
@@ -130,9 +171,10 @@ def parse_rbc_annual_report_vl(file_path: str) -> dict:
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
     timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
 
-    max_pages = getattr(settings, 'VL_MAX_PAGES', 3)
-    logger.info("parse_rbc_annual_report_vl: rendering %s at %d DPI (max %d pages)", file_path, dpi, max_pages)
-    pages_b64 = _render_pdf_pages(file_path, dpi, max_pages=max_pages)
+    # Render all pages — annual reports have charges on pages 4-6
+    max_pages = 0  # 0 = unlimited
+    logger.info("parse_rbc_annual_report_vl: rendering %s at %d DPI (all pages)", file_path, dpi)
+    pages_b64 = _render_pdf_pages(file_path, dpi, max_pages=0)
     logger.info("parse_rbc_annual_report_vl: %d page(s) rendered, calling VL model", len(pages_b64))
 
     client = VLClient(base_url=base_url, model=model, timeout=timeout, max_retries=max_retries)
@@ -145,13 +187,18 @@ def parse_rbc_annual_report_vl(file_path: str) -> dict:
 # PDF → images
 # ---------------------------------------------------------------------------
 
-def _render_pdf_pages(file_path: str, dpi: int, max_pages: int = 3) -> list[str]:
-    """Render up to max_pages pages of the PDF to PNG and return base64-encoded strings."""
+def _render_pdf_pages(file_path: str, dpi: int, max_pages: int = 0) -> list[str]:
+    """Render PDF pages to PNG and return base64-encoded strings.
+    
+    max_pages=0 means render all pages.
+    """
     doc = fitz.open(file_path)
     pages_b64 = []
     matrix = fitz.Matrix(dpi / 72, dpi / 72)
     try:
-        for page in list(doc)[:max_pages]:
+        for i, page in enumerate(doc):
+            if max_pages > 0 and i >= max_pages:
+                break
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             png_bytes = pix.tobytes("png")
             pages_b64.append(base64.b64encode(png_bytes).decode('ascii'))

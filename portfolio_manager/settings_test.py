@@ -15,7 +15,7 @@ DATABASES = {
 AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix="amibroker_")
 
 # VL model settings for tests
-VL_MODEL_BASE_URL = "http://localhost:11439/v1"
+VL_MODEL_BASE_URL = "http://127.0.0.1:11440/v1"
 
 # yFinance fetch settings
 YFINANCE_DEFAULT_HISTORY_YEARS = 10

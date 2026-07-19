@@ -138,18 +138,18 @@ Rules:
   These are found at the BOTTOM of the "Asset Summary" or "Market Value" table.
   The table lists individual holdings with their market values and percentages.
   At the very end of this table, there are TWO "Total on [date]" lines:
-  
+
     Total on MAY 31 $287,192.32 100.00 %    ← ENDING total (current statement date)
     Total on APR. 30 $285,450.10             ← BEGINNING total (previous statement date)
-  
+
   - end_total_market_value = the dollar amount from the "Total on [CURRENT DATE]" line
     (the one that HAS a percentage, e.g. "Total on MAY 31 $287,192.32 100.00 %")
   - begin_total_market_value = the dollar amount from the "Total on [PREVIOUS DATE]" line
     (the one that does NOT have a percentage, e.g. "Total on APR. 30 $285,450.10")
-  
+
   IMPORTANT: These totals represent the FULL PORTFOLIO VALUE, NOT individual holdings.
   Typical portfolio values range from $10,000 to $1,000,000+.
-  
+
   HOW TO FIND THE TOTALS:
   1. Look for the "Asset Summary" or "Market Value" table
   2. Scroll to the VERY BOTTOM of this table
@@ -157,13 +157,13 @@ Rules:
      - One with the current statement date (has percentage) → end_total
      - One with the previous statement date (no percentage) → begin_total
   4. Extract the DOLLAR AMOUNT from each line (remove $ and commas)
-  
+
   CRITICAL WARNINGS:
   - DO NOT use the market value of a single stock/holding
   - DO NOT use any value from the middle of the table
   - DO NOT return 0 or small values (< $1,000) unless the account truly has that little
   - The "Total on" lines are ALWAYS at the bottom of the table, AFTER all holdings
-  
+
   Example CORRECT extraction:
   - Text: "Total on MAY 31 $287,192.32 100.00 %" → end_total = 287192.32
   - Text: "Total on APR. 30 $285,450.10" → begin_total = 285450.10
@@ -173,7 +173,7 @@ Rules:
   The typical range for USD/CAD is 0.70 to 1.60.
   If you see this line, extract the X.XXXX value as fx_rate.
   If you do NOT see this line, use null (NOT 1.0 or 0).
-  
+
   Common mistake: Do NOT return 1.000000 if you cannot find the exchange rate.
   Return null instead. The system will handle null values correctly.
 
@@ -221,7 +221,7 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
         If required fields (statement_date, account_number) are missing.
     """
     base_url = settings.VL_MODEL_BASE_URL
-    model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
+    model = getattr(settings, 'VL_MODEL_NAME', 'gemma-gen')
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
     timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
@@ -253,14 +253,36 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
-    """Render all pages of the PDF to PNG and return base64 strings."""
+    """Render PDF pages to PNG and return base64 strings.
+    
+    Limits to VL_MONTHLY_MAX_PAGES (default 0 = unlimited).
+    Set to 0 to render all pages, or a specific number to limit.
+    """
     doc = fitz.open(file_path)
     total = len(doc)
-    logger.info("parse_rbc_monthly_vl: PDF has %d page(s), rendering all", total)
+    max_pages = getattr(settings, 'VL_MONTHLY_MAX_PAGES', 0)
+    
+    # 0 means unlimited - render all pages
+    if max_pages <= 0:
+        render_count = total
+        logger.info(
+            "parse_rbc_monthly_vl: PDF has %d page(s), rendering all (unlimited)",
+            total,
+        )
+    else:
+        render_count = min(total, max_pages)
+        logger.info(
+            "parse_rbc_monthly_vl: PDF has %d page(s), rendering first %d (max=%d)",
+            total, render_count, max_pages,
+        )
+    
     pages_b64 = []
     matrix = fitz.Matrix(dpi / 72, dpi / 72)
     try:
-        for page in doc:
+        for i, page in enumerate(doc):
+            if max_pages > 0 and i >= max_pages:
+                logger.info("parse_rbc_monthly_vl: skipping page %d (max=%d)", i, max_pages)
+                break
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             png_bytes = pix.tobytes("png")
             pages_b64.append(base64.b64encode(png_bytes).decode('ascii'))
@@ -384,10 +406,10 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
     for section in result:
         end_total = section.get('end_total_market_value', Decimal('0'))
         begin_total = section.get('begin_total_market_value', Decimal('0'))
-        
+
         # Sum up all balance market values for this section
         balance_sum = sum((b.get('market_value', Decimal('0')) for b in section.get('balances', [])), Decimal('0'))
-        
+
         # If end_total is suspiciously low but balances sum to a large value,
         # the VL model likely extracted a single holding instead of the total
         if end_total < Decimal('1000') and balance_sum > Decimal('1000'):
@@ -403,7 +425,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     file_path, section.get('currency', 'CAD'), end_total, balance_sum,
                 )
                 section['end_total_market_value'] = balance_sum
-        
+
         # Same check for begin_total
         if begin_total < Decimal('1000') and balance_sum > Decimal('1000'):
             logger.warning(

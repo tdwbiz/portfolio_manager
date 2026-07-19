@@ -235,16 +235,16 @@ _json_raw = (
 )
 IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / "processed" / "json_logs"
 
-# Vision-language (VL) model settings — Gemma4-26B on port 11439 via llama.cpp
-VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://localhost:11439/v1")
-VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "gemma4_26B-general")
+# Vision-language (VL) model settings — qwen2.5-vl-7b on port 11440 via llama.cpp
+VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11440/v1")
+VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "qwen2.5-vl")
 VL_PAGE_DPI = int(os.getenv("VL_PAGE_DPI", "150"))
 VL_MAX_RETRIES = int(os.getenv("VL_MAX_RETRIES", "2"))
-VL_TIMEOUT_SECONDS = int(os.getenv("VL_TIMEOUT_SECONDS", "120"))
+VL_TIMEOUT_SECONDS = int(os.getenv("VL_TIMEOUT_SECONDS", "600"))  # 10 minutes for large PDFs
 VL_MAX_PAGES = int(os.getenv("VL_MAX_PAGES", "3"))
 VL_MONTHLY_MAX_PAGES = int(
-    os.getenv("VL_MONTHLY_MAX_PAGES", "5")
-)  # monthly statements have more pages
+    os.getenv("VL_MONTHLY_MAX_PAGES", "0")
+)  # 0 = unlimited — render all pages so holdings on later pages are captured
 
 # UI configuration via environment variables
 IMPORT_INBOX_POLL_INTERVAL = int(

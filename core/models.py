@@ -240,7 +240,7 @@ class Transaction(models.Model):
         related_name="transactions",
     )
     date = models.DateField()
-    symbol = models.CharField(max_length=50, blank=True, default="")
+    symbol = models.CharField(max_length=200, blank=True, default="")
     type = models.CharField(max_length=20)
     quantity = models.DecimalField(max_digits=12, decimal_places=4)
     price = models.DecimalField(max_digits=12, decimal_places=4)
@@ -397,7 +397,7 @@ class RbcMonthlyTransaction(models.Model):
     )
     date = models.DateField()
     activity_type = models.CharField(
-        max_length=50, help_text='e.g. "INTEREST", "BUY", "SELL", "DIVIDEND"'
+        max_length=100, help_text='e.g. "INTEREST", "BUY", "SELL", "DIVIDEND"'
     )
     description = models.CharField(
         max_length=500,
@@ -405,7 +405,7 @@ class RbcMonthlyTransaction(models.Model):
         default="",
         help_text="Full activity description from PDF",
     )
-    symbol = models.CharField(max_length=50, blank=True, default="")
+    symbol = models.CharField(max_length=200, blank=True, default="")
     quantity = models.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal("0.0000")
     )
@@ -455,7 +455,7 @@ class RbcMonthlyHolding(models.Model):
     )
     currency = models.CharField(max_length=3, default="CAD")
     security = models.CharField(max_length=200, help_text="Full security name")
-    symbol = models.CharField(max_length=50, blank=True, default="", help_text="Ticker symbol")
+    symbol = models.CharField(max_length=200, blank=True, default="", help_text="Ticker symbol")
     quantity = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))
     book_cost = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
     market_price = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))

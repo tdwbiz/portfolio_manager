@@ -32,6 +32,10 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 ```
 - Uses llama.cpp on port 11437 (NOT Ollama)
 - Model name: `qwen35B-code`
+- Alternative model: `qwen27B-code` on port 11438
+  ```powershell
+  aider --model openai/qwen27B-code --openai-api-base http://127.0.0.1:11438/v1
+  ```
 - In aider, end a command with `/exit`
 
 ## Architecture Notes
@@ -161,6 +165,14 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
 - **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
 - **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
+
+## PDF Import & Holdings Architecture
+- **PDF monthly statements are master** (state + activity). CSV is activity layer only.
+- **4 PDF sections parsed:** Account Info (`RbcMonthly`), Account Activity (`RbcMonthlyTransaction`), Balances summary (`RbcMonthlyBalance`), Holdings/Asset Review (`RbcMonthlyHolding`).
+- **VL model config:** `settings.py` lines 238-247: `VL_MODEL_BASE_URL = http://127.0.0.1:11440/v1`, `VL_MODEL_NAME = qwen2.5-vl`. Model `qwen2.5-vl-7b-instruct-q8_0.gguf` on port 11440 via llama.cpp with `--mmproj`.
+- **`vl_model` skill at `~/.agents/skills/vl_model/`** — not registered in available skills list, can be edited directly.
+- **Key bug:** `vl_model` error `500 - image input is not supported - hint: if this is unexpected, you may need to provide the mmproj` — this was from old qwen2.5-vl config, not Gemma 4. Gemma 4 has built-in vision encoder (~550M params), no separate `mmproj` needed.
+- **JSON logs:** `processed/json_logs/` contains JSON only for **failed** imports. Successful imports log to `FileImportLog` model.
 
 ## Memory & Skill Management
 

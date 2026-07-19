@@ -1,17 +1,12 @@
 """Management command to import RBC Annual Reports in batch."""
 
 import logging
-import os
 import shutil
-import sys
-import time
-from datetime import datetime
 from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
-from decimal import Decimal
 
 from core.models import Account, FileImportLog, RbcAnnual
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
@@ -66,11 +61,9 @@ class Command(BaseCommand):
     def _get_or_create_account(self, account_number: str, account_type_code: str,
                                account_name: str = ''):
         """Look up or create an Account matching the RBC account number."""
-        if account_number:
-            # Normalize to 8-digit canonical form first
-            import re
-            digits = re.sub(r'\D', '', account_number)
-            canonical = digits[:8] if len(digits) >= 8 else digits
+        import re
+        canonical = re.sub(r'\D', '', account_number)[:8] if account_number else ''
+        if canonical:
             try:
                 return Account.objects.get(account_id=canonical)
             except Account.DoesNotExist:
@@ -82,7 +75,7 @@ class Command(BaseCommand):
                 pass
 
         # Auto-create
-        account_id = canonical if account_number else f'RBC-{account_type_code}'
+        account_id = canonical or f'RBC-{account_type_code}'
         name = account_name or f'Auto-created from PDF: {account_number}'
         logger.warning("Auto-created account for unrecognised number %r", account_number)
         return Account.objects.create(

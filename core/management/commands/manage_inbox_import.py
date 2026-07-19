@@ -17,10 +17,8 @@ Usage examples:
 
 import json
 import logging
-import os
 import re
 import shutil
-import sys
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -42,7 +40,6 @@ from core.models import (
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
-from imports.llm_client import VLParseError
 
 logger = logging.getLogger(__name__)
 
@@ -253,15 +250,11 @@ class Command(BaseCommand):
     # Annual processing
     # ------------------------------------------------------------------
 
-    def _process_annual(self, pdf_file: Path, dry_run: bool) -> tuple[int, int]:
+    def _process_annual(self, pdf_file: Path, dry_run: bool) -> tuple[int, int, str]:
         """Parse and import an annual report PDF.
 
-        Returns (records_created, error_count).
+        Returns (records_created, error_count, error_message).
         """
-        processed_dir = Path(
-            getattr(settings, 'IMPORT_PROCESSED_DIR', settings.BASE_DIR / 'processed')
-        )
-
         try:
             parsed = parse_rbc_annual_report_vl(str(pdf_file))
         except Exception as exc:
@@ -278,7 +271,7 @@ class Command(BaseCommand):
                     f'year={parsed["report_year"]} currencies={currencies}'
                 )
             )
-            return len(currencies), 0
+            return len(currencies), 0, ''
 
         account = _get_or_create_account(
             parsed['account_number'],
@@ -355,11 +348,11 @@ class Command(BaseCommand):
 
     def _process_monthly(
         self, pdf_file: Path, dry_run: bool
-    ) -> tuple[int, int, int, int, int, list]:
+    ) -> tuple[int, int, int, int, int, list, list]:
         """Parse and import a monthly statement PDF.
 
         Returns (statements_created, transactions_imported, balances_recorded,
-                 holdings_recorded, error_count, json_sections).
+                 holdings_recorded, error_count, json_sections, error_messages).
         """
         try:
             parsed_list = parse_rbc_monthly_vl(str(pdf_file))
@@ -379,7 +372,7 @@ class Command(BaseCommand):
                         f'{len(parsed["balances"])} balances'
                     )
                 )
-            return len(parsed_list), 0, 0, 0, 0, []
+            return len(parsed_list), 0, 0, 0, 0, [], []
 
         account = None
         stmts_created = 0

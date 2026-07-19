@@ -5,11 +5,9 @@ the llama.cpp server on port 11441, then extracts the JSON response.
 
 Hard error on failure — no fallback to regex.
 """
-import base64
 import json
 import logging
 import re
-import socket
 import time
 from typing import Any
 
@@ -17,9 +15,6 @@ import httpx
 from openai import OpenAI, APIConnectionError, APITimeoutError
 
 logger = logging.getLogger(__name__)
-
-# Module-level client for connection diagnostics
-_vl_http_client: httpx.Client | None = None
 
 
 class VLParseError(Exception):
@@ -125,6 +120,16 @@ class VLClient:
                             attempt, time.monotonic() - t0)
                 return parsed
 
+            except APITimeoutError as exc:
+                elapsed = time.monotonic() - t0
+                last_error = exc
+                logger.error("VLClient: attempt %d timeout after %.1fs — %s",
+                             attempt, elapsed, exc)
+                if attempt < self._max_retries:
+                    wait = 5
+                    logger.info("VLClient: waiting %ds before retry", wait)
+                    time.sleep(wait)
+
             except APIConnectionError as exc:
                 elapsed = time.monotonic() - t0
                 last_error = exc
@@ -136,16 +141,6 @@ class VLClient:
                                  exc.request.method, exc.request.url)
                 if hasattr(exc, 'code'):
                     logger.error("VLClient: HTTP status code=%s", exc.code)
-                if attempt < self._max_retries:
-                    wait = 5
-                    logger.info("VLClient: waiting %ds before retry", wait)
-                    time.sleep(wait)
-
-            except APITimeoutError as exc:
-                elapsed = time.monotonic() - t0
-                last_error = exc
-                logger.error("VLClient: attempt %d timeout after %.1fs — %s",
-                             attempt, elapsed, exc)
                 if attempt < self._max_retries:
                     wait = 5
                     logger.info("VLClient: waiting %ds before retry", wait)
@@ -180,10 +175,6 @@ class VLClient:
     def _diag_connection(base_url: str):
         """Quick connectivity diagnostic on init."""
         try:
-            parts = base_url.rstrip('/')
-            # Extract host:port from URL like http://127.0.0.1:11440/v1
-            slash = parts.index('/', len('http://'))
-            host_port = parts[slash-1:]
             # Try to reach /v1/models endpoint
             with httpx.Client(timeout=5) as client:
                 resp = client.get(f"{base_url}/models")

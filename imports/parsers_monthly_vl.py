@@ -51,8 +51,6 @@ import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Optional
-
 import fitz  # PyMuPDF
 
 from django.conf import settings
@@ -279,7 +277,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
     pages_b64 = []
     matrix = fitz.Matrix(dpi / 72, dpi / 72)
     try:
-        for i, page in enumerate(doc):
+        for i, page in enumerate(doc):  # pyright: ignore[reportArgumentType]
             if max_pages > 0 and i >= max_pages:
                 logger.info("parse_rbc_monthly_vl: skipping page %d (max=%d)", i, max_pages)
                 break
@@ -444,7 +442,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
 def _parse_date(value: str) -> date:
     """Parse an ISO-8601 date string (YYYY-MM-DD) to a Python date."""
     if not value:
-        raise ValueError(f"Empty date string")
+        raise ValueError("Empty date string")
     # Strip time component if the model returns a full datetime string
     date_part = str(value).strip()[:10]
     try:
@@ -485,7 +483,7 @@ def _parse_rbc_monthly_regex(file_path: str) -> list[dict]:
         List of section dicts. May be incomplete compared to VL output.
     """
     doc = fitz.open(file_path)
-    full_text = '\n'.join(page.get_text() for page in doc)
+    full_text = '\n'.join([str(page.get_text()) for page in doc])
     doc.close()
 
     result = []

@@ -18,8 +18,6 @@ from decimal import Decimal
 from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyHolding, RbcMonthlyTransaction
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 
-import re
-
 logger = logging.getLogger(__name__)
 
 # ANSI escape code pattern
@@ -113,7 +111,7 @@ class Command(BaseCommand):
                         f'Moved to {dest_folder}: {src_path.name}'
                     )
                 )
-        except PermissionError as perm_err:
+        except PermissionError:
             # Retry with delays
             for attempt in range(5):
                 try:
@@ -225,7 +223,6 @@ class Command(BaseCommand):
             file_statements_total = 0
             file_errors = []
             account = None
-            all_parsed_data = {}  # For JSON output
 
             for parsed in parsed_list:
                 statement_date = parsed.get('statement_date')
@@ -233,7 +230,7 @@ class Command(BaseCommand):
                 currency = parsed.get('currency', 'CAD')
 
                 if not statement_date:
-                    error_msg = f'could not determine statement date'
+                    error_msg = 'could not determine statement date'
                     file_errors.append({'currency': currency, 'error': error_msg})
                     self.stderr.write(self.style.ERROR(
                         f'Skipping {pdf_file.name} [{currency}]: {error_msg}'

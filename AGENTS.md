@@ -166,6 +166,15 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
 - **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
 
+## Reconciliation Work (feature_rbc_statements_reconciliation)
+- Active branch for verifying PDF data integrity and planning CSV reconciliation
+- `scripts/verify_pdf_integrity.py` — verifies RBC PDF internal consistency
+  - Usage: `python scripts/verify_pdf_integrity.py --account 90000001 --currency CAD --start-date 2019-01-01 --start-balance 393437.82`
+  - Reports saved to `docs/reconciliation/pdf_integrity_<account>_<currency>.md`
+  - Each account gets its own start date decided during inspection
+- TS_HUISGELD (90000001) CAD: Start date 2019-01-01, Start balance $393,437.82. 90 PDF statements (2017-11 to 2026-04), 88 in analysis. Balance chain intact except first statement ($12.28 offset from start balance). 57 periods show small DRIP reconciliation gaps (expected).
+- Monthly vs Annual cross-check shows consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
+
 ## PDF Import & Holdings Architecture
 - **PDF monthly statements are master** (state + activity). CSV is activity layer only.
 - **4 PDF sections parsed:** Account Info (`RbcMonthly`), Account Activity (`RbcMonthlyTransaction`), Balances summary (`RbcMonthlyBalance`), Holdings/Asset Review (`RbcMonthlyHolding`).
@@ -180,6 +189,14 @@ Phase D was implemented in a previous session. The code, views, templates, model
   - PDF `BOUGHT` with small `debit` ($1-$5) is likely a fee/commission.
   - PDF `TRANSFER` with `credit` is an inflow (transfer-in), but CSV may record it as negative TFO (transfer-out from source account).
   - CSV `INT` with `amount_cad = 0.00` are phantom entries — no actual money moved.
+- **PDF DRIP quantity convention (from verify_pdf_integrity analysis):**
+  - DRIP `BUY` entries with description "DIST ON X SHS" have two patterns:
+    - **"Fake quantity"**: `quantity` field = existing holdings count (e.g., `BUY VDY 2891 debit=366.13`). The actual new shares are fractional and NOT stored in `quantity`. Detect by parsing "DIST ON X SHS" — if `quantity == X`, the quantity field is unreliable. Skip for share-count reconciliation.
+    - **"Real quantity"**: `quantity` is a small fractional number (e.g., `BUY VDY 0.1670 debit=1033.79`). This IS the actual new shares. Detect when `quantity < 10` and `quantity != parsed_X`.
+  - `BOUGHT` with `debit > 0` and no "DIST" in description = real cash purchase (quantity is accurate)
+  - `SOLD` with `debit > 0` = sell (quantity is accurate, `debit` = proceeds)
+  - `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share. Shares = `debit / 10`
+  - Many older transactions have empty `symbol` — symbol must be extracted from `description`
 
 ## Memory & Skill Management
 

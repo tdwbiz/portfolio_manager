@@ -173,6 +173,13 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **`vl_model` skill at `~/.agents/skills/vl_model/`** — not registered in available skills list, can be edited directly.
 - **Key bug:** `vl_model` error `500 - image input is not supported - hint: if this is unexpected, you may need to provide the mmproj` — this was from old qwen2.5-vl config, not Gemma 4. Gemma 4 has built-in vision encoder (~550M params), no separate `mmproj` needed.
 - **JSON logs:** `processed/json_logs/` contains JSON only for **failed** imports. Successful imports log to `FileImportLog` model.
+- **PDF transaction sign convention (from reconcile_tx analysis):**
+  - PDF `RbcMonthlyTransaction` uses `debit` (outflow) and `credit` (inflow). Net = `credit - debit`.
+  - PDF SELL/INTEREST(Tax) show as `debit` (negative net) — opposite of CSV where SELL is positive.
+  - PDF `BUY` with `credit` is actually a dividend reinvestment — CSV labels it `DIST`.
+  - PDF `BOUGHT` with small `debit` ($1-$5) is likely a fee/commission.
+  - PDF `TRANSFER` with `credit` is an inflow (transfer-in), but CSV may record it as negative TFO (transfer-out from source account).
+  - CSV `INT` with `amount_cad = 0.00` are phantom entries — no actual money moved.
 
 ## Memory & Skill Management
 

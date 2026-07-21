@@ -244,11 +244,11 @@ Rules:
      for cash. DEBIT or CREDIT = proceeds (money in). quantity = shares sold.
   
   3. **DIST**: Description contains "DIST ON X SHS". This is a cash
-     distribution/dividend you RECEIVE. The amount is in the DEBIT column.
-     quantity = per-share distribution rate (small number like 0.169).
-     The actual cash received = DEBIT amount.
-     Example: "VDY DIST ON 6182 SHS" with DEBIT 1047.29 means you received
-     $1,047.29 cash. This is NOT a buy — it is cash income.
+     distribution/dividend you RECEIVE. The total cash amount is in the
+     CREDIT column. The per-share distribution rate is in the PRICE column
+     (small number like 0.169). Leave QUANTITY as 0 (it is blank in the PDF).
+     Example: "VDY DIST ON 6182 SHS" → CREDIT = 1047.29, PRICE = 0.169, QUANTITY = 0.
+     This is NOT a buy — it is cash income.
   
   4. **DIVIDEND**: The ACTIVITY column says "DIVIDEND" or "DIV". Cash
      dividend received. CREDIT = cash amount (money in).
@@ -259,7 +259,8 @@ Rules:
   
   6. **INTEREST**: Description contains "RBC INVESTMENT SAVINGS" or
      "INTEREST". This is interest on RBF2010/RBF2014 savings funds.
-     quantity = new shares earned, cash = quantity × $10.
+     quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
+     is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
      Net cash effect = 0 (interest reinvested as shares).
   
   7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB**:
@@ -542,15 +543,54 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             if raw_type == 'BUY' and 'DIST ON' in description.upper():
                 activity = 'DIST'
 
+            quantity = _to_decimal(tx.get('quantity', 0))
+            price = _to_decimal(tx.get('price', 0))
+            debit = _to_decimal(tx.get('debit', 0))
+            credit = _to_decimal(tx.get('credit', 0))
+
+            # --- Fix DIST: per-share rate goes in price, quantity is 0 ---
+            # PDF: DIST has per-share rate in RATE column, quantity blank in PDF
+            # VL model often puts the rate in quantity and total cash in credit/debit
+            if activity == 'DIST':
+                # If quantity looks like a per-share rate (small decimal < 5),
+                # move it to price and set quantity to 0
+                if 0 < quantity < Decimal('5'):
+                    price = quantity
+                    quantity = Decimal('0')
+                    logger.info(
+                        "parse_rbc_monthly_vl: DIST rate->price fix: price=%.4f qty=0 for: %s",
+                        price, description[:60],
+                    )
+                # Ensure cash is in credit (money in)
+                if debit > 0 and credit == 0:
+                    credit = debit
+                    debit = Decimal('0')
+
+            # --- Fix INTEREST: only quantity matters, clear price/debit/credit ---
+            # RBF2010/RBF2014 interest: quantity = new shares earned
+            # The PDF shows quantity and $10 rate, but no real debit/credit
+            if activity == 'INTEREST':
+                # Clear the $10 rate from price field — it's not a real price
+                if price == Decimal('10.00'):
+                    price = Decimal('0')
+                # Clear any debit/credit that may have been parsed
+                # (interest is reinvested as shares, no cash flow)
+                debit = Decimal('0')
+                credit = Decimal('0')
+                logger.info(
+                    "parse_rbc_monthly_vl: INTEREST fix: qty=%s price=0 for: %s",
+                    quantity, description[:60],
+                )
+
             transactions.append({
                 'date':          tx_date,
                 'activity_type': activity,
                 'description':   description,
                 'symbol':        str(tx.get('symbol') or ''),
-                'quantity':      _to_decimal(tx.get('quantity', 0)),
-                'price':         _to_decimal(tx.get('price', 0)),
-                'debit':         _to_decimal(tx.get('debit', 0)),
-                'credit':        _to_decimal(tx.get('credit', 0)),
+                'quantity':      quantity,
+                'price':         price,
+                'debit':         debit,
+                'credit':        credit,
                 'currency':      currency,
                 'commission':    _to_decimal(tx.get('commission', 0)),
                 'notes':         str(tx.get('notes') or ''),

@@ -1,26 +1,24 @@
 """Generate detailed ledger-style .md report for months with >5% price change.
 
-For each qualifying month, shows:
-  Opening Balance (from begin_total_market_value)
-  Opening Holdings (from previous statement's holdings)
-  Transaction Ledger (current statement — raw DB data with correct interpretation)
-  Closing Holdings (from current statement's holdings)
-  Closing Balance (from end_total_market_value)
-
-RBC PDF convention (parsed by VL model):
-  - SOLD/SELL: debit or credit = proceeds (money in from sale)
-  - BOUGHT/BUY: debit or credit = cost (money out for purchase)
-  - DIVIDEND/DIV: credit = cash dividend
-  - DIV REIN: dividend reinvested (no net cash flow — div -> shares)
-  - INTEREST: debit or credit = interest amount
-  - TRANSFER/TFR OUT: money in/out
-  - DRIP (BUY/SOLD with "DIST ON X SHS"): reinvestment, qty field unreliable
-  - OPENING BALANCE: not a real transaction
-
-Parser quirks:
-  - Sometimes `price` = per-share price, sometimes `price` = total amount
-  - Sometimes the amount is in `debit`, sometimes in `credit`
-  - For DRIP, `quantity` often = existing holdings count, actual new shares in `price` or fractional
+RBC PDF Transaction Convention (CORRECT):
+  - The PDF has columns: DATE | ACTIVITY | DESCRIPTION | QTY | RATE | DEBIT | CREDIT
+  - "DIST ON X SHS" in description = CASH DIVIDEND (money IN). Amount = qty × rate.
+  - INTEREST = RBF2010/RBF2014 savings interest. Shares increase by qty. Cash = qty × $10.
+  - DIVIDEND = Cash dividend received. Credit column has amount.
+  - DIV REIN = Dividend used to buy shares. Has REINV@C$XX showing purchase price.
+  - BUY/BOUGHT = Purchase of shares. Debit = cost.
+  - SOLD/SELL = Sale of shares. Debit or credit = proceeds.
+  
+  Parser bugs:
+  - "DIST ON X SHS" is often labeled as BUY instead of DIST
+  - Opening cash balance sometimes merged into first transaction's credit field
+  - quantity field for DIST entries may be existing holdings count OR per-share dividend
+  
+  Cash Flow:
+  - Positive = cash coming into the account (sell proceeds, dividends)
+  - Negative = cash leaving (buy cost, transfers out)
+  - DIV REIN = 0 (dividend immediately reinvested as shares)
+  - INTEREST = 0 (interest immediately reinvested as RBF shares)
 
 Usage:
     python scripts/ledger_high_change.py --account 90000001 --currency CAD [--threshold 5]
@@ -45,8 +43,9 @@ django.setup()
 
 from core.models import Account, RbcMonthly, RbcMonthlyTransaction, RbcMonthlyHolding
 
-# Pattern to extract "DIST ON X SHS"
+# Patterns
 DIST_RE = re.compile(r'DIST ON\s+([\d,]+\.?\d*)\s+SHS', re.IGNORECASE)
+REINV_RE = re.compile(r'REINV@C?\$?([\d,]+\.?\d*)', re.IGNORECASE)
 
 
 def fmt(val, precision=2):
@@ -63,7 +62,7 @@ def month_label(d):
 
 
 def resolve_symbol(tx, all_symbols):
-    """Extract symbol from transaction."""
+    """Extract symbol from transaction description."""
     sym = tx.symbol.strip().upper() if tx.symbol and tx.symbol.strip() else ''
     if sym:
         return sym
@@ -74,17 +73,10 @@ def resolve_symbol(tx, all_symbols):
     return '-'
 
 
-def get_amount(tx):
-    """Return the monetary amount of a transaction (always positive magnitude)."""
-    debit = tx.debit or Decimal('0')
-    credit = tx.credit or Decimal('0')
-    return max(debit, credit)
-
-
 def interpret_transaction(tx, all_symbols):
-    """Return (label, cash_flow_effect).
+    """Return (label, cash_flow).
     
-    cash_flow_effect: positive = cash in, negative = cash out, zero = no cash effect
+    cash_flow: positive = cash in, negative = cash out, 0 = no net cash effect
     """
     atype = tx.activity_type.upper().strip()
     desc = tx.description.strip()
@@ -94,73 +86,109 @@ def interpret_transaction(tx, all_symbols):
     credit = tx.credit or Decimal('0')
     qty = tx.quantity or Decimal('0')
     price = tx.price or Decimal('0')
-    amount = get_amount(tx)
     
-    # --- Skip non-transactions ---
-    if atype in ('OPENING BALANCE', 'RTC', 'ADJUST'):
-        return (f"{atype}: {fmt(amount)} [{desc[:40]}]", 0)
+    # --- Non-cash entries ---
+    if atype in ('OPENING BALANCE',):
+        return (f"Opening Balance: {fmt(max(debit, credit))}", 0)
     
-    # --- Check for DRIP ("DIST ON X SHS" in description) ---
+    if atype in ('RTC', 'ADJUST'):
+        amount = max(debit, credit)
+        if amount > 0:
+            return (f"Book adj {sym}: {fmt(amount)}", 0)
+        return (f"Book adj {sym}", 0)
+    
+    # --- Check for "DIST ON X SHS" — this is a cash dividend ---
     drip_match = DIST_RE.search(desc)
     if drip_match:
         existing_shares = float(drip_match.group(1).replace(',', ''))
-        # For DRIP, the cash amount is the dividend being reinvested (no net cash flow)
-        if credit > 0:
-            return (f"DRIP {sym} on {existing_shares:.0f} shs, reinvested {fmt(credit)}", 0)
-        elif debit > 0:
-            return (f"DRIP {sym} on {existing_shares:.0f} shs, reinvested {fmt(debit)}", 0)
-        return (f"DRIP {sym} on {existing_shares:.0f} shs (no amt)", 0)
+        
+        # Check if this is a DIV REIN (reinvestment)
+        reinv_match = REINV_RE.search(desc)
+        if reinv_match and atype == 'DIV REIN':
+            # True reinvestment — dividend used to buy shares
+            cost = debit if debit > 0 else credit
+            return (f"DIV REIN {sym}: {fmt(cost)} reinvested", 0)
+        
+        # DIST (cash dividend) — money IN
+        # Parser bug: When qty == existing_shares (large number), the debit field
+        # contains the MARKET VALUE of holdings, NOT the dividend amount.
+        # When qty is small (< 10), it's the per-share dividend rate, and
+        # debit = qty * existing_shares = actual dividend amount.
+        if existing_shares > 10:
+            # "Fake quantity" — qty = existing holdings count
+            # When price > $5, it's the market price, not the dividend rate.
+            # In this case, debit = market value of holdings (NOT the dividend).
+            if price > 5:
+                # Price is market price — debit is market value, NOT dividend
+                return (f"DIST {sym}: {existing_shares:.0f} shs (div amt unknown, parser stored MV={fmt(debit)})", 0)
+            
+            # Price is per-share dividend rate (typically $0.10-$2.00)
+            # Actual dividend = price × existing_shares
+            # But the debit field may contain the opening cash balance (parser bug)
+            actual_div = Decimal(str(price)) * Decimal(str(existing_shares))
+            
+            # If debit ≈ actual_div, use debit; otherwise use credit or compute actual
+            if abs(float(debit - actual_div)) < 1.0:
+                return (f"DIST {sym}: {fmt(debit)} ({existing_shares:.0f} shs × {fmt(price)}/share)", debit)
+            elif credit > 0 and abs(float(credit - actual_div)) < 1.0:
+                return (f"DIST {sym}: {fmt(credit)} ({existing_shares:.0f} shs × {fmt(price)}/share)", credit)
+            else:
+                # Use computed actual dividend
+                return (f"DIST {sym}: {fmt(actual_div)} ({existing_shares:.0f} shs × {fmt(price)}/share)", actual_div)
+        else:
+            # Small qty — this IS the per-share dividend rate
+            cash = debit if debit > 0 else credit
+            return (f"DIST {sym}: {fmt(cash)} ({float(qty):.3f}/share)", cash)
     
     # --- DIV REIN (Dividend Reinvestment) ---
     if atype == 'DIV REIN':
-        # Reinvestment: dividend automatically bought as shares. No net cash flow.
-        return (f"DIV REIN {sym} {fmt(amount)}", 0)
+        reinv_match = REINV_RE.search(desc)
+        if reinv_match:
+            cost = debit if debit > 0 else credit
+            return (f"DIV REIN {sym}: bought shares @ {fmt(Decimal(reinv_match.group(1).replace(',', '')))}, cost {fmt(cost)}", 0)
+        cost = max(debit, credit)
+        return (f"DIV REIN {sym}: {fmt(cost)}", 0)
     
-    # --- DIVIDEND / DIV (Cash dividend) ---
-    if atype in ('DIVIDEND', 'DIV'):
+    # --- DIVIDEND / DIV / DIST (Cash dividend) ---
+    if atype in ('DIVIDEND', 'DIV', 'DIST'):
         cash = credit if credit > 0 else debit
-        return (f"Dividend {sym} {fmt(cash)}", cash)
+        return (f"Div {sym}: {fmt(cash)}", cash)
     
-    # --- INTEREST ---
+    # --- INTEREST (RBF2010/RBF2014) ---
     if atype == 'INTEREST':
-        return (f"Interest {sym} {fmt(amount)}", amount)
+        # Interest is qty × $10 (REINVEST @ $10.00)
+        # The credit field may contain the opening cash balance (parser bug)
+        interest_cash = qty * Decimal('10')
+        return (f"Interest {sym}: {fmt(interest_cash)} ({float(qty):.3f} shs × $10)", 0)
     
-    # --- SOLD / SELL ---
-    if atype in ('SELL', 'SOLD'):
-        return (f"Sold {qty:.0f} {sym}, proceeds {fmt(amount)}", amount)
-    
-    # --- BOUGHT / BUY ---
+    # --- BUY / BOUGHT (Purchase of shares) ---
     if atype in ('BUY', 'BOUGHT'):
-        return (f"Bought {qty:.0f} {sym}, cost {fmt(amount)}", -amount)
+        cost = debit if debit > 0 else credit
+        return (f"Buy {sym}: {fmt(cost)}", -cost)
+    
+    # --- SOLD / SELL (Proceeds from sale) ---
+    if atype in ('SELL', 'SOLD'):
+        proceeds = debit if debit > 0 else credit
+        return (f"Sold {qty:.0f} {sym}: {fmt(proceeds)}", proceeds)
     
     # --- TRANSFER / TFR OUT / WIRE TFR / CONTRIB ---
-    if atype in ('TRANSFER', 'TFR OUT', 'TRANSFER OUT', 'WIRE TFR'):
+    if atype in ('TRANSFER', 'TFR OUT', 'TRANSFER OUT', 'WIRE TFR', 'CONTRIB'):
         if credit > debit:
-            return (f"Transfer IN {fmt(credit)}", credit)
+            return (f"Transfer IN: {fmt(credit)}", credit)
         elif debit > credit:
-            return (f"Transfer OUT {fmt(debit)}", -debit)
-        return (f"{atype} {fmt(amount)}", 0)
-    
-    if atype == 'CONTRIB':
-        return (f"Contribution {fmt(amount)}", amount)
-    
-    # --- DIST (Distribution) ---
-    if atype == 'DIST':
-        return (f"Distribution {sym} {fmt(amount)}", amount)
+            return (f"Transfer OUT: {fmt(debit)}", -debit)
+        return (f"{atype}: {fmt(max(debit, credit))}", 0)
     
     # --- Fallback ---
     net = credit - debit
     return (f"{atype} {sym} D:{fmt(debit)} C:{fmt(credit)} [{desc[:40]}]", net)
 
 
-def compute_cash_flow(stmt):
-    """Compute net cash flow for a statement period.
-    
-    Returns net cash flow (positive = money in, negative = money out).
-    """
+def compute_cash_flow(stmt, all_symbols):
+    """Compute net cash flow for a statement period."""
     total = Decimal('0')
     for tx in stmt.transactions.all():
-        _, cf = interpret_transaction(tx, set())
+        _, cf = interpret_transaction(tx, all_symbols)
         total += cf
     return total
 
@@ -194,7 +222,7 @@ def main():
     else:
         stmts = all_stmts
 
-    # Collect all symbols
+    # Collect all symbols from holdings
     all_symbols = set()
     for stmt in all_stmts:
         for h in stmt.holdings.all():
@@ -209,7 +237,7 @@ def main():
         end = stmt.end_total_market_value or Decimal('0')
         bal_change = end - begin
         
-        net_cash = compute_cash_flow(stmt)
+        net_cash = compute_cash_flow(stmt, all_symbols)
         price_change = bal_change - net_cash
         
         if begin > 0:
@@ -227,12 +255,11 @@ def main():
         lines.append(f"Start date filter: {args.start_date}\n")
     lines.append(f"Statements analyzed: {len(stmts)} ({month_label(stmts[0].statement_date)} to {month_label(stmts[-1].statement_date)})")
     lines.append(f"High-change months found: {len(high_change_months)}\n")
-
     lines.append("---\n")
 
     # Summary table
     lines.append("## Summary of High-Change Months\n")
-    lines.append(f"{'Month':>10} | {'Opening':>14} | {'Closing':>14} | {'Bal Change':>14} | {'Cash Flow':>14} | {'Price Chg':>14} | % Change")
+    lines.append(f"{'Month':>10} | {'Opening':>14} | {'Closing':>14} | {'Bal Δ':>14} | {'Cash Flow':>14} | {'Price Δ':>14} | % Change")
     lines.append(f"{'-'*10}-|{'-'*14}-|{'-'*14}-|{'-'*14}-|{'-'*14}-|{'-'*14}-|{'-'*8}")
     for stmt, pct, bal_chg, net_cash in sorted(high_change_months, key=lambda x: x[0].statement_date):
         begin = stmt.begin_total_market_value or Decimal('0')
@@ -250,7 +277,7 @@ def main():
         end = stmt.end_total_market_value or Decimal('0')
         price_chg = bal_chg - net_cash
 
-        # Find previous statement (from ALL statements)
+        # Find previous statement
         all_idx = None
         for i, s in enumerate(all_stmts):
             if s.pk == stmt.pk:

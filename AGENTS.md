@@ -187,31 +187,34 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - No USD sub-account
 
 ### RBC PDF Transaction Convention (Verified from actual PDFs)
-- **SOLD**: `debit` = proceeds (money out of securities position), `credit` = 0 (sometimes has credit for tax/adjustment)
-- **BOUGHT**: `debit` = cost (money spent), `credit` = 0
-- **DIVIDEND**: `credit` = cash dividend received
-- **DIV REIN**: Dividend reinvestment — no net cash flow. May have both `debit` and `credit`.
-- **DRIP** (parsed as BUY with "DIST ON X SHS"):
-  - DB `quantity` = existing holdings count (parser bug)
-  - DB `price` = actual new fractional shares (when present)
-  - DB `debit` = cash reinvested (or opening cash balance for first DRIP in period)
-  - DB `credit` = actual dividend amount (when present)
-  - **Cash flow effect: ZERO** (dividend automatically becomes shares)
-- **TRANSFER**: `credit` = inflow, `debit` = outflow
+
+**NO "DRIP" exists in RBC PDFs.** Dividend reinvestments appear as `BUY`/`BOUGHT` or `DIV REIN` depending on parser version.
+
+- **SOLD/SELL**: `debit` or `credit` = proceeds (money in from sale)
+- **BOUGHT/BUY**: `debit` = cost (money out for purchase)
+- **DIVIDEND**: `credit` = cash dividend received (money in)
+- **DIST** (Distribution): Cash dividend. Identified by "DIST ON X SHS" in description. `debit` = cash amount. (money in)
+- **DIV**: Cash dividend. `credit` = cash amount. (money in)
+- **DIV REIN**: Dividend Reinvestment = BUY of shares. Description contains "REINV@C$XX.XX" showing purchase price. `qty` = new shares, `debit` = cost. **Net cash effect = 0** (dividend immediately buys shares)
+- **BUY/BOUGHT with "DIST ON X SHS"**: Same as DIV REIN — dividend reinvested as shares. **Net cash effect = 0**
+- **INTEREST**: RBF2010/RBF2014 savings fund interest. `debit` = cash amount. Shares increase by `amount / 10`. **Net cash effect = 0** (interest reinvested as shares)
+- **TRANSFER/TFR OUT/WIRE TFR/CONTRIB**: Cash transfers. `credit` = inflow, `debit` = outflow
 - **OPENING BALANCE**: Not a real transaction — parser captures cash balance line
-- **Parser quirks**: Sometimes `price` = per-share, sometimes `price` = total amount. Sometimes amount in `debit`, sometimes in `credit`. Use `max(debit, credit)` as the monetary amount.
+- **ADJUST/RTC**: Book cost adjustments. No cash effect.
+- **Parser quirks**: Sometimes `price` = per-share, sometimes `price` = total amount. Sometimes amount in `debit`, sometimes in `credit`. Use `max(debit, credit)` as monetary amount.
 - **Activity types found**: ADJUST, BOUGHT, BUY, CONTRIB, DIST, DIV, DIV REIN, DIVIDEND, INTEREST, OPENING BALANCE, RTC, SELL, SOLD, TFR OUT, TRANSFER, TRANSFER OUT, WIRE TFR
 
 ### Monthly vs Annual Cross-check
 - Consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
 
-### DRIP Quantity Convention
-- DRIP `BUY` entries with description "DIST ON X SHS" have two patterns:
-  - **"Fake quantity"**: `quantity` field = existing holdings count. Actual new shares fractional and unreliable.
-  - **"Real quantity"**: `quantity` is small fractional number (< 10). This IS actual new shares.
-- `BOUGHT` with `debit > 0` and no "DIST" = real cash purchase (quantity accurate)
-- `SOLD` with `debit > 0` = sell (quantity accurate, `debit` = proceeds)
-- `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share
+### Reinvestment Quantity Convention
+- Reinvestment `BUY` entries with description "DIST ON X SHS" have two patterns:
+  - **"Fake quantity"**: `quantity` field = existing holdings count (e.g., `BUY VDY 2891 debit=366.13`). The actual new shares are fractional and NOT stored in `quantity`. Detect by parsing "DIST ON X SHS" — if `quantity == X`, the quantity field is unreliable. Skip for share-count reconciliation.
+  - **"Real quantity"**: `quantity` is a small fractional number (e.g., `BUY VDY 0.1670 debit=1033.79`). This IS the actual new shares. Detect when `quantity < 10` and `quantity != parsed_X`.
+- `BOUGHT` with `debit > 0` and no "DIST" = real cash purchase (quantity is accurate)
+- `SOLD` with `debit > 0` = sell (quantity is accurate, `debit` = proceeds)
+- `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share. Shares = `debit / 10`
+- Many older transactions have empty `symbol` — symbol must be extracted from `description`
 
 ## PDF Import & Holdings Architecture
 - **PDF monthly statements are master** (state + activity). CSV is activity layer only.

@@ -397,7 +397,27 @@ class RbcMonthlyTransaction(models.Model):
     )
     date = models.DateField()
     activity_type = models.CharField(
-        max_length=100, help_text='e.g. "INTEREST", "BUY", "SELL", "DIVIDEND"'
+        max_length=50,
+        help_text='Type of activity from RBC PDF',
+        choices=[
+            ('BOUGHT', 'Bought (cash purchase)'),
+            ('SOLD', 'Sold (sale proceeds)'),
+            ('DIST', 'Distribution (cash dividend)'),
+            ('DIVIDEND', 'Dividend (cash received)'),
+            ('DIV REIN', 'Dividend Reinvestment (net cash = 0)'),
+            ('INTEREST', 'Interest (RBF savings, net cash = 0)'),
+            ('TRANSFER', 'Transfer'),
+            ('TFR OUT', 'Transfer Out'),
+            ('WIRE TFR', 'Wire Transfer'),
+            ('CONTRIB', 'Contribution'),
+            ('DEPOSIT', 'Deposit'),
+            ('WITHDRAWAL', 'Withdrawal'),
+            ('ADJUST', 'Book cost adjustment'),
+            ('RTC', 'Book cost adjustment (RTC)'),
+            ('FEE', 'Fee/Charge'),
+            ('OTHER', 'Other'),
+        ],
+        default='OTHER',
     )
     description = models.CharField(
         max_length=500,

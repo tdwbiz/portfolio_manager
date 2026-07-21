@@ -59,6 +59,105 @@ from imports.llm_client import VLClient, VLParseError
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Valid RBC PDF activity types
+# ---------------------------------------------------------------------------
+
+RBC_ACTIVITY_TYPES = {
+    'BOUGHT',       # Real cash purchase of shares — DEBIT = cost (money out)
+    'SOLD',         # Sale of shares — DEBIT or CREDIT = proceeds (money in)
+    'DIST',         # Cash distribution/dividend — amount in DEBIT or CREDIT (money in)
+    'DIVIDEND',     # Cash dividend — CREDIT = cash received (money in)
+    'DIV REIN',     # Dividend reinvestment (BUY of shares with dividend cash). Net cash = 0.
+    'INTEREST',     # RBF2010/RBF2014 savings fund interest. Shares = amount/10. Net cash = 0.
+    'TRANSFER',     # Cash transfer in/out
+    'TFR OUT',      # Transfer out
+    'WIRE TFR',     # Wire transfer
+    'CONTRIB',      # Contribution (deposit)
+    'DEPOSIT',      # Deposit
+    'WITHDRAWAL',   # Withdrawal
+    'ADJUST',       # Book cost adjustment. No cash effect.
+    'RTC',          # Book cost adjustment. No cash effect.
+    'FEE',          # Fee/charge
+    'OPENING BALANCE',  # Opening cash balance line — NOT a real transaction
+    'CLOSING BALANCE',  # Closing cash balance line — NOT a real transaction
+}
+
+# Activity types that represent cash inflow (money into the account)
+CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', 'WIRE TFR'}
+
+# Activity types that represent cash outflow (money out of the account)
+CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
+
+# Activity types with zero net cash effect
+ZERO_CASH_TYPES = {'DIV REIN', 'INTEREST', 'ADJUST', 'RTC', 'OPENING BALANCE', 'CLOSING BALANCE'}
+
+
+def normalize_activity_type(raw_type: str, description: str = '') -> str:
+    """Normalize and validate an activity type from the VL parser.
+    
+    Uses the description to disambiguate when the LLM misclassifies.
+    Returns a valid activity type from RBC_ACTIVITY_TYPES.
+    """
+    raw = raw_type.upper().strip()
+    desc = description.upper()
+    
+    # If already valid, return as-is
+    if raw in RBC_ACTIVITY_TYPES:
+        return raw
+    
+    # --- Fix known LLM misclassifications based on description ---
+    
+    # "DIST ON X SHS" in description = cash distribution (money in)
+    if 'DIST ON' in desc:
+        return 'DIST'
+    
+    # Dividend reinvestment: description contains "REINV@" or "REINVEST"
+    if 'REINV' in desc or 'REINVEST' in desc:
+        return 'DIV REIN'
+    
+    # Interest on RBF savings funds
+    if 'INTEREST' in desc or 'RBC INVESTMENT SAVINGS' in desc:
+        return 'INTEREST'
+    
+    # Map common LLM mistakes
+    type_map = {
+        'BUY': 'BOUGHT',
+        'SELL': 'SOLD',
+        'DIV': 'DIVIDEND',
+        'DISTRIBUTION': 'DIST',
+        'DIV REINVEST': 'DIV REIN',
+        'INT': 'INTEREST',
+        'TFR': 'TRANSFER',
+        'TFR IN': 'TRANSFER',
+        'TFR-OUT': 'TFR OUT',
+        'TRANSFER OUT': 'TFR OUT',
+        'TFO': 'TFR OUT',
+        'DEP': 'DEPOSIT',
+        'WDRAW': 'WITHDRAWAL',
+        'CHG': 'FEE',
+        'CHARGE': 'FEE',
+        'COMMISSION': 'FEE',
+        'OPENING': 'OPENING BALANCE',
+        'CLOSING': 'CLOSING BALANCE',
+    }
+    
+    if raw in type_map:
+        return type_map[raw]
+    
+    # Try partial match
+    for valid in RBC_ACTIVITY_TYPES:
+        if valid in raw or raw in valid:
+            return valid
+    
+    # Log warning and return UNKNOWN
+    logger.warning(
+        "normalize_activity_type: unknown type %r for description %r — using OTHER",
+        raw_type, description[:80],
+    )
+    return 'OTHER'
+
+
+# ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 
@@ -103,7 +202,7 @@ JSON schema:
       "transactions": [
         {
           "date": "YYYY-MM-DD",
-          "activity_type": "e.g. BUY, SELL, INTEREST, DIVIDEND, DEPOSIT, WITHDRAWAL, TRANSFER",
+          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
           "description": "full description text from statement",
           "symbol": "ticker symbol or empty string",
           "quantity": number or 0,
@@ -128,8 +227,57 @@ Rules:
 - Include one section object per currency (CAD and/or USD).
 - If there is no USD section in the statement, the sections array contains
   only the CAD section.
-- activity_type must be uppercase (e.g. "BUY", "SELL", "INTEREST",
-  "DIVIDEND", "DEPOSIT", "WITHDRAWAL", "TRANSFER", "FEE").
+- activity_type must be ONE of these exact values:
+  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT,
+  WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
+
+- **CRITICAL: How to classify each activity type from the PDF**
+  The PDF "Account Activity" table has columns: DATE | ACTIVITY | DESCRIPTION
+  | QUANTITY | RATE | DEBIT | CREDIT
+  
+  Use these rules to assign the correct activity_type:
+  
+  1. **BOUGHT**: The ACTIVITY column says "BOUGHT" or "BUY". You paid cash
+     to buy shares. DEBIT = cost (money out). quantity = shares purchased.
+  
+  2. **SOLD**: The ACTIVITY column says "SOLD" or "SELL". You sold shares
+     for cash. DEBIT or CREDIT = proceeds (money in). quantity = shares sold.
+  
+  3. **DIST**: Description contains "DIST ON X SHS". This is a cash
+     distribution/dividend you RECEIVE. The amount is in the DEBIT column.
+     quantity = per-share distribution rate (small number like 0.169).
+     The actual cash received = DEBIT amount.
+     Example: "VDY DIST ON 6182 SHS" with DEBIT 1047.29 means you received
+     $1,047.29 cash. This is NOT a buy — it is cash income.
+  
+  4. **DIVIDEND**: The ACTIVITY column says "DIVIDEND" or "DIV". Cash
+     dividend received. CREDIT = cash amount (money in).
+  
+  5. **DIV REIN**: Description contains "REINV@" or "REINVEST".
+     Dividend was automatically used to buy more shares. Net cash = 0.
+     quantity = new shares purchased.
+  
+  6. **INTEREST**: Description contains "RBC INVESTMENT SAVINGS" or
+     "INTEREST". This is interest on RBF2010/RBF2014 savings funds.
+     quantity = new shares earned, cash = quantity × $10.
+     Net cash effect = 0 (interest reinvested as shares).
+  
+  7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB**:
+     Cash transfers. CREDIT = inflow, DEBIT = outflow.
+  
+  8. **DEPOSIT**: Cash deposited into account. CREDIT = amount.
+  
+  9. **WITHDRAWAL**: Cash withdrawn. DEBIT = amount.
+  
+  10. **ADJUST** / **RTC**: Book cost adjustments. No cash effect.
+  
+  11. **FEE**: Charges/fees. DEBIT = amount charged.
+  
+  **IMPORTANT: Do NOT include "Opening Balance" or "Closing Balance" as
+  transactions.** These are balance summary lines, not transactions.
+  The Opening Balance dollar amount appears in the DEBIT/CREDIT column of
+  the first row but is NOT a transaction — skip it.
+
 - If a transaction has no ticker symbol, use an empty string for symbol.
 
 - **CRITICAL: begin_total_market_value and end_total_market_value**
@@ -368,10 +516,36 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 )
                 continue
 
+            raw_type = str(tx.get('activity_type') or '').upper().strip()
+            description = str(tx.get('description') or '')
+            
+            # Skip Opening/Closing balance lines — not real transactions
+            if normalize_activity_type(raw_type, description) in ('OPENING BALANCE', 'CLOSING BALANCE'):
+                logger.info(
+                    "parse_rbc_monthly_vl: skipping balance line: %s",
+                    description[:80],
+                )
+                continue
+            
+            activity = normalize_activity_type(raw_type, description)
+            
+            # Post-fix: if LLM labeled as BOUGHT but description says "DIST ON",
+            # force to DIST
+            if activity == 'BOUGHT' and 'DIST ON' in description.upper():
+                activity = 'DIST'
+                logger.warning(
+                    "parse_rbc_monthly_vl: corrected BOUGHT->DIST for: %s",
+                    description[:80],
+                )
+            
+            # Post-fix: if LLM labeled as BUY but description says "DIST ON"
+            if raw_type == 'BUY' and 'DIST ON' in description.upper():
+                activity = 'DIST'
+
             transactions.append({
                 'date':          tx_date,
-                'activity_type': str(tx.get('activity_type') or '').upper().strip(),
-                'description':   str(tx.get('description') or ''),
+                'activity_type': activity,
+                'description':   description,
                 'symbol':        str(tx.get('symbol') or ''),
                 'quantity':      _to_decimal(tx.get('quantity', 0)),
                 'price':         _to_decimal(tx.get('price', 0)),

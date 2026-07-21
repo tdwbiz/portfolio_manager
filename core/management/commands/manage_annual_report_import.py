@@ -1,7 +1,12 @@
-"""Management command to import RBC Annual Reports in batch."""
+"""Management command to import RBC Annual Reports in batch.
 
+Saves JSON logs to processed/json_logs/ only when errors occur.
+"""
+
+import json
 import logging
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from django.conf import settings
@@ -91,8 +96,10 @@ class Command(BaseCommand):
 
         processed_dir = Path(getattr(settings, 'IMPORT_PROCESSED_DIR', Path('processed')))
         errors_dir = processed_dir / 'errors'
+        json_dir = Path(getattr(settings, 'IMPORT_JSON_DIR', settings.BASE_DIR / 'processed' / 'json_logs'))
         processed_dir.mkdir(parents=True, exist_ok=True)
         errors_dir.mkdir(parents=True, exist_ok=True)
+        json_dir.mkdir(parents=True, exist_ok=True)
 
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN MODE - no database changes'))
@@ -108,11 +115,13 @@ class Command(BaseCommand):
             files_processed += 1
             self.stdout.write(f'Processing: {pdf_file.name}')
 
+            file_errors = []
             try:
                 parsed = parse_rbc_annual_report_vl(str(pdf_file))
             except Exception as e:
                 self.stderr.write(self.style.ERROR(f'Failed to parse {pdf_file.name}: {e}'))
                 errors += 1
+                file_errors.append(str(e))
                 if not dry_run:
                     FileImportLog.objects.create(
                         filename=pdf_file.name,
@@ -123,6 +132,20 @@ class Command(BaseCommand):
                         status='error',
                         error_message=str(e),
                     )
+                    # Save JSON log for errors
+                    json_data = {
+                        'type': 'annual',
+                        'filename': pdf_file.name,
+                        'processed_at': datetime.now().isoformat(),
+                        'errors': 1,
+                        'error_messages': file_errors,
+                    }
+                    json_path = json_dir / f'{pdf_file.stem}.json'
+                    try:
+                        with open(json_path, 'w', encoding='utf-8') as fh:
+                            json.dump(json_data, fh, indent=2, default=str)
+                    except OSError as exc:
+                        logger.warning("Could not write JSON log for %s: %s", pdf_file.name, exc)
                     dest = errors_dir / pdf_file.name
                     shutil.move(str(pdf_file), str(dest))
                     logger.info('Moved failed file to %s', dest)
@@ -228,4 +251,5 @@ class Command(BaseCommand):
             f'Records created:   {records_created}\n'
             f'Duplicates skipped:{duplicates_skipped}\n'
             f'Errors:            {errors}\n'
+            f'JSON logs:         {json_dir}\n'
         ))

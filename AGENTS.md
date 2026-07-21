@@ -168,12 +168,50 @@ Phase D was implemented in a previous session. The code, views, templates, model
 
 ## Reconciliation Work (feature_rbc_statements_reconciliation)
 - Active branch for verifying PDF data integrity and planning CSV reconciliation
+- **RBC PDF is master data source**. CSV is only used as fallback for missing PDFs.
+
+### Scripts
 - `scripts/verify_pdf_integrity.py` — verifies RBC PDF internal consistency
   - Usage: `python scripts/verify_pdf_integrity.py --account 90000001 --currency CAD --start-date 2019-01-01 --start-balance 393437.82`
   - Reports saved to `docs/reconciliation/pdf_integrity_<account>_<currency>.md`
   - Each account gets its own start date decided during inspection
-- TS_HUISGELD (90000001) CAD: Start date 2019-01-01, Start balance $393,437.82. 90 PDF statements (2017-11 to 2026-04), 88 in analysis. Balance chain intact except first statement ($12.28 offset from start balance). 57 periods show small DRIP reconciliation gaps (expected).
-- Monthly vs Annual cross-check shows consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
+- `scripts/ledger_high_change.py` — detailed ledger for months with >5% price change
+  - Usage: `python scripts/ledger_high_change.py --account 90000001 --currency CAD --start-date 2019-01-01`
+  - Reports saved to `docs/reconciliation/ledger_high_change_<account>_<currency>.md`
+
+### TS_HUISGELD (90000001) CAD
+- Start date 2019-01-01, Start balance $393,437.82
+- 90 PDF statements total (2017-11 to 2026-04), 88 in analysis (excludes 2 pre-2019)
+- Balance chain intact across all 88 statements (only $12.28 offset on first statement from start balance)
+- Missing statements (2019-12, 2020-12) were re-imported from inbox
+- No USD sub-account
+
+### RBC PDF Transaction Convention (Verified from actual PDFs)
+- **SOLD**: `debit` = proceeds (money out of securities position), `credit` = 0 (sometimes has credit for tax/adjustment)
+- **BOUGHT**: `debit` = cost (money spent), `credit` = 0
+- **DIVIDEND**: `credit` = cash dividend received
+- **DIV REIN**: Dividend reinvestment — no net cash flow. May have both `debit` and `credit`.
+- **DRIP** (parsed as BUY with "DIST ON X SHS"):
+  - DB `quantity` = existing holdings count (parser bug)
+  - DB `price` = actual new fractional shares (when present)
+  - DB `debit` = cash reinvested (or opening cash balance for first DRIP in period)
+  - DB `credit` = actual dividend amount (when present)
+  - **Cash flow effect: ZERO** (dividend automatically becomes shares)
+- **TRANSFER**: `credit` = inflow, `debit` = outflow
+- **OPENING BALANCE**: Not a real transaction — parser captures cash balance line
+- **Parser quirks**: Sometimes `price` = per-share, sometimes `price` = total amount. Sometimes amount in `debit`, sometimes in `credit`. Use `max(debit, credit)` as the monetary amount.
+- **Activity types found**: ADJUST, BOUGHT, BUY, CONTRIB, DIST, DIV, DIV REIN, DIVIDEND, INTEREST, OPENING BALANCE, RTC, SELL, SOLD, TFR OUT, TRANSFER, TRANSFER OUT, WIRE TFR
+
+### Monthly vs Annual Cross-check
+- Consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
+
+### DRIP Quantity Convention
+- DRIP `BUY` entries with description "DIST ON X SHS" have two patterns:
+  - **"Fake quantity"**: `quantity` field = existing holdings count. Actual new shares fractional and unreliable.
+  - **"Real quantity"**: `quantity` is small fractional number (< 10). This IS actual new shares.
+- `BOUGHT` with `debit > 0` and no "DIST" = real cash purchase (quantity accurate)
+- `SOLD` with `debit > 0` = sell (quantity accurate, `debit` = proceeds)
+- `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share
 
 ## PDF Import & Holdings Architecture
 - **PDF monthly statements are master** (state + activity). CSV is activity layer only.

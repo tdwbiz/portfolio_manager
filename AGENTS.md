@@ -188,33 +188,42 @@ Phase D was implemented in a previous session. The code, views, templates, model
 
 ### RBC PDF Transaction Convention (Verified from actual PDFs)
 
-**NO "DRIP" exists in RBC PDFs.** Dividend reinvestments appear as `BUY`/`BOUGHT` or `DIV REIN` depending on parser version.
+**`activity_type` is a fixed-choice CharField** — `RbcMonthlyTransaction.activity_type` has choices defined in `core/models.py` and enforced by `normalize_activity_type()` in `imports/parsers_monthly_vl.py`. The VL parser prompt now uses these exact values.
 
-- **SOLD/SELL**: `debit` or `credit` = proceeds (money in from sale)
-- **BOUGHT/BUY**: `debit` = cost (money out for purchase)
-- **DIVIDEND**: `credit` = cash dividend received (money in)
-- **DIST** (Distribution): Cash dividend. Identified by "DIST ON X SHS" in description. `debit` = cash amount. (money in)
-- **DIV**: Cash dividend. `credit` = cash amount. (money in)
-- **DIV REIN**: Dividend Reinvestment = BUY of shares. Description contains "REINV@C$XX.XX" showing purchase price. `qty` = new shares, `debit` = cost. **Net cash effect = 0** (dividend immediately buys shares)
-- **BUY/BOUGHT with "DIST ON X SHS"**: Same as DIV REIN — dividend reinvested as shares. **Net cash effect = 0**
-- **INTEREST**: RBF2010/RBF2014 savings fund interest. `debit` = cash amount. Shares increase by `amount / 10`. **Net cash effect = 0** (interest reinvested as shares)
-- **TRANSFER/TFR OUT/WIRE TFR/CONTRIB**: Cash transfers. `credit` = inflow, `debit` = outflow
-- **OPENING BALANCE**: Not a real transaction — parser captures cash balance line
+**Valid activity types:** BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE, OTHER
+
+**PDF columns:** `DATE | ACTIVITY | DESCRIPTION | QUANTITY | RATE | DEBIT | CREDIT`
+
+- **BOUGHT**: Real cash purchase. `debit` = cost (money out). `quantity` = shares purchased. Description does NOT contain "DIST".
+- **SOLD**: Sale of shares. `debit` or `credit` = proceeds (money in). `quantity` = shares sold.
+- **DIST**: Cash distribution/dividend. Identified by "DIST ON X SHS" in description. `debit` = cash amount received (money in). `quantity` = per-share distribution rate (small decimal like 0.169). **This is CASH INCOME — NOT a purchase.**
+- **DIVIDEND**: Cash dividend. `credit` = cash received (money in).
+- **DIV REIN**: Dividend reinvestment — dividend immediately used to buy shares. Description contains "REINV@C$XX.XX". `quantity` = new shares, `debit` = cost. **Net cash = 0**.
+- **INTEREST**: RBF2010/RBF2014 savings fund interest. `quantity` = new shares earned, cash = `quantity × 10`. **Net cash = 0** (reinvested).
+- **TRANSFER/TFR OUT/WIRE TFR/CONTRIB**: Cash transfers. `credit` = inflow, `debit` = outflow.
+- **DEPOSIT**: Cash deposited. `credit` = amount.
+- **WITHDRAWAL**: Cash withdrawn. `debit` = amount.
 - **ADJUST/RTC**: Book cost adjustments. No cash effect.
-- **Parser quirks**: Sometimes `price` = per-share, sometimes `price` = total amount. Sometimes amount in `debit`, sometimes in `credit`. Use `max(debit, credit)` as monetary amount.
-- **Activity types found**: ADJUST, BOUGHT, BUY, CONTRIB, DIST, DIV, DIV REIN, DIVIDEND, INTEREST, OPENING BALANCE, RTC, SELL, SOLD, TFR OUT, TRANSFER, TRANSFER OUT, WIRE TFR
+- **FEE**: Charges/fees. `debit` = amount.
+- **OPENING BALANCE / CLOSING BALANCE**: Balance summary lines — NOT transactions. The parser skips these.
+
+**Cash flow categories:**
+- Cash IN: SOLD, DIVIDEND, DIST, TRANSFER (credit), CONTRIB, DEPOSIT
+- Cash OUT: BOUGHT, WITHDRAWAL, TFR OUT (debit), FEE
+- Net Zero: DIV REIN, INTEREST, ADJUST, RTC
+
+**VL Parser post-processing** (`normalize_activity_type`): Uses description to fix known LLM errors:
+- "DIST ON X SHS" in description → force `DIST` (even if LLM says `BUY`/`BOUGHT`)
+- "REINV@" in description → force `DIV REIN`
+- "RBC INVESTMENT SAVINGS" → force `INTEREST`
+- `BUY` → `BOUGHT`, `SELL` → `SOLD`, `DIV` → `DIVIDEND`
+
+**DIST quantity pattern:** `quantity` = per-share distribution rate (e.g., 0.169). The actual cash received is in the `debit` column. Do NOT multiply quantity × existing holdings — the `debit` IS the total cash.
+
+**INTEREST quantity pattern:** `quantity` = new RBF shares earned. Cash value = `quantity × 10`.
 
 ### Monthly vs Annual Cross-check
 - Consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
-
-### Reinvestment Quantity Convention
-- Reinvestment `BUY` entries with description "DIST ON X SHS" have two patterns:
-  - **"Fake quantity"**: `quantity` field = existing holdings count (e.g., `BUY VDY 2891 debit=366.13`). The actual new shares are fractional and NOT stored in `quantity`. Detect by parsing "DIST ON X SHS" — if `quantity == X`, the quantity field is unreliable. Skip for share-count reconciliation.
-  - **"Real quantity"**: `quantity` is a small fractional number (e.g., `BUY VDY 0.1670 debit=1033.79`). This IS the actual new shares. Detect when `quantity < 10` and `quantity != parsed_X`.
-- `BOUGHT` with `debit > 0` and no "DIST" = real cash purchase (quantity is accurate)
-- `SOLD` with `debit > 0` = sell (quantity is accurate, `debit` = proceeds)
-- `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share. Shares = `debit / 10`
-- Many older transactions have empty `symbol` — symbol must be extracted from `description`
 
 ## PDF Import & Holdings Architecture
 - **PDF monthly statements are master** (state + activity). CSV is activity layer only.
@@ -222,22 +231,14 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **VL model config:** `settings.py` lines 238-247: `VL_MODEL_BASE_URL = http://127.0.0.1:11440/v1`, `VL_MODEL_NAME = qwen2.5-vl`. Model `qwen2.5-vl-7b-instruct-q8_0.gguf` on port 11440 via llama.cpp with `--mmproj`.
 - **`vl_model` skill at `~/.agents/skills/vl_model/`** — not registered in available skills list, can be edited directly.
 - **Key bug:** `vl_model` error `500 - image input is not supported - hint: if this is unexpected, you may need to provide the mmproj` — this was from old qwen2.5-vl config, not Gemma 4. Gemma 4 has built-in vision encoder (~550M params), no separate `mmproj` needed.
-- **JSON logs:** `processed/json_logs/` contains JSON only for **failed** imports. Successful imports log to `FileImportLog` model.
-- **PDF transaction sign convention (from reconcile_tx analysis):**
+- **JSON logs:** `processed/json_logs/` contains JSON only for **failed** imports. Successful imports log to `FileImportLog` model. Both monthly and annual imports follow this convention.
+- **Watchdog:** The inbox watcher runs as a daemon thread when `runserver` starts. It polls `inbox/` every `IMPORT_INBOX_POLL_INTERVAL` seconds (default: 300 = 5 minutes). When PDFs are found, it classifies them and routes to either `manage_annual_report_import` or `manage_pdf_import`. You can also run `python manage.py import_inbox` for a one-shot import that handles both types.
+- **PDF transaction sign convention:**
   - PDF `RbcMonthlyTransaction` uses `debit` (outflow) and `credit` (inflow). Net = `credit - debit`.
-  - PDF SELL/INTEREST(Tax) show as `debit` (negative net) — opposite of CSV where SELL is positive.
-  - PDF `BUY` with `credit` is actually a dividend reinvestment — CSV labels it `DIST`.
-  - PDF `BOUGHT` with small `debit` ($1-$5) is likely a fee/commission.
-  - PDF `TRANSFER` with `credit` is an inflow (transfer-in), but CSV may record it as negative TFO (transfer-out from source account).
   - CSV `INT` with `amount_cad = 0.00` are phantom entries — no actual money moved.
-- **PDF DRIP quantity convention (from verify_pdf_integrity analysis):**
-  - DRIP `BUY` entries with description "DIST ON X SHS" have two patterns:
-    - **"Fake quantity"**: `quantity` field = existing holdings count (e.g., `BUY VDY 2891 debit=366.13`). The actual new shares are fractional and NOT stored in `quantity`. Detect by parsing "DIST ON X SHS" — if `quantity == X`, the quantity field is unreliable. Skip for share-count reconciliation.
-    - **"Real quantity"**: `quantity` is a small fractional number (e.g., `BUY VDY 0.1670 debit=1033.79`). This IS the actual new shares. Detect when `quantity < 10` and `quantity != parsed_X`.
-  - `BOUGHT` with `debit > 0` and no "DIST" in description = real cash purchase (quantity is accurate)
-  - `SOLD` with `debit > 0` = sell (quantity is accurate, `debit` = proceeds)
-  - `INTEREST` with `debit > 0` for RBF2010 = interest reinvested as shares at $10/share. Shares = `debit / 10`
   - Many older transactions have empty `symbol` — symbol must be extracted from `description`
+- **DIST quantity pattern:** `quantity` = per-share distribution rate (e.g., 0.169). The actual cash received is in the `debit` column. Do NOT multiply quantity × existing holdings.
+- **INTEREST quantity pattern:** `quantity` = new RBF shares earned. Cash value = `quantity × 10`.
 
 ## Memory & Skill Management
 

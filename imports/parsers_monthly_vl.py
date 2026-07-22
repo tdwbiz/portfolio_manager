@@ -63,23 +63,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 RBC_ACTIVITY_TYPES = {
-    'BOUGHT',       # Real cash purchase of shares — DEBIT = cost (money out)
-    'SOLD',         # Sale of shares — DEBIT or CREDIT = proceeds (money in)
-    'DIST',         # Cash distribution/dividend — amount in DEBIT or CREDIT (money in)
-    'DIVIDEND',     # Cash dividend — CREDIT = cash received (money in)
-    'DIV REIN',     # Dividend reinvestment (BUY of shares with dividend cash). Net cash = 0.
-    'INTEREST',     # RBF2010/RBF2014 savings fund interest. Shares = amount/10. Net cash = 0.
-    'TRANSFER',     # Cash transfer in/out
-    'TFR OUT',      # Transfer out
-    'WIRE TFR',     # Wire transfer
-    'CONTRIB',      # Contribution (deposit)
-    'DEPOSIT',      # Deposit
-    'WITHDRAWAL',   # Withdrawal
-    'ADJUST',       # Book cost adjustment. No cash effect.
-    'RTC',          # Book cost adjustment. No cash effect.
-    'FEE',          # Fee/charge
-    'OPENING BALANCE',  # Opening cash balance line — NOT a real transaction
-    'CLOSING BALANCE',  # Closing cash balance line — NOT a real transaction
+    'BOUGHT',              # Real cash purchase of shares — DEBIT = cost (money out)
+    'SOLD',                # Sale of shares — DEBIT or CREDIT = proceeds (money in)
+    'DIST',                # Cash distribution/dividend — CREDIT = cash (money in)
+    'DIVIDEND',            # Cash dividend — CREDIT = cash received (money in)
+    'DIV REIN',            # Dividend reinvestment (BUY of shares with dividend cash). Net cash = 0.
+    'INTEREST_RECEIVED',   # RBF2010/RBF2014 or IB interest earned. quantity = new shares. Net cash = 0.
+    'INTEREST_PAID',       # Interest paid on margin/debt. DEBIT = amount. (IB accounts)
+    'TRANSFER',            # Cash transfer in/out
+    'TFR OUT',             # Transfer out
+    'WIRE TFR',            # Wire transfer
+    'CONTRIB',             # Contribution (deposit)
+    'DEPOSIT',             # Deposit
+    'WITHDRAWAL',          # Withdrawal
+    'ADJUST',              # Book cost adjustment. No cash effect.
+    'RTC',                 # Book cost adjustment. No cash effect.
+    'FEE',                 # Fee/charge
+    'OPENING BALANCE',     # Opening cash balance line — NOT a real transaction
+    'CLOSING BALANCE',     # Closing cash balance line — NOT a real transaction
 }
 
 # Activity types that represent cash inflow (money into the account)
@@ -89,7 +90,7 @@ CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', '
 CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
 
 # Activity types with zero net cash effect
-ZERO_CASH_TYPES = {'DIV REIN', 'INTEREST', 'ADJUST', 'RTC', 'OPENING BALANCE', 'CLOSING BALANCE'}
+ZERO_CASH_TYPES = {'DIV REIN', 'INTEREST_RECEIVED', 'ADJUST', 'RTC', 'OPENING BALANCE', 'CLOSING BALANCE'}
 
 
 def normalize_activity_type(raw_type: str, description: str = '') -> str:
@@ -117,7 +118,7 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
     
     # Interest on RBF savings funds
     if 'INTEREST' in desc or 'RBC INVESTMENT SAVINGS' in desc:
-        return 'INTEREST'
+        return 'INTEREST_RECEIVED'
     
     # Map common LLM mistakes
     type_map = {
@@ -126,7 +127,8 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
         'DIV': 'DIVIDEND',
         'DISTRIBUTION': 'DIST',
         'DIV REINVEST': 'DIV REIN',
-        'INT': 'INTEREST',
+        'INT': 'INTEREST_RECEIVED',
+        'INTEREST': 'INTEREST_RECEIVED',
         'TFR': 'TRANSFER',
         'TFR IN': 'TRANSFER',
         'TFR-OUT': 'TFR OUT',
@@ -202,7 +204,7 @@ JSON schema:
       "transactions": [
         {
           "date": "YYYY-MM-DD",
-          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
+          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
           "description": "full description text from statement",
           "symbol": "ticker symbol or empty string",
           "quantity": number or 0,
@@ -228,7 +230,7 @@ Rules:
 - If there is no USD section in the statement, the sections array contains
   only the CAD section.
 - activity_type must be ONE of these exact values:
-  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT,
+  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT,
   WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
 
 - **CRITICAL: How to classify each activity type from the PDF**
@@ -257,7 +259,7 @@ Rules:
      Dividend was automatically used to buy more shares. Net cash = 0.
      quantity = new shares purchased.
   
-  6. **INTEREST**: Description contains "RBC INVESTMENT SAVINGS" or
+  6. **INTEREST_RECEIVED**: Description contains "RBC INVESTMENT SAVINGS" or
      "INTEREST". This is interest on RBF2010/RBF2014 savings funds.
      quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
      is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
@@ -566,10 +568,10 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     credit = debit
                     debit = Decimal('0')
 
-            # --- Fix INTEREST: only quantity matters, clear price/debit/credit ---
+            # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
             # RBF2010/RBF2014 interest: quantity = new shares earned
             # The PDF shows quantity and $10 rate, but no real debit/credit
-            if activity == 'INTEREST':
+            if activity == 'INTEREST_RECEIVED':
                 # Clear the $10 rate from price field — it's not a real price
                 if price == Decimal('10.00'):
                     price = Decimal('0')

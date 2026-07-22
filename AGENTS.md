@@ -190,16 +190,17 @@ Phase D was implemented in a previous session. The code, views, templates, model
 
 **`activity_type` is a fixed-choice CharField** — `RbcMonthlyTransaction.activity_type` has choices defined in `core/models.py` and enforced by `normalize_activity_type()` in `imports/parsers_monthly_vl.py`. The VL parser prompt now uses these exact values.
 
-**Valid activity types:** BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE, OTHER
+**Valid activity types:** BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, INTEREST_PAID, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE, OTHER
 
 **PDF columns:** `DATE | ACTIVITY | DESCRIPTION | QUANTITY | RATE | DEBIT | CREDIT`
 
 - **BOUGHT**: Real cash purchase. `debit` = cost (money out). `quantity` = shares purchased. Description does NOT contain "DIST".
 - **SOLD**: Sale of shares. `debit` or `credit` = proceeds (money in). `quantity` = shares sold.
-- **DIST**: Cash distribution/dividend. Identified by "DIST ON X SHS" in description. `debit` = cash amount received (money in). `quantity` = per-share distribution rate (small decimal like 0.169). **This is CASH INCOME — NOT a purchase.**
+- **DIST**: Cash distribution/dividend. Identified by "DIST ON X SHS" in description. `credit` = total cash received (money in). `price` = per-share distribution rate (e.g., 0.169). `quantity` = 0 (blank in PDF). **This is CASH INCOME — NOT a purchase.**
 - **DIVIDEND**: Cash dividend. `credit` = cash received (money in).
 - **DIV REIN**: Dividend reinvestment — dividend immediately used to buy shares. Description contains "REINV@C$XX.XX". `quantity` = new shares, `debit` = cost. **Net cash = 0**.
-- **INTEREST**: RBF2010/RBF2014 savings fund interest. `quantity` = new shares earned, cash = `quantity × 10`. **Net cash = 0** (reinvested).
+- **INTEREST_RECEIVED**: RBF2010/RBF2014 or IB interest earned. `quantity` = new shares earned (e.g., 2.067). `price` = 0, `debit` = 0, `credit` = 0. **Net cash = 0** (reinvested as shares).
+- **INTEREST_PAID**: Interest paid (e.g., margin debt). `debit` = amount. (Used by IB accounts.)
 - **TRANSFER/TFR OUT/WIRE TFR/CONTRIB**: Cash transfers. `credit` = inflow, `debit` = outflow.
 - **DEPOSIT**: Cash deposited. `credit` = amount.
 - **WITHDRAWAL**: Cash withdrawn. `debit` = amount.
@@ -209,8 +210,8 @@ Phase D was implemented in a previous session. The code, views, templates, model
 
 **Cash flow categories:**
 - Cash IN: SOLD, DIVIDEND, DIST, TRANSFER (credit), CONTRIB, DEPOSIT
-- Cash OUT: BOUGHT, WITHDRAWAL, TFR OUT (debit), FEE
-- Net Zero: DIV REIN, INTEREST, ADJUST, RTC
+- Cash OUT: BOUGHT, WITHDRAWAL, TFR OUT (debit), FEE, INTEREST_PAID
+- Net Zero: DIV REIN, INTEREST_RECEIVED, ADJUST, RTC
 
 **VL Parser post-processing** (`normalize_activity_type`): Uses description to fix known LLM errors:
 - "DIST ON X SHS" in description → force `DIST` (even if LLM says `BUY`/`BOUGHT`)
@@ -238,7 +239,7 @@ Phase D was implemented in a previous session. The code, views, templates, model
   - CSV `INT` with `amount_cad = 0.00` are phantom entries — no actual money moved.
   - Many older transactions have empty `symbol` — symbol must be extracted from `description`
 - **DIST quantity pattern:** `quantity` = per-share distribution rate (e.g., 0.169). The actual cash received is in the `debit` column. Do NOT multiply quantity × existing holdings.
-- **INTEREST quantity pattern:** `quantity` = new RBF shares earned. Cash value = `quantity × 10`.
+- **INTEREST_RECEIVED quantity pattern:** `quantity` = new RBF shares earned. Cash value = `quantity × 10`.
 
 ## Memory & Skill Management
 

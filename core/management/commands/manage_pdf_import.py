@@ -78,7 +78,7 @@ class TerminalLogger:
 
 
 class Command(BaseCommand):
-    help = 'Import RBC PDF statements from a directory or single file.'
+    help = 'DEPRECATED — use manage_inbox_import instead. Imports RBC PDF statements from a directory or single file.'
 
     def add_arguments(self, parser):
         parser.add_argument('path', nargs='?', type=str, help='Path to PDF file or directory.')
@@ -140,6 +140,10 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'Failed to move file: {move_err}'))
 
     def handle(self, *args, **options):
+        self.stderr.write(self.style.WARNING(
+            'DEPRECATED: manage_pdf_import is deprecated. '
+            'Use "manage_inbox_import" instead — it classifies PDFs automatically.\n'
+        ))
         # Use inbox_dir if provided, otherwise fall back to positional path, then to settings
         inbox_dir = options['inbox_dir'] or options.get('path') or str(getattr(settings, 'IMPORT_INBOX_DIR', Path('inbox')))
         target_path = Path(inbox_dir)
@@ -468,18 +472,16 @@ class Command(BaseCommand):
             if not dry_run and move_files:
                 processed_dir = str(getattr(settings, 'IMPORT_PROCESSED_DIR', settings.BASE_DIR / 'processed'))
                 os.makedirs(processed_dir, exist_ok=True)
-                move_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                name, ext = os.path.splitext(pdf_file.name)
 
                 if not file_errors:
                     # Move PERFECT files to processed/
-                    dest_path = os.path.join(processed_dir, f"{name}_{move_timestamp}{ext}")
+                    dest_path = os.path.join(processed_dir, pdf_file.name)
                     self._move_file(pdf_file, dest_path, 'processed/')
                 else:
                     # Move ERROR files to processed/errors/
                     errors_dir = os.path.join(processed_dir, 'errors')
                     os.makedirs(errors_dir, exist_ok=True)
-                    dest_path = os.path.join(errors_dir, f"{name}_{move_timestamp}{ext}")
+                    dest_path = os.path.join(errors_dir, pdf_file.name)
                     self._move_file(pdf_file, dest_path, 'processed/errors/', error_count=len(file_errors))
 
         # Summary

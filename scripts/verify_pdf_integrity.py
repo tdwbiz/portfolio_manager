@@ -17,8 +17,6 @@ Usage:
 import argparse
 import re
 import sys
-from collections import defaultdict
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -34,7 +32,7 @@ import django
 django.setup()
 
 from core.models import (
-    Account, RbcMonthly, RbcMonthlyTransaction, RbcMonthlyHolding, RbcAnnual,
+    Account, RbcMonthly, RbcAnnual,
 )
 
 
@@ -63,8 +61,10 @@ def main():
     currency = args.currency
     start_date = args.start_date
 
+    from datetime import datetime
     lines = []
     lines.append(f"# PDF Data Integrity Report: {account.account_id} ({account.name}) — {currency}\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append("Verifies internal consistency of RBC PDF data.\n")
     lines.append("---\n")
 
@@ -81,15 +81,53 @@ def main():
         print("\n".join(lines))
         return
 
+    # Filter out annual report summary rows that were mistakenly stored in RbcMonthly.
+    # These are duplicate December entries with annual aggregate transactions
+    # ("Deposits and transfers-in", "Net investment return", etc.)
+    def _is_annual_summary(stmt):
+        """Return True if this RbcMonthly row is an annual report summary, not a real monthly statement."""
+        annual_keywords = [
+            'deposits and transfers-in',
+            'net investment return',
+            'deposit of $',
+            'withdrawal of $',
+            'withdrawals and transfers-out',
+        ]
+        for tx in stmt.transactions.all():
+            desc = (tx.description or '').lower()
+            if any(kw in desc for kw in annual_keywords):
+                return True
+        return False
+
     # Filter by start date if provided
     if start_date:
         from datetime import datetime
         sd = datetime.strptime(start_date, '%Y-%m-%d').date()
-        stmts = [s for s in all_stmts if s.statement_date >= sd]
-        excluded = [s for s in all_stmts if s.statement_date < sd]
+        stmts = [s for s in all_stmts if s.statement_date >= sd and not _is_annual_summary(s)]
+        excluded = [s for s in all_stmts if s.statement_date < sd or _is_annual_summary(s)]
     else:
-        stmts = all_stmts
-        excluded = []
+        stmts = [s for s in all_stmts if not _is_annual_summary(s)]
+        excluded = [s for s in all_stmts if _is_annual_summary(s)]
+
+    # If multiple statements exist for the same month, keep only the non-annual one
+    # (this handles cases where both monthly and annual rows exist for December)
+    from collections import defaultdict
+    month_groups = defaultdict(list)
+    for s in stmts:
+        key = (s.statement_date.year, s.statement_date.month)
+        month_groups[key].append(s)
+    
+    final_stmts = []
+    for key in sorted(month_groups.keys()):
+        group = month_groups[key]
+        if len(group) == 1:
+            final_stmts.append(group[0])
+        else:
+            # Keep the one with more transactions (the real monthly statement)
+            # Annual summaries typically have 2-4 aggregate transactions
+            group.sort(key=lambda s: s.transactions.count(), reverse=True)
+            final_stmts.append(group[0])
+    stmts = final_stmts
 
     lines.append(f"## Data Overview\n")
     lines.append(f"- Total RbcMonthly statements (all): {len(all_stmts)}")

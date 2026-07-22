@@ -264,8 +264,10 @@ def gather_account_data():
 
 def generate_rbc_monthly_vs_annual(data):
     """Compare RbcMonthly year-end balances against RbcAnnual."""
+    from datetime import datetime
     lines = []
-    lines.append("# Report 1: RbcMonthly vs RbcAnnual Reconciliation\n")
+    lines.append(f"# Report 1: RbcMonthly vs RbcAnnual Reconciliation\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append("Compares December year-end `RbcMonthly` balances against `RbcAnnual` records.\n")
     lines.append("**Threshold:** Balances within $1.00 are considered matching.\n")
     lines.append("---\n")
@@ -360,8 +362,10 @@ def generate_rbc_monthly_vs_annual(data):
 
 def generate_rbc_monthly_vs_csv(data):
     """Compare RbcMonthly ending balances against CoreMonthlyStatement."""
+    from datetime import datetime
     lines = []
-    lines.append("# Report 2: RbcMonthly vs CoreMonthlyStatement (CSV) Reconciliation\n")
+    lines.append(f"# Report 2: RbcMonthly vs CoreMonthlyStatement (CSV) Reconciliation\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append("Compares monthly ending balances from PDF import (RbcMonthly) against CSV-derived CoreMonthlyStatement.\n")
     lines.append("**Threshold:** Balances within $1.00 are considered matching.\n")
     lines.append("---\n")
@@ -462,8 +466,10 @@ def generate_continuity_report(data, ib_accounts):
       - **True gap**: balance changed between surrounding records (PDF likely exists but not imported)
       - **No-activity skip**: balance unchanged (RBC didn't issue a statement)
     """
+    from datetime import datetime
     lines = []
-    lines.append("# Report 3: Data Continuity Analysis\n")
+    lines.append(f"# Report 3: Data Continuity Analysis\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append("For each RBC account and currency, identifies:\n")
     lines.append("- Range of available data\n")
     lines.append("- Longest continuous run (no gaps)\n")
@@ -653,8 +659,10 @@ def generate_continuity_report(data, ib_accounts):
 
 def generate_proposal(data, ib_accounts):
     """Generate actionable proposal to fix identified gaps."""
+    from datetime import datetime
     lines = []
-    lines.append("# Report 4: Proposal to Fix Data Gaps\n")
+    lines.append(f"# Report 4: Proposal to Fix Data Gaps\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append("Based on the reconciliation reports above, here are the identified issues and proposed fixes.\n")
     lines.append("**Scope:** RBC accounts only. IB accounts are out of scope.\n")
     lines.append("**Gap definition:** A 'true gap' in RbcMonthly means the balance changed between\n")

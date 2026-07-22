@@ -56,11 +56,9 @@ class Command(BaseCommand):
         return 'IB'  # default
 
     def _move_file(self, src: str, dest_dir: str) -> str:
-        """Atomic copy-then-delete to dest_dir, appending a timestamp."""
+        """Atomic copy-then-delete to dest_dir."""
         os.makedirs(dest_dir, exist_ok=True)
-        name, ext = os.path.splitext(os.path.basename(src))
-        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-        dest_path = os.path.join(dest_dir, f"{name}_{timestamp}{ext}")
+        dest_path = os.path.join(dest_dir, os.path.basename(src))
         shutil.copy2(src, dest_path)
         os.remove(src)
         return dest_path

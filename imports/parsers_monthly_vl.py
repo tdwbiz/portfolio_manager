@@ -265,21 +265,24 @@ Rules:
      is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
      Net cash effect = 0 (interest reinvested as shares).
   
-  7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB**:
-     Cash transfers. CREDIT = inflow, DEBIT = outflow.
-  
-  8. **DEPOSIT**: Cash deposited into account. CREDIT = amount.
-  
-  9. **WITHDRAWAL**: Cash withdrawn. DEBIT = amount.
+  7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB** / **DEPOSIT** / **WITHDRAWAL** / **FEE**:
+     These are CASH-ONLY transactions. They move money but do NOT involve
+     buying/selling shares. **QUANTITY must be 0 for all these types.**
+     - TFR OUT: DEBIT = amount transferred out (money out), quantity = 0
+     - TRANSFER/CONTRIB/WIRE TFR: CREDIT = inflow (money in), quantity = 0
+     - DEPOSIT: CREDIT = amount deposited (money in), quantity = 0
+     - WITHDRAWAL: DEBIT = amount withdrawn (money out), quantity = 0
+     - FEE: DEBIT = amount charged, quantity = 0
   
   10. **ADJUST** / **RTC**: Book cost adjustments. No cash effect.
   
-  11. **FEE**: Charges/fees. DEBIT = amount charged.
-  
   **IMPORTANT: Do NOT include "Opening Balance" or "Closing Balance" as
   transactions.** These are balance summary lines, not transactions.
-  The Opening Balance dollar amount appears in the DEBIT/CREDIT column of
-  the first row but is NOT a transaction — skip it.
+  The Opening Balance line appears at the TOP of the Account Activity table.
+  It shows a date in parentheses like "Opening Balance (APR. 30, 2019)"
+  and a dollar amount in the DEBIT column. This is NOT a transaction —
+  it is just a reference balance. DO NOT parse it as a SOLD/BOUGHT/etc.
+  The first REAL transaction is the NEXT row after the Opening Balance line.
 
 - If a transaction has no ticker symbol, use an empty string for symbol.
 
@@ -529,6 +532,16 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     description[:80],
                 )
                 continue
+
+            # Post-fix: detect Opening Balance that was misclassified as a transaction.
+            # Pattern: description contains "Opening Balance" or matches date pattern
+            # like "(APR. 30, 2019)" with no real activity
+            if 'OPENING BALANCE' in description.upper():
+                logger.info(
+                    "parse_rbc_monthly_vl: skipping misclassified opening balance: %s",
+                    description[:80],
+                )
+                continue
             
             activity = normalize_activity_type(raw_type, description)
             
@@ -540,15 +553,49 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     "parse_rbc_monthly_vl: corrected BOUGHT->DIST for: %s",
                     description[:80],
                 )
-            
+
             # Post-fix: if LLM labeled as BUY but description says "DIST ON"
             if raw_type == 'BUY' and 'DIST ON' in description.upper():
+                activity = 'DIST'
+
+            # Post-fix: if description says "REINV@" or "REINVEST", force to DIV REIN
+            if 'REINV' in description.upper() or 'REINVEST' in description.upper():
+                if activity != 'DIV REIN':
+                    logger.warning(
+                        "parse_rbc_monthly_vl: corrected %s->DIV REIN for: %s",
+                        activity, description[:80],
+                    )
+                    activity = 'DIV REIN'
+
+            # Post-fix: if LLM labeled as BOUGHT but description says "DIST ON"
+            if raw_type == 'BOUGHT' and 'DIST ON' in description.upper():
                 activity = 'DIST'
 
             quantity = _to_decimal(tx.get('quantity', 0))
             price = _to_decimal(tx.get('price', 0))
             debit = _to_decimal(tx.get('debit', 0))
             credit = _to_decimal(tx.get('credit', 0))
+
+            # --- Fix SOLD: clear debit, ensure proceeds in credit ---
+            # SOLD = money in. The VL model sometimes puts the Opening Balance
+            # amount from the previous row into the debit column of the first
+            # transaction. Also, sometimes proceeds go to debit instead of credit.
+            if activity == 'SOLD':
+                if debit > 0 and credit == 0:
+                    # Proceeds went to wrong column
+                    logger.warning(
+                        "parse_rbc_monthly_vl: SOLD moved debit->credit for: %s",
+                        description[:60],
+                    )
+                    credit = debit
+                    debit = Decimal('0')
+                elif debit > 0 and credit > 0:
+                    # Both set — debit is likely Opening Balance leak
+                    logger.warning(
+                        "parse_rbc_monthly_vl: SOLD cleared debit (opening balance leak) for: %s",
+                        description[:60],
+                    )
+                    debit = Decimal('0')
 
             # --- Fix DIST: per-share rate goes in price, quantity is 0 ---
             # PDF: DIST has per-share rate in RATE column, quantity blank in PDF
@@ -568,6 +615,18 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     credit = debit
                     debit = Decimal('0')
 
+            # --- Fix DIV REIN: net cash = 0, quantity = new shares ---
+            # Dividend reinvestment: dividend immediately used to buy shares
+            if activity == 'DIV REIN':
+                # Clear debit/credit — net cash effect is 0
+                if debit > 0 or credit > 0:
+                    logger.warning(
+                        "parse_rbc_monthly_vl: DIV REIN cleared debit/credit for: %s",
+                        description[:60],
+                    )
+                debit = Decimal('0')
+                credit = Decimal('0')
+
             # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
             # RBF2010/RBF2014 interest: quantity = new shares earned
             # The PDF shows quantity and $10 rate, but no real debit/credit
@@ -583,6 +642,29 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     "parse_rbc_monthly_vl: INTEREST fix: qty=%s price=0 for: %s",
                     quantity, description[:60],
                 )
+
+            # --- Fix cash-only transactions: quantity must be 0 ---
+            # TFR OUT, TRANSFER, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL,
+            # FEE are cash-only — no shares involved
+            CASH_ONLY_TYPES = {'TFR OUT', 'TRANSFER', 'WIRE TFR', 'CONTRIB',
+                               'DEPOSIT', 'WITHDRAWAL', 'FEE'}
+            if activity in CASH_ONLY_TYPES and quantity > 0:
+                logger.warning(
+                    "parse_rbc_monthly_vl: %s should have qty=0, clearing qty=%s for: %s",
+                    activity, quantity, description[:60],
+                )
+                quantity = Decimal('0')
+                price = Decimal('0')
+
+            # --- Fix TFR OUT: cash out must be in debit ---
+            if activity == 'TFR OUT':
+                if credit > 0 and debit == 0:
+                    debit = credit
+                    credit = Decimal('0')
+                    logger.warning(
+                        "parse_rbc_monthly_vl: TFR OUT moved credit->debit for: %s",
+                        description[:60],
+                    )
 
             transactions.append({
                 'date':          tx_date,

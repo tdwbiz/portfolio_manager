@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = 'Import RBC Annual Reports from a directory or single file.'
+    help = 'DEPRECATED — use manage_inbox_import instead. Import RBC Annual Reports from a directory or single file.'
 
     def add_arguments(self, parser):
         parser.add_argument('path', nargs='?', type=str,
@@ -90,6 +90,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self.stderr.write(self.style.WARNING(
+            'DEPRECATED: manage_annual_report_import is deprecated. '
+            'Use "manage_inbox_import" instead — it classifies PDFs automatically.\n'
+        ))
         inbox_dir = options['inbox_dir'] or options.get('path') or str(getattr(settings, 'IMPORT_INBOX_DIR', Path('inbox')))
         target_path = Path(inbox_dir)
         dry_run = options['dry_run']

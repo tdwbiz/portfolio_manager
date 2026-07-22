@@ -41,7 +41,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 import django
 django.setup()
 
-from core.models import Account, RbcMonthly, RbcMonthlyTransaction, RbcMonthlyHolding
+from core.models import Account, RbcMonthly
 
 # Patterns
 DIST_RE = re.compile(r'DIST ON\s+([\d,]+\.?\d*)\s+SHS', re.IGNORECASE)
@@ -214,17 +214,50 @@ def main():
         print(f"No statements found for {account.account_id} {currency}")
         return
 
+    # Filter out annual report summary rows that were mistakenly stored in RbcMonthly
+    def _is_annual_summary(stmt):
+        """Return True if this RbcMonthly row is an annual report summary."""
+        annual_keywords = [
+            'deposits and transfers-in',
+            'net investment return',
+            'deposit of $',
+            'withdrawal of $',
+            'withdrawals and transfers-out',
+        ]
+        for tx in stmt.transactions.all():
+            desc = (tx.description or '').lower()
+            if any(kw in desc for kw in annual_keywords):
+                return True
+        return False
+
     # Filter by start date
     if args.start_date:
         from datetime import datetime
         sd = datetime.strptime(args.start_date, '%Y-%m-%d').date()
-        stmts = [s for s in all_stmts if s.statement_date >= sd]
+        stmts = [s for s in all_stmts if s.statement_date >= sd and not _is_annual_summary(s)]
     else:
-        stmts = all_stmts
+        stmts = [s for s in all_stmts if not _is_annual_summary(s)]
 
-    # Collect all symbols from holdings
+    # If multiple statements exist for the same month, keep only the non-annual one
+    from collections import defaultdict
+    month_groups = defaultdict(list)
+    for s in stmts:
+        key = (s.statement_date.year, s.statement_date.month)
+        month_groups[key].append(s)
+    
+    final_stmts = []
+    for key in sorted(month_groups.keys()):
+        group = month_groups[key]
+        if len(group) == 1:
+            final_stmts.append(group[0])
+        else:
+            group.sort(key=lambda s: s.transactions.count(), reverse=True)
+            final_stmts.append(group[0])
+    stmts = final_stmts
+
+    # Collect all symbols from holdings (using filtered stmts)
     all_symbols = set()
-    for stmt in all_stmts:
+    for stmt in stmts:
         for h in stmt.holdings.all():
             s = h.symbol.strip().upper() if h.symbol and h.symbol.strip() else h.security.strip()[:10].upper()
             if s:
@@ -248,8 +281,10 @@ def main():
         if abs(pct) >= args.threshold:
             high_change_months.append((stmt, pct, bal_change, net_cash))
 
+    from datetime import datetime
     lines = []
     lines.append(f"# Detailed Ledger Report: {account.account_id} ({account.name}) — {currency}\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append(f"Threshold: price change >{args.threshold}% of opening balance\n")
     if args.start_date:
         lines.append(f"Start date filter: {args.start_date}\n")
@@ -277,13 +312,13 @@ def main():
         end = stmt.end_total_market_value or Decimal('0')
         price_chg = bal_chg - net_cash
 
-        # Find previous statement
-        all_idx = None
-        for i, s in enumerate(all_stmts):
+        # Find previous statement (in filtered list)
+        stmt_idx = None
+        for i, s in enumerate(stmts):
             if s.pk == stmt.pk:
-                all_idx = i
+                stmt_idx = i
                 break
-        prev_stmt = all_stmts[all_idx - 1] if all_idx and all_idx > 0 else None
+        prev_stmt = stmts[stmt_idx - 1] if stmt_idx and stmt_idx > 0 else None
 
         lines.append(f"## {month_label(stmt.statement_date)} — {pct:+.1f}%\n")
 

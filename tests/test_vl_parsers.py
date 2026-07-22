@@ -224,7 +224,7 @@ class WatcherClassificationTest(TestCase):
         finally:
             os.unlink(path)
 
-    def test_classify_monthly_statement(self):
+def test_classify_monthly_statement(self):
         """PDF with 'monthly statement' text is classified as statement."""
         text = "RBC Monthly Statement\nAs of Date: 05/31/2024"
         path = self._create_test_pdf(text)
@@ -237,3 +237,125 @@ class WatcherClassificationTest(TestCase):
             self.assertEqual(result, "statement")
         finally:
             os.unlink(path)
+
+
+class FilenameHeuristicTest(TestCase):
+    """Tests for filename-based classification heuristic in classify_pdf_vl."""
+
+    def test_annual_report_filename(self):
+        """Filename containing 'annual report' is classified as annual."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        result = classify_pdf("/path/to/Annual Report-4711 2025-12-31.pdf")
+        self.assertEqual(result, "annual")
+
+    def test_annual_investment_performance_filename(self):
+        """Filename containing 'annual investment performance' is classified as annual."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        result = classify_pdf("/path/to/Annual Investment Performance Report.pdf")
+        self.assertEqual(result, "annual")
+
+    def test_monthly_statement_filename(self):
+        """Filename containing 'monthly statement' is classified as monthly."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        result = classify_pdf("/path/to/Monthly Statement 2025-06.pdf")
+        self.assertEqual(result, "monthly")
+
+    def test_account_statement_filename(self):
+        """Filename containing 'account statement' is classified as monthly."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        result = classify_pdf("/path/to/Account Statement June 2025.pdf")
+        self.assertEqual(result, "monthly")
+
+    def test_unknown_filename_delegates_to_vl(self):
+        """Filename without known patterns delegates to VL model (returns 'unknown' when VL is unavailable)."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        # Non-existent file with no matching pattern should return 'unknown'
+        result = classify_pdf("/path/to/Statement_2025-06.pdf")
+        self.assertEqual(result, "unknown")
+
+    def test_filename_heuristic_is_case_insensitive(self):
+        """Filename matching is case-insensitive."""
+        from imports.classify_pdf_vl import classify_pdf
+
+        result = classify_pdf("/path/to/ANNUAL REPORT-4711.pdf")
+        self.assertEqual(result, "annual")
+
+        result = classify_pdf("/path/to/annual report 2025.pdf")
+        self.assertEqual(result, "annual")
+
+
+class PostProcessingTest(TestCase):
+    """Tests for transaction post-processing rules in the VL parser."""
+
+    def test_tfr_out_clears_quantity(self):
+        """TFR OUT should have quantity=0 and cash in debit."""
+        from decimal import Decimal
+        from datetime import date
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2023-03-31',
+            'sections': [{
+                'currency': 'CAD',
+                'begin_total_market_value': 500000,
+                'end_total_market_value': 520000,
+                'balances': [],
+                'holdings': [],
+                'transactions': [{
+                    'date': '2023-03-13',
+                    'activity_type': 'TFR OUT',
+                    'description': 'ACCOUNT TRANSFER',
+                    'symbol': '',
+                    'quantity': Decimal('27103.0000'),  # Wrong - should be 0
+                    'price': Decimal('0'),
+                    'debit': Decimal('0'),
+                    'credit': Decimal('27103.00'),  # Wrong side
+                    'commission': Decimal('0'),
+                    'notes': '',
+                }],
+            }],
+        }
+        result = _coerce_response(raw, '/test.pdf')
+        tx = result[0]['transactions'][0]
+        self.assertEqual(tx['quantity'], Decimal('0'))
+        self.assertEqual(tx['debit'], Decimal('27103.00'))
+        self.assertEqual(tx['credit'], Decimal('0'))
+
+    def test_deposit_clears_quantity(self):
+        """DEPOSIT should have quantity=0."""
+        from decimal import Decimal
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2023-06-30',
+            'sections': [{
+                'currency': 'CAD',
+                'begin_total_market_value': 500000,
+                'end_total_market_value': 520000,
+                'balances': [],
+                'holdings': [],
+                'transactions': [{
+                    'date': '2023-06-01',
+                    'activity_type': 'DEPOSIT',
+                    'description': 'Deposit',
+                    'symbol': '',
+                    'quantity': Decimal('5000.00'),  # Wrong
+                    'price': Decimal('0'),
+                    'debit': Decimal('0'),
+                    'credit': Decimal('5000.00'),
+                    'commission': Decimal('0'),
+                    'notes': '',
+                }],
+            }],
+        }
+        result = _coerce_response(raw, '/test.pdf')
+        tx = result[0]['transactions'][0]
+        self.assertEqual(tx['quantity'], Decimal('0'))
+        self.assertEqual(tx['price'], Decimal('0'))

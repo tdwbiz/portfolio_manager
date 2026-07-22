@@ -26,6 +26,18 @@ C:\AI-DevTeam\ai-env\Scripts\python.exe manage.py makemigrations --check --setti
 C:\AI-DevTeam\ai-env\Scripts\python.exe manage.py migrate --settings=portfolio_manager.settings_test
 ```
 
+## Import Commands
+Full reference: `docs/IMPORT_COMMANDS.md`
+
+| What you want | Command |
+|---|---|
+| **Import all PDFs** (annual + monthly) | `manage_inbox_import` |
+| **Import CSVs** from inbox | `auto_import` |
+| **Import specific CSV** | `import_statements --broker RBC` |
+| **Watch inbox continuously** | `watch_inbox` |
+
+**DEPRECATED (do not use):** `manage_pdf_import`, `manage_annual_report_import` — use `manage_inbox_import` instead.
+
 ## Aider (LLM Coding Agent)
 ```powershell
 aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1

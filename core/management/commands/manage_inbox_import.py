@@ -136,8 +136,6 @@ class Command(BaseCommand):
             doc_type = classify_pdf(str(pdf_file))
             self.stdout.write(f'  -> {doc_type}')
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
             # ── Step 2: parse + import + log ──────────────────────────────
             if doc_type == 'annual':
                 classified_annual += 1
@@ -197,7 +195,7 @@ class Command(BaseCommand):
                             json.dump(json_data, fh, indent=2, default=str)
                     except OSError as exc:
                         logger.warning("Could not write JSON log for %s: %s", pdf_file.name, exc)
-                    dest = errors_dir / f'{pdf_file.stem}_{timestamp}{pdf_file.suffix}'
+                    dest = errors_dir / pdf_file.name
                     _move_file(pdf_file, dest)
                 continue
 
@@ -216,18 +214,19 @@ class Command(BaseCommand):
                 had_error = errs > 0
                 if had_error:
                     dest = errors_dir / f'{pdf_file.stem}_{timestamp}{pdf_file.suffix}'
-                    moved = _move_file(pdf_file, dest)
-                    if moved:
-                        self.stdout.write(
-                            self.style.WARNING(f'  Moved to errors/: {pdf_file.name}')
-                        )
-                else:
-                    dest = processed_dir / f'{pdf_file.stem}_{timestamp}{pdf_file.suffix}'
-                    moved = _move_file(pdf_file, dest)
-                    if moved:
-                        self.stdout.write(
-                            self.style.SUCCESS(f'  Moved to processed/: {pdf_file.name}')
-                        )
+                    if had_error:                    dest = errors_dir / pdf_file.name
+                        moved = _move_file(pdf_file, dest)
+                        if moved:
+                            self.stdout.write(
+                                self.style.WARNING(f'  Moved to errors/: {pdf_file.name}')
+                            )
+                    else:
+                        dest = processed_dir / pdf_file.name
+                        moved = _move_file(pdf_file, dest)
+                        if moved:
+                            self.stdout.write(
+                                self.style.SUCCESS(f'  Moved to processed/: {pdf_file.name}')
+                            )
 
         # ── Final summary ──────────────────────────────────────────────────
         self.stdout.write(self.style.SUCCESS(

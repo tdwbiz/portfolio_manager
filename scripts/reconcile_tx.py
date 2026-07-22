@@ -216,9 +216,11 @@ def match_transactions(pdf_txs, csv_txs):
 
 
 def generate_report(account_id, year, currency, pdf_txs, csv_txs, matched, unmatched_pdf, unmatched_csv):
+    from datetime import datetime
     lines = []
 
     lines.append(f"# Transaction Reconciliation: {account_id} — {currency} — {year}\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append(f"**PDF is the master source.** CSV transactions are compared against PDF.\n")
     lines.append(f"PDF is master — any CSV-only transactions should be reviewed for accuracy.\n")
     lines.append(f"- PDF transactions: {len(pdf_txs)}")

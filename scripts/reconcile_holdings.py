@@ -133,9 +133,11 @@ def month_label(ym):
 
 
 def generate_report(account_id, year, currency, pdf_data, csv_data):
+    from datetime import datetime
     lines = []
 
     lines.append(f"# Holdings Reconciliation: {account_id} — {currency} — {year}\n")
+    lines.append(f"**Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**\n")
     lines.append(f"**PDF is the master source.** CSV positions are compared against PDF holdings.\n")
 
     pdf_months = sorted(pdf_data.keys())

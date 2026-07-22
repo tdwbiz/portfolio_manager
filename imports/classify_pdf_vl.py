@@ -30,6 +30,9 @@ Determine which of the following document types it is:
   - "annual"  — RBC Annual Investment Performance Report. Covers a full calendar
                 year, shows beginning/ending values, deposits, withdrawals, net
                 return, performance percentages, fees, and compensation.
+                Key indicators: "Annual investment performance report" title,
+                "Change in account value" table, "Money-weighted rate of return",
+                "Annual charges and compensation report", full-year period dates.
   - "monthly" — RBC monthly account statement for a single month. The account type
                 header on page 1 may say any of the following (all are monthly):
                   "Cdn. Dollar Statement", "USD Dollar Statement",
@@ -39,11 +42,55 @@ Determine which of the following document types it is:
                 Key indicators: shows an address block, account number, date of
                 last statement, Asset Summary table with market values by category
                 (Cash, Common Shares, Mutual Funds, etc.), and Income Summary.
+                A monthly statement covers a SINGLE MONTH only (e.g. October 2025,
+                November 2025), NOT a full year.
   - "unknown" — Cannot be determined from this page.
+
+IMPORTANT DISTINCTION:
+- If the document covers a FULL YEAR period (e.g. "January 1, 2025 to December 31, 2025"),
+  it is an ANNUAL report, NOT a monthly statement.
+- If the document covers a SINGLE MONTH (e.g. "October 1, 2025 to October 31, 2025"),
+  it is a MONTHLY statement.
+- The presence of "Annual investment performance report" or "Annual charges" headings
+  means this is definitely an ANNUAL report.
+- The presence of "Asset Summary", "Income Summary", or "Account Activity" for one
+  month means this is a MONTHLY statement.
 
 Return ONLY a JSON object with a single key — no markdown, no prose:
 {"doc_type": "annual" | "monthly" | "unknown"}
 """
+
+
+# ---------------------------------------------------------------------------
+# Filename heuristics — fast pre-classification before calling VL model
+# ---------------------------------------------------------------------------
+
+ANNUAL_FILENAME_PATTERNS = [
+    'annual report',
+    'annual investment performance',
+    'annual charges',
+]
+
+MONTHLY_FILENAME_PATTERNS = [
+    'monthly statement',
+    'account statement',
+]
+
+
+def _classify_by_filename(file_path: str) -> str | None:
+    """Return 'annual' or 'monthly' if the filename strongly indicates type.
+    
+    Returns None if the filename doesn't match any known pattern, in which
+    case the caller should use the VL model.
+    """
+    name = file_path.lower()
+    for pattern in ANNUAL_FILENAME_PATTERNS:
+        if pattern in name:
+            return 'annual'
+    for pattern in MONTHLY_FILENAME_PATTERNS:
+        if pattern in name:
+            return 'monthly'
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -53,9 +100,9 @@ Return ONLY a JSON object with a single key — no markdown, no prose:
 def classify_pdf(file_path: str) -> str:
     """Classify a PDF as 'annual', 'monthly', or 'unknown'.
 
-    Renders the first page at VL_PAGE_DPI and sends it to the VL model.
-    On any error, returns 'unknown' rather than raising — the caller can
-    decide how to handle unrecognised files.
+    First tries a fast filename heuristic. If the filename doesn't match
+    any known pattern, renders the first page at VL_PAGE_DPI and sends it
+    to the VL model. On any error, returns 'unknown' rather than raising.
 
     Parameters
     ----------
@@ -67,6 +114,12 @@ def classify_pdf(file_path: str) -> str:
     str
         One of: 'annual', 'monthly', 'unknown'.
     """
+    # Fast path: check filename for known patterns
+    hint = _classify_by_filename(file_path)
+    if hint:
+        logger.info("classify_pdf: filename heuristic → %s for %s", hint, file_path)
+        return hint
+
     base_url = settings.VL_MODEL_BASE_URL
     model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)

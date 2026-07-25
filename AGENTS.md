@@ -253,6 +253,23 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **DIST quantity pattern:** `quantity` = per-share distribution rate (e.g., 0.169). The actual cash received is in the `debit` column. Do NOT multiply quantity × existing holdings.
 - **INTEREST_RECEIVED quantity pattern:** `quantity` = new RBF shares earned. Cash value = `quantity × 10`.
 
+## Bug Fixes & Gotchas
+- **Migration numbering:** Data migration must be `0025_` not `00024_` to avoid conflicts with schema migration `00024_alter_*`.
+- **Production DB max_length=3:** `Account.currency` column has `max_length=3` — use `'MIX'` (3 chars), NOT `'MIXED'` (5 chars). Use `Account.objects.filter(pk=pk).update(currency=...)` instead of `account.save()` to avoid SQL Server truncation errors when column was previously wider.
+- **Naive datetime warning:** Suppressed in `settings_test.py` — Django `auto_now_add=True` fields can trigger warnings during tests when TZ support is active.
+- **Template bug:** Fixed malformed HTML in `accounts.html` — currency badge span was empty with stray `</span>`.
+- **Transaction requires statement FK:** Always create `BrokerStatement` in tests before creating `Transaction`.
+- **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
+- **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
+- **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
+
+### RBC Monthly PDF Parser Bugs
+- **`"Continued on Next Page"` was case-sensitive** — PDF text uses uppercase `"- CONTINUED ON NEXT PAGE -"` but parser checked lowercase. Fixed with `lines[i].lower()`.
+- **`"Opening Balance"` / `"Closing Balance"` were case-sensitive** — same issue, fixed with `.lower()`.
+- **DIST transactions have activity type AFTER quantity/rate** — unlike DIV REIN/DIVIDEND where activity is on line 2, DIST has: date → security name → quantity → rate → description → ACTIVITY TYPE → "ON X SHS" → "REC ... PAY ...". Parser scans forward to find the activity type and collects pre-activity lines as description/quantity/rate.
+- **Transaction dates are strings like `"JAN. 08"`** — must be converted to proper `datetime.date` objects via `_parse_date_from_string()` before saving to `RbcMonthlyTransaction.date` (DateField).
+- **`_parse_date_from_string()` must handle `"JAN. 08"` format** (with dot after month abbreviation) — not just `"Dec 08"`.
+
 ## Memory & Skill Management
 
 ### Global AGENTS.md (`C:\Users\tdwdev\.agents\AGENTS.md`)

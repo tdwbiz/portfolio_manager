@@ -324,7 +324,7 @@ class TestParseRbcPdf(TestCase):
             os.unlink(pdf_path)
             account.delete()
 
-    @patch('imports.parsers_monthly_vl.parse_rbc_monthly_vl')
+    @patch('imports.parsers_monthly_vl.parse_rbc_monthly')
     def test_duplicate_detection(self, mock_vl):
         """Test 6: Import the same PDF twice.
         Verify the second import is skipped with a warning."""

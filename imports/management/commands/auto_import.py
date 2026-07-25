@@ -16,7 +16,7 @@ from django.utils import timezone
 from core.models import Account, BrokerStatement, FileImportLog, Transaction, TransactionType, compute_tx_hash
 from core.models import RbcAnnual
 from imports.parsers import parse_ib_csv, parse_rbc_csv
-from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
+from imports.parsers_monthly_vl import parse_rbc_monthly
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.rejection_log import rejection_from_trade, write_rejection_log
 
@@ -370,9 +370,9 @@ class Command(BaseCommand):
                         # Standard RBC PDF statement — use VL parser
                         self.stdout.write(f"  Parsing: {filename}")
                         try:
-                            parsed_list = parse_rbc_monthly_vl(file_path)
-                        except (VLParseError, ValueError) as e:
-                            raise ValueError(f'VL parse failed: {e}')
+                            parsed_list = parse_rbc_monthly(file_path)
+                        except (ValueError, Exception) as e:
+                            raise ValueError(f'Parse failed: {e}')
 
                         if dry_run:
                             currencies = [s.get('currency', 'CAD') for s in parsed_list]

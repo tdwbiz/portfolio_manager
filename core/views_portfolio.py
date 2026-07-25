@@ -382,22 +382,24 @@ def portfolio_chart_data(request):
         datasets = []
 
         # Always include market_value
+        mv_series = None
         if "market_value" in series_list or not series_list:
             try:
                 mv_series = compute_portfolio_value_series(
                     freq=freq, date_from=date_from, date_to=date_to
                 )
-                labels = [item["date"] for item in mv_series]
-                values = [float(item["market_value_cad"]) for item in mv_series]
-                datasets.append(
-                    {
-                        "id": "market_value",
-                        "label": "Portfolio Market Value (CAD)",
-                        "data": values,
-                        "type": "line",
-                        "yAxisID": "y",
-                    }
-                )
+                if mv_series:
+                    labels = [item["date"] for item in mv_series]
+                    values = [float(item["market_value_cad"]) for item in mv_series]
+                    datasets.append(
+                        {
+                            "id": "market_value",
+                            "label": "Portfolio Market Value (CAD)",
+                            "data": values,
+                            "type": "line",
+                            "yAxisID": "y",
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Error computing market value series: {e}")
 

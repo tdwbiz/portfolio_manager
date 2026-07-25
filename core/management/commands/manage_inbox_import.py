@@ -39,7 +39,7 @@ from core.models import (
 )
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
-from imports.parsers_monthly_vl import parse_rbc_monthly_vl
+from imports.parsers_monthly_vl import parse_rbc_monthly
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ class Command(BaseCommand):
                             'scanned image quality, or cover page before statement.'
                         ],
                     }
-                    json_path = json_dir / f'{pdf_file.stem}.json'
+                    json_path = json_dir / f'{pdf_file.stem}_ERROR.json'
                     try:
                         with open(json_path, 'w', encoding='utf-8') as fh:
                             json.dump(json_data, fh, indent=2, default=str)
@@ -199,9 +199,10 @@ class Command(BaseCommand):
                     _move_file(pdf_file, dest)
                 continue
 
-            # ── Step 3: save JSON log (errors only) ───────────────────────
-            if not dry_run and errs > 0:
-                json_path = json_dir / f'{pdf_file.stem}.json'
+            # ── Step 3: save JSON log (always) ──────────────────────────
+            if not dry_run:
+                json_filename = pdf_file.stem + ('_ERROR' if errs > 0 else '')
+                json_path = json_dir / f'{json_filename}.json'
                 try:
                     with open(json_path, 'w', encoding='utf-8') as fh:
                         json.dump(json_data, fh, indent=2, default=str)
@@ -210,23 +211,21 @@ class Command(BaseCommand):
 
             # ── Step 4: move PDF ──────────────────────────────────────────
             if not dry_run:
-                had_error = (errors - (errors - errs)) > 0  # noqa: SIM210 — errs from this file
                 had_error = errs > 0
                 if had_error:
-                    dest = errors_dir / f'{pdf_file.stem}_{timestamp}{pdf_file.suffix}'
-                    if had_error:                    dest = errors_dir / pdf_file.name
-                        moved = _move_file(pdf_file, dest)
-                        if moved:
-                            self.stdout.write(
-                                self.style.WARNING(f'  Moved to errors/: {pdf_file.name}')
-                            )
-                    else:
-                        dest = processed_dir / pdf_file.name
-                        moved = _move_file(pdf_file, dest)
-                        if moved:
-                            self.stdout.write(
-                                self.style.SUCCESS(f'  Moved to processed/: {pdf_file.name}')
-                            )
+                    dest = errors_dir / pdf_file.name
+                    moved = _move_file(pdf_file, dest)
+                    if moved:
+                        self.stdout.write(
+                            self.style.WARNING(f'  Moved to errors/: {pdf_file.name}')
+                        )
+                else:
+                    dest = processed_dir / pdf_file.name
+                    moved = _move_file(pdf_file, dest)
+                    if moved:
+                        self.stdout.write(
+                            self.style.SUCCESS(f'  Moved to processed/: {pdf_file.name}')
+                        )
 
         # ── Final summary ──────────────────────────────────────────────────
         self.stdout.write(self.style.SUCCESS(
@@ -354,24 +353,31 @@ class Command(BaseCommand):
                  holdings_recorded, error_count, json_sections, error_messages).
         """
         try:
-            parsed_list = parse_rbc_monthly_vl(str(pdf_file))
+            parsed = parse_rbc_monthly(str(pdf_file))
         except Exception as exc:
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
                 self._log_import(pdf_file.name, 0, 'error', str(exc))
             return 0, 0, 0, 0, 1, [], [str(exc)]
 
+        if parsed is None:
+            empty_msg = 'Parser returned no sections (possible unsupported statement format)'
+            if dry_run:
+                self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
+                return 0, 0, 0, 0, 1, [], [empty_msg]
+            return 0, 0, 0, 0, 1, [], [empty_msg]
+
         if dry_run:
-            for parsed in parsed_list:
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f'  [DRY-RUN] Would import monthly [{parsed["currency"]}]: '
-                        f'{parsed.get("account_number")} {parsed["statement_date"]} '
-                        f'— {len(parsed["transactions"])} txns, '
-                        f'{len(parsed["balances"])} balances'
-                    )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'  [DRY-RUN] Would import monthly [{parsed["currency"]}]: '
+                    f'{parsed.get("account_number")} {parsed["statement_date"]} '
+                    f'\u2014 {len(parsed["sections"]["transactions"])} txns, '
+                    f'{len(parsed["sections"]["holdings"])} holdings, '
+                    f'{len(parsed["sections"]["balances"]) if isinstance(parsed["sections"]["balances"], list) else 2} balances'
                 )
-            return len(parsed_list), 0, 0, 0, 0, [], []
+            )
+            return 1, 0, 0, 0, 0, [], []
 
         account = None
         stmts_created = 0
@@ -381,138 +387,139 @@ class Command(BaseCommand):
         file_errors = []
         json_sections = []
 
-        for parsed in parsed_list:
-            statement_date = parsed.get('statement_date')
-            account_number = parsed.get('account_number', '')
-            currency = parsed.get('currency', 'CAD')
+        # Single-pass processing (text parser returns one dict)
+        statement_date = parsed.get('statement_date')
+        account_number = parsed.get('account_number', '')
+        currency = parsed.get('currency', 'CAD')
+        sections = parsed['sections']
 
-            if not statement_date:
-                msg = 'VL parser did not return statement_date'
-                file_errors.append({'currency': currency, 'error': msg})
-                self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
-                continue
-
+        if not statement_date:
+            msg = 'Parser did not return statement_date'
+            file_errors.append({'currency': currency, 'error': msg})
+            self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
+        else:
             if account is None:
                 account = _get_or_create_account(account_number, '')
                 if account is None:
                     msg = f'Cannot resolve account for account_number={account_number!r}'
                     file_errors.append({'currency': currency, 'error': msg})
                     self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
-                    continue
-
-            # Duplicate check
-            existing = RbcMonthly.objects.filter(
-                account=account,
-                statement_date=statement_date,
-                currency=currency,
-                file_name=pdf_file.name,
-            )
-            if existing.exists():
-                self.stdout.write(
-                    self.style.WARNING(
-                        f'  Duplicate monthly [{currency}]: {pdf_file.name} '
-                        f'(account={account}, date={statement_date})'
+                else:
+                    # Duplicate check
+                    existing = RbcMonthly.objects.filter(
+                        account=account,
+                        statement_date=statement_date,
+                        currency=currency,
+                        file_name=pdf_file.name,
                     )
-                )
-                continue
+                    if existing.exists():
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f'  Duplicate monthly [{currency}]: {pdf_file.name} '
+                                f'(account={account}, date={statement_date})'
+                            )
+                        )
+                    else:
+                        rbc_monthly = RbcMonthly.objects.create(
+                            account=account,
+                            file_name=pdf_file.name,
+                            statement_date=statement_date,
+                            currency=currency,
+                            account_number=account_number,
+                        )
 
-            rbc_monthly = RbcMonthly.objects.create(
-                account=account,
-                file_name=pdf_file.name,
-                statement_date=statement_date,
-                currency=currency,
-                last_statement_date=parsed.get('last_statement_date'),
-                account_number=account_number,
-                fx_rate=parsed.get('fx_rate', Decimal('1.000000')),
-                begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
-                end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
-            )
+                        # Bulk create balances (opening/closing dict -> Cash entry)
+                        balances_data = sections.get('balances', {})
+                        if isinstance(balances_data, dict) and (balances_data.get('opening') or balances_data.get('closing')):
+                            bals_list = [{
+                                'account_type': 'Cash',
+                                'opening': balances_data.get('opening', Decimal('0.00')),
+                                'closing': balances_data.get('closing', Decimal('0.00')),
+                                'market_value': Decimal('0.00'),
+                                'percentage': Decimal('0.00'),
+                            }]
+                        else:
+                            bals_list = []
 
-            # Bulk create balances
-            balances_to_create = [
-                RbcMonthlyBalance(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    account_type=bal['account_type'],
-                    opening_balance=bal.get('opening', Decimal('0.00')),
-                    closing_balance=bal.get('closing', Decimal('0.00')),
-                    market_value=bal.get('market_value', Decimal('0.00')),
-                    percentage=bal.get('percentage', Decimal('0.00')),
-                )
-                for bal in parsed.get('balances', [])
-            ]
-            if balances_to_create:
-                RbcMonthlyBalance.objects.bulk_create(balances_to_create)
-            bals_imported += len(balances_to_create)
+                        balances_to_create = [
+                            RbcMonthlyBalance(
+                                rbc_monthly=rbc_monthly,
+                                currency=currency,
+                                account_type=bal['account_type'],
+                                opening_balance=bal.get('opening', Decimal('0.00')),
+                                closing_balance=bal.get('closing', Decimal('0.00')),
+                                market_value=bal.get('market_value', Decimal('0.00')),
+                                percentage=bal.get('percentage', Decimal('0.00')),
+                            )
+                            for bal in bals_list
+                        ]
+                        if balances_to_create:
+                            RbcMonthlyBalance.objects.bulk_create(balances_to_create)
+                        bals_imported += len(balances_to_create)
 
-            # Bulk create holdings
-            holdings_to_create = [
-                RbcMonthlyHolding(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    security=h.get('security', ''),
-                    symbol=h.get('symbol', '')[:200],
-                    quantity=h.get('quantity', Decimal('0.0000')),
-                    book_cost=h.get('book_cost', Decimal('0.00')),
-                    market_price=h.get('market_price', Decimal('0.0000')),
-                    market_value=h.get('market_value', Decimal('0.00')),
-                )
-                for h in parsed.get('holdings', [])
-            ]
-            if holdings_to_create:
-                RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
-            holdings_imported += len(holdings_to_create)
+                        # Bulk create holdings
+                        holdings_to_create = [
+                            RbcMonthlyHolding(
+                                rbc_monthly=rbc_monthly,
+                                currency=currency,
+                                security=h.get('description', ''),
+                                symbol=h.get('symbol', '')[:200],
+                                quantity=h.get('quantity', Decimal('0.0000')),
+                                book_cost=h.get('book_cost', Decimal('0.00')),
+                                market_price=h.get('market_price', Decimal('0.0000')),
+                                market_value=h.get('market_value', Decimal('0.00')),
+                            )
+                            for h in sections.get('holdings', [])
+                        ]
+                        if holdings_to_create:
+                            RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
+                        holdings_imported += len(holdings_to_create)
 
-            # Bulk create transactions
-            txs_to_create = [
-                RbcMonthlyTransaction(
-                    rbc_monthly=rbc_monthly,
-                    date=tx['date'],
-                    activity_type=tx['activity_type'][:100],
-                    description=tx['description'][:500],
-                    symbol=(tx.get('symbol', '') or '')[:200],
-                    quantity=tx.get('quantity') or Decimal('0.0000'),
-                    price=tx.get('price') or Decimal('0.0000'),
-                    debit=tx.get('debit') or Decimal('0.00'),
-                    credit=tx.get('credit') or Decimal('0.00'),
-                    currency=tx.get('currency', currency),
-                    commission=tx.get('commission') or Decimal('0.00'),
-                    notes=tx.get('notes', '')[:200],
-                )
-                for tx in parsed.get('transactions', [])
-            ]
-            if txs_to_create:
-                RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
-            txns_imported += len(txs_to_create)
+                        # Bulk create transactions
+                        txs_to_create = [
+                            RbcMonthlyTransaction(
+                                rbc_monthly=rbc_monthly,
+                                date=tx['date'],
+                                activity_type=tx['activity_type'][:100],
+                                description=tx['description'][:500],
+                                symbol=(tx.get('symbol', '') or '')[:200],
+                                quantity=tx.get('quantity') or Decimal('0.0000'),
+                                price=tx.get('rate') or Decimal('0.0000'),
+                                debit=tx.get('debit') or Decimal('0.00'),
+                                credit=tx.get('credit') or Decimal('0.00'),
+                                currency=currency,
+                            )
+                            for tx in sections.get('transactions', [])
+                        ]
+                        if txs_to_create:
+                            RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
+                        txns_imported += len(txs_to_create)
 
-            stmts_created += 1
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f'  Imported monthly [{currency}]: {statement_date} — '
-                    f'{len(parsed.get("transactions", []))} txns, {len(parsed.get("balances", []))} balances, {len(parsed.get("holdings", []))} holdings'
-                )
-            )
+                        stmts_created += 1
+                        self.stdout.write(
+                            self.style.SUCCESS(
+                                f'  Imported monthly [{currency}]: {statement_date} \u2014 '
+                                f'{len(sections.get("transactions", []))} txns, '
+                                f'{bals_imported} balances, '
+                                f'{len(sections.get("holdings", []))} holdings'
+                            )
+                        )
 
-            json_sections.append({
-                'currency': currency,
-                'statement_date': str(statement_date),
-                'last_statement_date': str(parsed.get('last_statement_date')) if parsed.get('last_statement_date') else None,
-                'account_number': account_number,
-                'fx_rate': str(parsed.get('fx_rate', '1.000000')),
-                'total_market_value': str(parsed.get('total_market_value', '0.00')),
-                'balances_count': len(parsed.get('balances', [])),
-                'transactions_count': len(parsed.get('transactions', [])),
-                'balances': parsed.get('balances', []),
-                'transactions': parsed.get('transactions', []),
-            })
+                        json_sections.append({
+                            'currency': currency,
+                            'statement_date': str(statement_date),
+                            'last_statement_date': None,
+                            'account_number': account_number,
+                            'fx_rate': '1.000000',
+                            'total_market_value': '0.00',
+                            'balances_count': bals_imported,
+                            'transactions_count': len(sections.get('transactions', [])),
+                            'balances': [],
+                            'transactions': sections.get('transactions', []),
+                        })
 
         error_count = len(file_errors)
         error_messages = [e['error'] for e in file_errors]
-        if not parsed_list and not file_errors:
-            # VL parser returned empty list with no explicit error
-            empty_msg = 'VL parser returned no sections (empty response — possible unsupported statement format)'
-            error_messages = [empty_msg]
-            error_count = 1
 
         # FileImportLog — one entry per PDF
         if not dry_run:

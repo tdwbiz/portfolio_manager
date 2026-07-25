@@ -1,7 +1,7 @@
-"""Thin OpenAI-compatible client for the gemma-gen vision-language model.
+"""Thin OpenAI-compatible client for the qwen2.5-vl vision-language model.
 
 Sends one or more PDF pages (as base64 PNG images) and a structured prompt to
-the llama.cpp server on port 11441, then extracts the JSON response.
+the llama.cpp server (port 11440), then extracts the JSON response.
 
 Hard error on failure — no fallback to regex.
 """
@@ -22,7 +22,7 @@ class VLParseError(Exception):
 
 
 class VLClient:
-    """Client for the gemma-gen vision-language model on port 11441."""
+    """Client for the qwen2.5-vl vision-language model on port 11440."""
 
     def __init__(self, base_url: str, model: str, timeout: int = 120, max_retries: int = 2):
         # Disable OpenAI library's built-in retries — we handle retries ourselves with full logging

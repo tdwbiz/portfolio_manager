@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from core.models import RbcAnnual
-from imports.parsers_monthly_vl import parse_rbc_monthly
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 
 logger = logging.getLogger(__name__)

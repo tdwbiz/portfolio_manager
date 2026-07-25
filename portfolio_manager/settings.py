@@ -235,7 +235,7 @@ _json_raw = (
 )
 IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / "processed" / "json_logs"
 
-# Vision-language (VL) model settings — qwen2.5-vl-7b on port 11440 via llama.cpp
+# Vision-language (VL) model settings — qwen2.5-vl-72b on port 11440 via llama.cpp
 VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11440/v1")
 VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "qwen2.5-vl")
 VL_PAGE_DPI = int(os.getenv("VL_PAGE_DPI", "150"))

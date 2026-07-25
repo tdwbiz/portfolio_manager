@@ -16,7 +16,7 @@ from django.utils import timezone
 from decimal import Decimal
 
 from core.models import Account, FileImportLog, RbcMonthly, RbcMonthlyBalance, RbcMonthlyHolding, RbcMonthlyTransaction
-from imports.parsers_monthly_vl import parse_rbc_monthly
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +191,8 @@ class Command(BaseCommand):
             self.stdout.write(f'Processing: {pdf_file.name}')
 
             try:
-                parsed_list = parse_rbc_monthly(str(pdf_file))
-            except (ValueError, Exception) as e:
+                parsed_list = parse_rbc_monthly_vl(str(pdf_file))
+            except (VLParseError, ValueError) as e:
                 self.stderr.write(self.style.ERROR(f'Failed to parse {pdf_file.name}: {e}'))
                 errors += 1
                 if not dry_run:

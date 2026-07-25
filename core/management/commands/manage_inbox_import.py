@@ -39,7 +39,7 @@ from core.models import (
 )
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
-from imports.parsers_monthly_vl import parse_rbc_monthly_vl, VLParseError
+from imports.parsers_monthly_vl import parse_rbc_monthly_vl
 
 logger = logging.getLogger(__name__)
 

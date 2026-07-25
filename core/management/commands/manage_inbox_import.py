@@ -508,6 +508,7 @@ class Command(BaseCommand):
                 pdf_file.name,
                 stmts_created + txns_imported + bals_imported + holdings_imported,
                 'success',
+                '',
             )
 
         return stmts_created, txns_imported, bals_imported, holdings_imported, len(file_errors), json_sections, [e['error'] for e in file_errors]

@@ -32,8 +32,9 @@ Full reference: `docs/IMPORT_COMMANDS.md`
 | What you want | Command |
 |---|---|
 | **Import all PDFs** (annual + monthly) | `manage_inbox_import` |
-| **Import CSVs** from inbox | `auto_import` |
-| **Import specific CSV** | `import_statements --broker RBC` |
+| **Import Activity CSVs** from inbox | `import_csv` |
+| **Import Holdings CSVs** into PositionHistory | `import_csv --holdings` |
+| **Import specific CSV** (legacy) | `auto_import` |
 | **Watch inbox continuously** | `watch_inbox` |
 
 **DEPRECATED (do not use):** `manage_pdf_import`, `manage_annual_report_import` — use `manage_inbox_import` instead.
@@ -212,7 +213,8 @@ Phase D was implemented in a previous session. The code, views, templates, model
 
 ## Reconciliation Work (feature_rbc_statements_reconciliation)
 - Active branch for verifying PDF data integrity and planning CSV reconciliation
-- **RBC PDF is master data source**. CSV is only used as fallback for missing PDFs.
+- **CSV is the authoritative source for activity data**. PDF VL extraction is unreliable (hallucinates transactions).
+- **RBC PDF provides scaffolding**: balance data (`RbcMonthly.end_total_market_value`, `RbcMonthlyBalance.closing_balance`), holdings snapshots (`RbcMonthlyHolding`)
 
 ### Scripts
 - `scripts/verify_pdf_integrity.py` — verifies RBC PDF internal consistency
@@ -271,8 +273,9 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - Consistent $1,500-$2,200 mismatch across all years — systematic offset from different valuation dates
 
 ## PDF Import & Holdings Architecture
-- **PDF monthly statements are master** (state + activity). CSV is activity layer only.
-- **4 PDF sections parsed:** Account Info (`RbcMonthly`), Account Activity (`RbcMonthlyTransaction`), Balances summary (`RbcMonthlyBalance`), Holdings/Asset Review (`RbcMonthlyHolding`).
+- **CSV Activity is master for transactions**. PDF provides balance scaffolding only.
+- **Holdings CSV** provides position snapshots for `PositionHistory` (quantity, market_price, market_value, average_cost)
+- **4 PDF sections parsed:** Account Info (`RbcMonthly`), Balances summary (`RbcMonthlyBalance`), Holdings/Asset Review (`RbcMonthlyHolding`), Account Activity (`RbcMonthlyTransaction` — unreliable, do not use for transactions)
 - **VL model config:** `settings.py` lines 238-247: `VL_MODEL_BASE_URL = http://127.0.0.1:11440/v1`, `VL_MODEL_NAME = qwen2.5-vl`. Model `qwen2.5-vl-7b-instruct-q8_0.gguf` on port 11440 via llama.cpp with `--mmproj`.
 - **`vl_model` skill at `~/.agents/skills/vl_model/`** — not registered in available skills list, can be edited directly.
 - **Key bug:** `vl_model` error `500 - image input is not supported - hint: if this is unexpected, you may need to provide the mmproj` — this was from old qwen2.5-vl config, not Gemma 4. Gemma 4 has built-in vision encoder (~550M params), no separate `mmproj` needed.

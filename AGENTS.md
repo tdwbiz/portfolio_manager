@@ -102,19 +102,18 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 - **New `BrokerStatement.period_start` / `period_end`** — track coverage range
 - **Shrunk `Transaction.symbol`** to max_length=50, `commission` to (10,2)
 - **New `imports/parsers_holdings.py`** — parses Holdings CSV → `PositionHistory`
-- **New `reimport_csv` management command** — clean re-import of CSV/Holdings
-- **Migration 0033** — all schema changes
+- **New `import_csv` management command** — import Activity and Holdings CSVs from inbox
 
 ### Import Commands
 ```powershell
-# Clean re-import all Activity CSVs (deletes old data first)
-python manage.py reimport_csv
+# Import all Activity CSVs from inbox/
+python manage.py import_csv
 
 # Import Holdings CSVs into PositionHistory
-python manage.py reimport_csv --holdings
+python manage.py import_csv --holdings
 
 # Dry run (parse without writing)
-python manage.py reimport_csv --dry-run
+python manage.py import_csv --dry-run
 ```
 
 ## Branch Strategy

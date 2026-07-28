@@ -14,6 +14,8 @@ import glob
 import logging
 import os
 import sys
+import shutil
+from datetime import datetime
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -79,6 +81,10 @@ class Command(BaseCommand):
         imported_total = 0
         skipped_total = 0
         errors = 0
+        
+        # Setup processed directory
+        processed_dir = os.path.join(inbox, 'processed')
+        os.makedirs(processed_dir, exist_ok=True)
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
@@ -86,9 +92,19 @@ class Command(BaseCommand):
             try:
                 auto_import(file_path, 'RBC', dry_run=dry_run)
                 imported_total += 1
+                
+                # Move file to processed directory with timestamp
+                if not dry_run:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    new_filename = f"{timestamp}_{filename}"
+                    dest_path = os.path.join(processed_dir, new_filename)
+                    shutil.move(file_path, dest_path)
+                    self.stdout.write(f"  Moved to: {new_filename}")
             except Exception as e:
                 self.stderr.write(f"  ERROR importing {filename}: {e}")
                 errors += 1
+                import traceback
+                self.stderr.write(traceback.format_exc())
 
         # Report final counts
         if not dry_run:
@@ -131,6 +147,10 @@ class Command(BaseCommand):
         created_total = 0
         closed_total = 0
         errors = 0
+        
+        # Setup processed directory
+        processed_dir = os.path.join(inbox, 'processed')
+        os.makedirs(processed_dir, exist_ok=True)
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
@@ -141,6 +161,14 @@ class Command(BaseCommand):
                 )
                 created_total += created
                 closed_total += closed
+                
+                # Move file to processed directory with timestamp
+                if not dry_run:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    new_filename = f"{timestamp}_{filename}"
+                    dest_path = os.path.join(processed_dir, new_filename)
+                    shutil.move(file_path, dest_path)
+                    self.stdout.write(f"  Moved to: {new_filename}")
             except Exception as e:
                 self.stderr.write(
                     f"  ERROR importing holdings {filename}: {e}"

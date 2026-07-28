@@ -615,7 +615,7 @@ class RbcAnnual(models.Model):
         help_text="RBC account number from PDF, e.g. 900-00005",
     )
     account_type_code = models.CharField(
-        max_length=10,
+        max_length=50,
         blank=True,
         default="",
         help_text="RRSP, RRIF, RIF, LIF, LIRA, TFSA, RESP",

@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 import httpx
-from openai import OpenAI, APIConnectionError, APITimeoutError
+from openai import APIConnectionError, APITimeoutError, OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,6 @@ class VLClient:
 
     def __init__(self, base_url: str, model: str, timeout: int = 120, max_retries: int = 2):
         # Disable OpenAI library's built-in retries — we handle retries ourselves with full logging
-        import httpx
         self._httpx_client = httpx.Client(
             timeout=httpx.Timeout(timeout, connect=30),
             limits=httpx.Limits(max_connections=1, keepalive_expiry=5),
@@ -181,8 +180,8 @@ class VLClient:
                 logger.info("VLClient: connection test OK — status=%d models=%s",
                             resp.status_code,
                             [m['name'] for m in resp.json().get('models', [])])
-        except Exception as exc:
-            logger.error("VLClient: connection test FAILED — %s", exc)
+        except Exception:
+            logger.exception("VLClient: connection test FAILED")
 
     @staticmethod
     def _extract_json_from_text(text: str) -> dict:

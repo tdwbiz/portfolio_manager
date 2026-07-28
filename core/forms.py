@@ -1,7 +1,5 @@
 from django import forms
-from django.contrib import admin
 from django.forms import inlineformset_factory
-from decimal import Decimal
 
 from core.models import Account, AccountCurrency
 
@@ -24,7 +22,7 @@ class AccountCurrencyInlineFormSet(inlineformset_factory(
     """Formset for editing AccountCurrency sub-accounts on the account edit form."""
 
     starting_balance = forms.DecimalField(
-        max_digits=15, decimal_places=2, required=False, initial=Decimal('0')
+        max_digits=15, decimal_places=2, required=False, initial=0
     )
 
 

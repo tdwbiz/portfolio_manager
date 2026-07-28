@@ -2,14 +2,12 @@
 
 import csv
 import logging
-from datetime import datetime
-from decimal import Decimal
-
+from django.conf import settings
+from django.utils import timezone
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.conf import settings
 
 from core.models import Transaction, BrokerStatement, Account
 from core.views import _get_transaction_type_options, _validate_date_param, TRANSACTION_EXPORT_HEADERS
@@ -152,7 +150,7 @@ def transaction_export_csv(request):
     logger.info(f'CSV export requested by {request.user.username} with filters: {filters} ({qs.count()} transactions)')
 
     response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename=transactions_{datetime.now().strftime("%Y-%m-%d")}.csv'
+    response['Content-Disposition'] = f'attachment; filename=transactions_{timezone.now().strftime("%Y-%m-%d")}.csv'
 
     writer = csv.writer(response)
     writer.writerow(TRANSACTION_EXPORT_HEADERS)
@@ -178,10 +176,12 @@ def transaction_export_excel(request):
     logger.info(f'Excel export requested by {request.user.username} with filters: {filters} ({qs.count()} transactions)')
 
     import openpyxl
+    from openpyxl.styles import Font
     from io import BytesIO
     
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = 'Transactions'
 
     ws.append(TRANSACTION_EXPORT_HEADERS)
@@ -195,10 +195,10 @@ def transaction_export_excel(request):
         ])
 
     for cell in ws[1]:
-        cell.font = openpyxl.styles.Font(bold=True)
+        cell.font = Font(bold=True)
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename=transactions_{datetime.now().strftime("%Y-%m-%d")}.xlsx'
+    response['Content-Disposition'] = f'attachment; filename=transactions_{timezone.now().strftime("%Y-%m-%d")}.xlsx'
 
     buffer = BytesIO()
     wb.save(buffer)

@@ -29,9 +29,7 @@ def _check_login_attempts(ip_address):
     """Check if IP address has exceeded login attempt limit."""
     cache_key = f"login_attempts:{ip_address}"
     attempts = cache.get(cache_key, 0)
-    if attempts >= settings.LOGIN_ATTEMPT_LIMIT:
-        return False
-    return True
+    return not attempts >= settings.LOGIN_ATTEMPT_LIMIT
 
 
 def _record_login_attempt(ip_address):
@@ -99,10 +97,7 @@ def is_safe_url(url: str, allowed_hosts: set | None = None) -> bool:
             return host in allowed_hosts
 
     # Relative URLs are always safe
-    if url.startswith("/") and not url.startswith("//"):
-        return True
-
-    return False
+    return url.startswith("/") and not url.startswith("//")
 
 
 TRANSACTION_TYPE_LABELS = {
@@ -187,19 +182,19 @@ class _ReportSummaryRow:
 
     @property
     def ending_value(self):
-        return self._cad.bal_ending_value if self._cad else Decimal("0")
+        return self._cad.bal_ending_value if self._cad else Decimal(0)
 
     @property
     def net_return(self):
-        return self._cad.bal_net_return if self._cad else Decimal("0")
+        return self._cad.bal_net_return if self._cad else Decimal(0)
 
     @property
     def total_charges_cad(self):
-        return self._cad.chg_total_paid if self._cad else Decimal("0")
+        return self._cad.chg_total_paid if self._cad else Decimal(0)
 
     @property
     def total_compensation_cad(self):
-        return self._cad.comp_total if self._cad else Decimal("0")
+        return self._cad.comp_total if self._cad else Decimal(0)
 
     @property
     def balance_snapshots(self):

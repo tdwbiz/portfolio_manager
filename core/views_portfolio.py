@@ -65,7 +65,7 @@ def dashboard(request):
     try:
         positions = compute_positions()
         symbols = [p["symbol"] for p in positions if p.get("symbol")]
-        prices = fetch_last_prices(symbols)  # noqa: F821 - imported above
+        prices = fetch_last_prices(symbols)
         positions = enrich_positions_with_prices(positions, prices)
 
         total_market_value_cad = sum(

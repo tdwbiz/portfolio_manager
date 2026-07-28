@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import Sum, Count
 from decimal import Decimal
 
-from core.models import Account, AccountCurrency, Transaction
+from core.models import Account, Transaction
 from core.forms import AccountForm, AccountCurrencyFormSet
 from core.views import CASH_ACTIVITY_TRANSACTION_TYPES, POSITION_TRANSACTION_TYPES
 

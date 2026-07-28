@@ -9,14 +9,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q, Sum
-from django.db.models.functions import ExtractYear
+from django.db.models import Sum
 
 from core.models import (
     Account,
     CoreAnnualReport,
     CoreMonthlyStatement,
-    RbcAnnual,
     RbcMonthly,
     Transaction,
 )
@@ -94,7 +92,6 @@ def generate_monthly_statements(
         ending_values[(stmt.statement_month, stmt.currency)] = stmt.ending_market_value
 
     generated = []
-    sorted_keys = sorted(groups.keys())
 
     for (month_start, currency), month_txs in groups.items():
         # Accumulate signed sums per type (CSV sign convention: buys/wdrow/tax = negative, sells/div/dep = positive)
@@ -145,7 +142,7 @@ def generate_monthly_statements(
         abs_commission = abs(total_commission)
 
         with transaction.atomic():
-            stmt, created = CoreMonthlyStatement.objects.update_or_create(
+            stmt, _ = CoreMonthlyStatement.objects.update_or_create(
                 account=account,
                 statement_month=month_start,
                 currency=currency,
@@ -229,7 +226,7 @@ def reverse_generate_monthly_statements(
         return []
 
     min_year, min_month = min(all_months)
-    max_year, max_month = max(all_months)
+    _max_year, _max_month = max(all_months)
 
     # If ending_balances not provided, try to auto-detect
     if ending_balances is None:
@@ -249,7 +246,7 @@ def reverse_generate_monthly_statements(
 
         # Fall back to AccountCurrency starting balance if no RBC data
         if not ending_balances:
-            from core.models import AccountCurrency
+            from core.models import AccountCurrency  # noqa: F401 - ensures reverse FK is loaded
 
             for ac in account.currencies.filter(currency__in=all_currencies):
                 if ac.starting_balance and ac.starting_balance > 0:
@@ -391,7 +388,7 @@ def reverse_generate_monthly_statements(
             ending_cash = current_ending.get(currency, Decimal("0")) + net_flow
 
             with transaction.atomic():
-                stmt, created = CoreMonthlyStatement.objects.update_or_create(
+                stmt, _ = CoreMonthlyStatement.objects.update_or_create(
                     account=account,
                     statement_month=date(year, month, 1),
                     currency=currency,
@@ -650,7 +647,7 @@ def generate_annual_reports(
         # Get all monthly statements for this year
         year_monthly = monthly_qs.filter(statement_month__year=year)
 
-        for cur in currency_totals:
+        for cur, _ in currency_totals.items():
             cur_monthly = year_monthly.filter(currency=cur).order_by("statement_month")
             if cur_monthly.exists():
                 # Beginning = first month's beginning
@@ -692,7 +689,7 @@ def generate_annual_reports(
             withdrawals = totals["sells"]
 
             with transaction.atomic():
-                report, created = CoreAnnualReport.objects.update_or_create(
+                report, _ = CoreAnnualReport.objects.update_or_create(
                     account=account,
                     report_year=year,
                     currency=currency,

@@ -20,7 +20,6 @@ import logging
 import re
 import shutil
 import time
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -139,14 +138,15 @@ class Command(BaseCommand):
             # ── Step 2: parse + import + log ──────────────────────────────
             if doc_type == 'annual':
                 classified_annual += 1
-                rec, errs, err_msg = self._process_annual(pdf_file, dry_run)
+                rec, errs, err_msg, annual_data = self._process_annual(pdf_file, dry_run)
                 imported_annual += rec
                 errors += errs
 
                 json_data = {'type': 'annual', 'filename': pdf_file.name,
-                             'processed_at': datetime.now().isoformat(),
+                             'processed_at': timezone.now().isoformat(),
                              'records_created': rec, 'errors': errs,
-                             'error_messages': [err_msg] if err_msg else []}
+                             'error_messages': [err_msg] if err_msg else [],
+                             'data': annual_data}
 
             elif doc_type == 'monthly':
                 classified_monthly += 1
@@ -162,9 +162,10 @@ class Command(BaseCommand):
                 json_data = {
                     'type': 'monthly',
                     'filename': pdf_file.name,
-                    'processed_at': datetime.now().isoformat(),
+                    'processed_at': timezone.now().isoformat(),
                     'errors': errs,
                     'error_messages': err_msgs,
+                    'sections': json_sections,
                 }
 
             else:
@@ -180,14 +181,14 @@ class Command(BaseCommand):
                     json_data = {
                         'type': 'unknown',
                         'filename': pdf_file.name,
-                        'processed_at': datetime.now().isoformat(),
+                        'processed_at': timezone.now().isoformat(),
                         'errors': 1,
-                        'error_messages': [
+                        'error_messages': (
                             'VL classifier could not identify document type. '
                             'Page 1 did not match RBC monthly statement or annual report. '
                             'Possible causes: different statement format, non-RBC document, '
-                            'scanned image quality, or cover page before statement.'
-                        ],
+                            'scanned image quality, or cover page before statement.',
+                        ),
                     }
                     json_path = json_dir / f'{pdf_file.stem}_ERROR.json'
                     try:
@@ -248,10 +249,10 @@ class Command(BaseCommand):
     # Annual processing
     # ------------------------------------------------------------------
 
-    def _process_annual(self, pdf_file: Path, dry_run: bool) -> tuple[int, int, str]:
+    def _process_annual(self, pdf_file: Path, dry_run: bool) -> tuple[int, int, str, dict]:
         """Parse and import an annual report PDF.
 
-        Returns (records_created, error_count, error_message).
+        Returns (records_created, error_count, error_message, parsed_data).
         """
         try:
             parsed = parse_rbc_annual_report_vl(str(pdf_file))
@@ -259,7 +260,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
                 self._log_import(pdf_file.name, 0, 'error', str(exc))
-            return 0, 1, str(exc)
+            return 0, 1, str(exc), {}
 
         if dry_run:
             currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
@@ -269,7 +270,7 @@ class Command(BaseCommand):
                     f'year={parsed["report_year"]} currencies={currencies}'
                 )
             )
-            return len(currencies), 0, ''
+            return len(currencies), 0, '', parsed
 
         account = _get_or_create_account(
             parsed['account_number'],
@@ -338,7 +339,7 @@ class Command(BaseCommand):
             )
             self._log_import(pdf_file.name, 0, 'ok', 'All records already exist')
 
-        return records_created, 0, ''
+        return records_created, 0, '', parsed
 
     # ------------------------------------------------------------------
     # Monthly processing
@@ -380,6 +381,9 @@ class Command(BaseCommand):
             statement_date = parsed.get('statement_date')
             account_number = parsed.get('account_number', '')
             currency = parsed.get('currency', 'CAD')
+
+            # Always capture parsed data for JSON log
+            json_sections.append(parsed)
 
             if dry_run:
                 self.stdout.write(
@@ -430,6 +434,7 @@ class Command(BaseCommand):
                 statement_date=statement_date,
                 currency=currency,
                 account_number=account_number,
+                last_statement_date=parsed.get('last_statement_date'),
                 begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
                 end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
                 fx_rate=parsed.get('fx_rate', Decimal('1.0000')),
@@ -457,7 +462,7 @@ class Command(BaseCommand):
                 RbcMonthlyHolding(
                     rbc_monthly=rbc_monthly,
                     currency=currency,
-                    security=h.get('description', ''),
+                    security=h.get('security', ''),
                     symbol=h.get('symbol', '')[:200],
                     quantity=h.get('quantity', Decimal('0.0000')),
                     book_cost=h.get('book_cost', Decimal('0.00')),
@@ -560,7 +565,7 @@ def _get_or_create_account(account_number: str, account_type_code: str) -> Accou
             pass
 
     # Auto-create
-    account_id = _normalize_rbc_account_id(account_number) if account_number else f'RBC-AUTO-{datetime.now().strftime("%H%M%S")}'
+    account_id = _normalize_rbc_account_id(account_number) if account_number else f'RBC-AUTO-{timezone.now().strftime("%H%M%S")}'
     name = f'Auto-created from PDF: {account_number}'
     account = Account.objects.create(
         account_id=account_id,

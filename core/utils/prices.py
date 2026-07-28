@@ -306,13 +306,13 @@ def enrich_positions_with_prices(positions: list[dict], prices: dict) -> list[di
         Enriched position dicts with 'last_price', 'market_value_cad',
         'unrealised_pnl_cad', and 'unrealised_pnl_pct' added.
     """
-    usdcad = prices.get("USDCAD=X", Decimal("1"))
+    usdcad = prices.get("USDCAD=X", Decimal(1))
 
     enriched = []
     for pos in positions:
         last_price = prices.get(pos["symbol"])
 
-        fx = usdcad if pos["currency"] != "CAD" else Decimal("1")
+        fx = usdcad if pos["currency"] != "CAD" else Decimal(1)
 
         market_value_cad = None
         if last_price is not None:

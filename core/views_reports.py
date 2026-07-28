@@ -3,7 +3,7 @@
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,21 +15,13 @@ from django.db.models import Q as dj_Q
 
 from core.models import Transaction, Account, FileImportLog, RbcAnnual
 from core.views import (
-    _validate_date_param,
     _is_path_safe,
     _get_transaction_type_options,
     INCOME_TRANSACTION_TYPES,
     TAX_TRANSACTION_TYPES,
     POSITION_TRANSACTION_TYPES,
-    utils_fetch_last_prices,
 )
-from core.utils import (
-    compute_realised_pnl,
-    compute_portfolio_value_series,
-    compute_cost_basis_series,
-    compute_income_series,
-    compute_series_by_account,
-)
+from core.utils import compute_realised_pnl
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +144,11 @@ def download_rejection_log(request, month):
     # SECURITY: Use context manager to ensure file is properly closed
     try:
         logger.info(f'Rejection log downloaded: {month} by user {request.user.username}')
-        response = FileResponse(open(log_path, 'rb'), content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="rejected_{month}.csv"'
-        return response
-    except IOError as e:
+        with open(log_path, 'rb') as f:
+            response = FileResponse(f, content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="rejected_{month}.csv"'
+            return response
+    except OSError as e:
         logger.error(f'Error reading rejection log {month}: {e}')
         return HttpResponse('Error reading file', status=500)
 
@@ -346,7 +339,7 @@ def annual_reports_view(request):
         if key not in seen:
             seen.add(key)
             cad = records.filter(account=rec.account, report_year=rec.report_year, currency='CAD').first()
-            usd = records.filter(account=rec.account, report_year=rec.report_year, currency='USD').first()
+            _ = records.filter(account=rec.account, report_year=rec.report_year, currency='USD').first()
             summary = _ReportSummaryRow(cad)
             report_summaries.append(summary)
 

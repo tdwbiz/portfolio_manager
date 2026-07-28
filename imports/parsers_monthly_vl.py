@@ -576,6 +576,24 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             debit = _to_decimal(tx.get('debit', 0))
             credit = _to_decimal(tx.get('credit', 0))
 
+            # --- Fix BOUGHT: clear credit, ensure cost in debit ---
+            # BOUGHT = money out. The VL model sometimes puts the amount in
+            # credit instead of debit, or leaves both set.
+            if activity == 'BOUGHT':
+                if credit > 0 and debit == 0:
+                    logger.warning(
+                        "parse_rbc_monthly_vl: BOUGHT moved credit->debit for: %s",
+                        description[:60],
+                    )
+                    debit = credit
+                    credit = Decimal('0')
+                elif credit > 0 and debit > 0:
+                    logger.warning(
+                        "parse_rbc_monthly_vl: BOUGHT cleared credit for: %s",
+                        description[:60],
+                    )
+                    credit = Decimal('0')
+
             # --- Fix SOLD: clear debit, ensure proceeds in credit ---
             # SOLD = money in. The VL model sometimes puts the Opening Balance
             # amount from the previous row into the debit column of the first
@@ -666,6 +684,42 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                         description[:60],
                     )
 
+            # --- Fix DIVIDEND: ensure cash is in credit ---
+            if activity == 'DIVIDEND':
+                if debit > 0 and credit == 0:
+                    credit = debit
+                    debit = Decimal('0')
+                    logger.warning(
+                        "parse_rbc_monthly_vl: DIVIDEND moved debit->credit for: %s",
+                        description[:60],
+                    )
+
+            # --- Fix WITHDRAWAL: ensure cash is in debit ---
+            if activity == 'WITHDRAWAL':
+                if credit > 0 and debit == 0:
+                    debit = credit
+                    credit = Decimal('0')
+                    logger.warning(
+                        "parse_rbc_monthly_vl: WITHDRAWAL moved credit->debit for: %s",
+                        description[:60],
+                    )
+
+            # --- Validate: cash-in types must have credit > 0 ---
+            if activity in CASH_IN_TYPES and debit == 0 and credit == 0:
+                logger.warning(
+                    "parse_rbc_monthly_vl: %s has zero debit and credit — skipping: %s",
+                    activity, description[:60],
+                )
+                continue
+
+            # --- Validate: cash-out types must have debit > 0 ---
+            if activity in CASH_OUT_TYPES and debit == 0 and credit == 0:
+                logger.warning(
+                    "parse_rbc_monthly_vl: %s has zero debit and credit — skipping: %s",
+                    activity, description[:60],
+                )
+                continue
+
             transactions.append({
                 'date':          tx_date,
                 'activity_type': activity,
@@ -729,6 +783,27 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 "VL model likely extracted wrong value",
                 file_path, section.get('currency', 'CAD'), begin_total, balance_sum,
             )
+
+        # If end_total is suspiciously HIGH (10x balance sum), the VL model
+        # likely hallucinated an extra digit or merged multiple values
+        if balance_sum > Decimal('0') and end_total > balance_sum * 10:
+            logger.warning(
+                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f is %.0fx balance_sum %.2f — "
+                "likely VL hallucination; replacing with balance_sum",
+                file_path, section.get('currency', 'CAD'),
+                end_total, end_total / balance_sum, balance_sum,
+            )
+            section['end_total_market_value'] = balance_sum
+
+        # Same for begin_total
+        if balance_sum > Decimal('0') and begin_total > balance_sum * 10:
+            logger.warning(
+                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f is %.0fx balance_sum %.2f — "
+                "likely VL hallucination; replacing with balance_sum",
+                file_path, section.get('currency', 'CAD'),
+                begin_total, begin_total / balance_sum, balance_sum,
+            )
+            section['begin_total_market_value'] = balance_sum
 
     return result
 

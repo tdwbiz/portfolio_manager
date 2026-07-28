@@ -111,20 +111,36 @@ def types_compatible(pdf_type, csv_type):
     if pt in ('BUY', 'BOUGHT') and ct == 'BUY':
         return True
 
-    # PDF SELL -> CSV SELL
-    if pt == 'SELL' and ct == 'SELL':
+    # PDF SELL/SOLD -> CSV SELL
+    if pt in ('SELL', 'SOLD') and ct == 'SELL':
         return True
 
-    # PDF INTEREST -> CSV INT
-    if pt in ('INTEREST', 'INTEREST PAID') and ct == 'INT':
+    # PDF INTEREST/INTEREST_RECEIVED -> CSV INT
+    if pt in ('INTEREST', 'INTEREST_RECEIVED', 'INTEREST PAID') and ct == 'INT':
         return True
 
-    # PDF BUY with credit (dividend reinvestment) -> CSV DIST/DIV
-    if pt == 'BUY' and ct in ('DIST', 'DIV'):
+    # PDF DIV REIN -> CSV INT (dividend reinvestment shows as INT in CSV with $0)
+    if pt == 'DIV REIN' and ct == 'INT':
         return True
 
-    # PDF TRANSFER -> CSV TRANSFER/TFO
-    if pt == 'TRANSFER' and ct in ('TRANSFER', 'TFO'):
+    # PDF DIST/DIVIDEND -> CSV DIST/DIV
+    if pt in ('DIST', 'DIVIDEND') and ct in ('DIST', 'DIV'):
+        return True
+
+    # PDF TRANSFER/TFR OUT -> CSV TRANSFER/TFO
+    if pt in ('TRANSFER', 'TFR OUT', 'WIRE TFR') and ct in ('TRANSFER', 'TFO'):
+        return True
+
+    # PDF DEPOSIT -> CSV DEP
+    if pt == 'DEPOSIT' and ct == 'DEP':
+        return True
+
+    # PDF WITHDRAWAL -> CSV WDRAW
+    if pt == 'WITHDRAWAL' and ct == 'WDRAW':
+        return True
+
+    # PDF CONTRIB -> CSV DEP
+    if pt == 'CONTRIB' and ct == 'DEP':
         return True
 
     return False

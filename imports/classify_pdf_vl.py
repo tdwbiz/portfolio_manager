@@ -13,9 +13,9 @@ import base64
 import logging
 
 import fitz  # PyMuPDF
-
 from django.conf import settings
-from imports.llm_client import VLClient, VLParseError
+
+from imports.llm_client import VLParseError, VLClient
 
 logger = logging.getLogger(__name__)
 

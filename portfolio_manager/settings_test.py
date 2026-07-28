@@ -2,7 +2,7 @@
 
 import tempfile
 
-from .settings import *  # noqa: F401,F403
+from .settings import *  # noqa: F403
 
 DATABASES = {
     "default": {
@@ -29,6 +29,7 @@ PRICE_GAP_CRITICAL_DAYS = 10
 
 # Suppress naive datetime warnings for auto_now_add fields during tests
 import warnings
+
 warnings.filterwarnings(
     "ignore",
     message=".*DateTimeField.*received a naive datetime.*",

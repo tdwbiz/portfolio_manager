@@ -1,3 +1,1 @@
-from django.db import models
-
-# Create your models here.
+# Placeholder — no models in this app.

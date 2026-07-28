@@ -84,6 +84,39 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 - `ending = beginning + net_flow`
 - Commission is already included in `amount_cad` — do NOT add it separately
 
+## Phase F (IN PROGRESS — CSV Master Import)
+**Branch:** `feature_csv_master_import`
+**Test count:** 208 total (25 new + 183 existing), 1 pre-existing failure (unrelated)
+
+### Strategy: CSV as Master for Activity
+- PDF VL extraction is unreliable (hallucinates transactions, misses real ones)
+- CSV is the authoritative source for activity data
+- RBC PDF provides scaffolding: `begin_total_market_value`, `end_total_market_value`, `RbcMonthlyBalance.closing_balance`
+- Holdings CSV provides position snapshots for `PositionHistory`
+- Given CSV activity + beginning balances + month-end market values → can build `CoreMonthlyStatement`
+
+### Changes Implemented
+- **Fixed `compute_tx_hash`** — removed `amount` so overlapping CSV exports with slightly different amounts produce the same hash
+- **New `PositionHistory.market_price` / `market_value`** — from Holdings CSV snapshots
+- **New `Transaction.settlement_date`** — parsed from CSV column 6
+- **New `BrokerStatement.period_start` / `period_end`** — track coverage range
+- **Shrunk `Transaction.symbol`** to max_length=50, `commission` to (10,2)
+- **New `imports/parsers_holdings.py`** — parses Holdings CSV → `PositionHistory`
+- **New `reimport_csv` management command** — clean re-import of CSV/Holdings
+- **Migration 0033** — all schema changes
+
+### Import Commands
+```powershell
+# Clean re-import all Activity CSVs (deletes old data first)
+python manage.py reimport_csv
+
+# Import Holdings CSVs into PositionHistory
+python manage.py reimport_csv --holdings
+
+# Dry run (parse without writing)
+python manage.py reimport_csv --dry-run
+```
+
 ## Branch Strategy
 - `dev` — active development branch
 - `main` — production

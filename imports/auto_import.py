@@ -148,7 +148,6 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                     tx_type=trade['type'],
                     quantity=trade['quantity'],
                     price=trade['price'],
-                    amount=trade['amount'],
                     currency=trade.get('currency', 'USD'),
                 )
 
@@ -169,6 +168,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                         statement=statement,
                         account=account,
                         date=trade['date'],
+                        settlement_date=trade.get('settlement_date'),
                         symbol=trade['symbol'],
                         type=trade['type'],
                         quantity=trade['quantity'],

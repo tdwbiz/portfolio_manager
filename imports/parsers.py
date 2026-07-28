@@ -535,6 +535,16 @@ def parse_rbc_csv(file_path: str,
                 symbol     = cleaned[2]
                 notes      = cleaned[10] if len(cleaned) > 10 else ''
 
+                # Settlement date (column 6) — optional
+                settlement_date = None
+                if len(cleaned) > 6:
+                    raw_sd = cleaned[6].strip()
+                    if raw_sd:
+                        try:
+                            settlement_date = datetime.strptime(raw_sd, '%B %d, %Y').date()
+                        except ValueError:
+                            pass
+
                 # Capture Account column (index 7) — skip practice accounts
                 account_id = cleaned[7].strip().upper() if len(cleaned) > 7 else ''
                 if account_id.startswith('PRAC'):
@@ -550,6 +560,7 @@ def parse_rbc_csv(file_path: str,
 
                 trades.append({
                     'date':              trade_date,
+                    'settlement_date':   settlement_date,
                     'symbol':            symbol,
                     'type':              type_code,
                     'type_label':        type_label,

@@ -13,7 +13,6 @@ def compute_tx_hash(
     tx_type: str,
     quantity,
     price,
-    amount,
     currency: str,
 ) -> str:
     """Return a SHA-256 hex digest that uniquely identifies a transaction.
@@ -21,6 +20,11 @@ def compute_tx_hash(
     All numeric fields are normalised to fixed decimal places so that the
     same trade imported from two different overlapping export files always
     produces the same hash.
+
+    NOTE: 'amount' is intentionally excluded because the same trade can
+    appear in overlapping CSV exports with slightly different amounts
+    (e.g. post-trade adjustments). The combination of (account, date,
+    symbol, type, quantity, price) is sufficient to identify a trade.
     """
     key = "|".join(
         [
@@ -31,7 +35,6 @@ def compute_tx_hash(
             tx_type or "",
             f"{Decimal(str(quantity)):.4f}",
             f"{Decimal(str(price)):.4f}",
-            f"{Decimal(str(amount)):.2f}",
             currency or "",
         ]
     )
@@ -187,7 +190,15 @@ class Account(models.Model):
 
 
 class PositionHistory(models.Model):
-    """Tracks historical positions for an account over time."""
+    """Tracks historical positions for an account over time.
+
+    Each row represents a position that was active from `date_from` to
+    `date_to`. A `NULL` `date_to` means the position is still held.
+
+    Populated from Holdings CSV snapshots. Multiple snapshots for the same
+    (account, symbol) create new rows with the previous row's `date_to` set
+    to one day before the new snapshot date.
+    """
 
     owner = models.CharField(max_length=50)
     account = models.ForeignKey(
@@ -198,6 +209,14 @@ class PositionHistory(models.Model):
     cost_basis_per_unit = models.DecimalField(max_digits=12, decimal_places=4)
     total_cost_basis = models.DecimalField(max_digits=15, decimal_places=2)
     currency = models.CharField(max_length=3, default="CAD")
+    market_price = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Price at the time of the snapshot"
+    )
+    market_value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="Market value (quantity * market_price) at snapshot time"
+    )
     date_from = models.DateField()
     date_to = models.DateField(null=True, blank=True)
     as_of_timestamp = models.DateTimeField(auto_now_add=True)
@@ -223,6 +242,14 @@ class BrokerStatement(models.Model):
     source = models.CharField(max_length=3, choices=SOURCE_CHOICES)
     file_date = models.DateField()
     raw_filename = models.CharField(max_length=255)
+    period_start = models.DateField(
+        null=True, blank=True,
+        help_text="Earliest transaction date in this statement"
+    )
+    period_end = models.DateField(
+        null=True, blank=True,
+        help_text="Latest transaction date in this statement"
+    )
 
     def __str__(self):
         return f"{self.source} Statement - {self.file_date}"
@@ -240,11 +267,15 @@ class Transaction(models.Model):
         related_name="transactions",
     )
     date = models.DateField()
-    symbol = models.CharField(max_length=200, blank=True, default="")
+    settlement_date = models.DateField(
+        null=True, blank=True,
+        help_text="Settlement date (T+2 for most trades)"
+    )
+    symbol = models.CharField(max_length=50, blank=True, default="")
     type = models.CharField(max_length=20)
     quantity = models.DecimalField(max_digits=12, decimal_places=4)
     price = models.DecimalField(max_digits=12, decimal_places=4)
-    commission = models.DecimalField(max_digits=12, decimal_places=4)
+    commission = models.DecimalField(max_digits=10, decimal_places=2)
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     currency = models.CharField(max_length=3, default="USD")
     exchange_rate_cad = models.DecimalField(

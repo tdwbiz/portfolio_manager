@@ -14,6 +14,7 @@ def compute_tx_hash(
     quantity,
     price,
     currency: str,
+    amount=None,
 ) -> str:
     """Return a SHA-256 hex digest that uniquely identifies a transaction.
 
@@ -21,10 +22,10 @@ def compute_tx_hash(
     same trade imported from two different overlapping export files always
     produces the same hash.
 
-    NOTE: 'amount' is intentionally excluded because the same trade can
-    appear in overlapping CSV exports with slightly different amounts
-    (e.g. post-trade adjustments). The combination of (account, date,
-    symbol, type, quantity, price) is sufficient to identify a trade.
+    NOTE: 'amount' is optional. When provided it is included in the hash
+    to distinguish multiple transactions of the same type on the same day
+    (e.g. two DEP on the same date). For BUY/SELL trades amount is already
+    derivable from quantity*price so it is redundant.
     """
     key = "|".join(
         [
@@ -36,6 +37,7 @@ def compute_tx_hash(
             f"{Decimal(str(quantity)):.4f}",
             f"{Decimal(str(price)):.4f}",
             currency or "",
+            f"{Decimal(str(amount)):.2f}" if amount is not None else "",
         ]
     )
     return hashlib.sha256(key.encode()).hexdigest()
@@ -1082,3 +1084,286 @@ class CoreReconciliation(models.Model):
 
     def __str__(self):
         return f"{self.account} {self.reconciliation_type} {self.period_start}"
+
+
+# ============================================================================
+# ACCOUNTING LEDGER SYSTEM (Phase F2)
+# ============================================================================
+
+
+class LedgerAccount(models.Model):
+    """Represents a single ledger account (cash or position).
+    
+    Created automatically when first transaction affects that account/symbol/currency.
+    Each brokerage account has multiple ledger accounts:
+    - One CASH account per currency (e.g., "90000001 CAD Cash")
+    - One POSITION account per (symbol, currency) (e.g., "90000001 AAPL USD")
+    """
+    
+    ACCOUNT_TYPES = [
+        ('CASH', 'Cash'),
+        ('POSITION', 'Stock Position'),
+        ('INCOME', 'Income'),
+    ]
+    
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name="ledger_accounts",
+        help_text="Parent brokerage account"
+    )
+    # Denormalized fields for quick lookup without joins
+    account_id_str = models.CharField(
+        max_length=50, db_index=True,
+        help_text="Denormalized account ID (e.g., 90000001)"
+    )
+    account_name = models.CharField(
+        max_length=100,
+        help_text="Denormalized account name (e.g., TS_HUISGELD)"
+    )
+    ledger_name = models.CharField(
+        max_length=150, db_index=True,
+        help_text="Human-readable name: account_id-type-currency[-symbol]"
+    )
+    account_type = models.CharField(max_length=10, choices=ACCOUNT_TYPES)
+    currency = models.CharField(max_length=3)
+    symbol = models.CharField(
+        max_length=50, 
+        blank=True, 
+        default="",
+        help_text="Only for POSITION type"
+    )
+    
+    # Current balance (updated as entries are added)
+    quantity = models.DecimalField(
+        max_digits=15, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Shares (POSITION) or 0 (CASH)"
+    )
+    cost_basis_total = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="Total cost basis"
+    )
+    cost_basis_per_unit = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Average cost per share"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = "core_ledger_account"
+        unique_together = [('account', 'account_type', 'currency', 'symbol')]
+        indexes = [
+            models.Index(fields=["account", "account_type"]),
+            models.Index(fields=["account", "symbol", "currency"]),
+        ]
+    
+    def __str__(self):
+        return self.ledger_name
+        if self.symbol:
+            parts.append(self.symbol)
+        return '-'.join(parts)
+
+
+class LedgerEntry(models.Model):
+    """Individual ledger transaction (double-entry).
+    
+    Every Transaction creates 1-2 LedgerEntry records:
+    - BUY: CREDIT cash + DEBIT position
+    - SELL: DEBIT cash + CREDIT position
+    - DIV/DIST/INT: DEBIT cash only
+    - DEP/CONTRIB: DEBIT cash only
+    - WDRAW/TFR OUT: CREDIT cash only
+    - DIV REIN: DEBIT position + CREDIT cash (dividend used)
+    - SPLIT: DEBIT position (quantity up, cost basis per share down)
+    
+    Audit trail: Every entry links back to source Transaction.
+    """
+    
+    ENTRY_TYPES = [
+        ('DEBIT', 'Debit'),
+        ('CREDIT', 'Credit'),
+    ]
+    
+    ledger_account = models.ForeignKey(
+        LedgerAccount,
+        on_delete=models.CASCADE,
+        related_name="entries"
+    )
+    entry_date = models.DateField()
+    entry_type = models.CharField(max_length=6, choices=ENTRY_TYPES)
+    
+    # For CASH accounts
+    cash_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="Positive for DEBIT, negative for CREDIT"
+    )
+    
+    # For POSITION accounts
+    quantity_change = models.DecimalField(
+        max_digits=15, decimal_places=4, default=Decimal("0.0000"),
+        help_text="Shares bought/sold"
+    )
+    cost_basis_change = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="Cost basis change"
+    )
+    
+    # Related symbol (for cash entries, shows which security the transaction was for)
+    related_symbol = models.CharField(
+        max_length=50, blank=True, default="",
+        help_text="For cash entries: which security this transaction was for"
+    )
+    
+    # Audit trail: link back to source Transaction
+    source_transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ledger_entries",
+        help_text="Source transaction (for audit trail)"
+    )
+    description = models.CharField(max_length=255, blank=True, default="")
+    
+    # Period tracking
+    statement_month = models.DateField(
+        help_text="First day of month (for period reporting)"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = "core_ledger_entry"
+        ordering = ["-entry_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["ledger_account", "statement_month"]),
+            models.Index(fields=["source_transaction"]),
+            models.Index(fields=["entry_date"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.entry_type} {self.ledger_account} {self.entry_date}"
+
+
+class MonthlyLedgerBalance(models.Model):
+    """Month-end snapshot of all ledger accounts.
+    
+    Built from LedgerEntry records for the month.
+    Verified against Holdings CSV and RBC PDF.
+    """
+    
+    ledger_account = models.ForeignKey(
+        LedgerAccount,
+        on_delete=models.CASCADE,
+        related_name="monthly_balances"
+    )
+    statement_month = models.DateField(help_text="First day of month")
+    
+    # Balances at month end (computed from LedgerEntry)
+    quantity = models.DecimalField(
+        max_digits=15, decimal_places=4, default=Decimal("0.0000")
+    )
+    cost_basis_total = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    cost_basis_per_unit = models.DecimalField(
+        max_digits=10, decimal_places=4, default=Decimal("0.0000")
+    )
+    
+    # Market values (from Holdings CSV or RBC PDF for verification)
+    market_price_csv = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="From Holdings CSV"
+    )
+    market_value_csv = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True
+    )
+    market_price_rbc = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="From RBC PDF"
+    )
+    market_value_rbc = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True
+    )
+    
+    # Reconciliation status
+    quantity_match_csv = models.BooleanField(
+        null=True, blank=True,
+        help_text="Matches Holdings CSV?"
+    )
+    quantity_match_rbc = models.BooleanField(
+        null=True, blank=True,
+        help_text="Matches RBC PDF?"
+    )
+    reconciliation_notes = models.TextField(blank=True, default="")
+    
+    # Month closure
+    is_closed = models.BooleanField(default=False)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.CharField(max_length=100, blank=True, default="")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = "core_monthly_ledger_balance"
+        unique_together = [('ledger_account', 'statement_month')]
+        ordering = ["-statement_month"]
+        indexes = [
+            models.Index(fields=["ledger_account", "statement_month"]),
+            models.Index(fields=["statement_month", "is_closed"]),
+        ]
+    
+    def __str__(self):
+        return f"{self.ledger_account} {self.statement_month}"
+
+
+class LedgerMonthClosure(models.Model):
+    """Tracks month-end closure status for each account.
+    
+    Once closed, no LedgerEntry can be added/modified for that month.
+    """
+    
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name="ledger_closures"
+    )
+    statement_month = models.DateField(help_text="First day of month")
+    currency = models.CharField(max_length=3)
+    
+    is_closed = models.BooleanField(default=False)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.CharField(max_length=100, blank=True, default="")
+    closure_notes = models.TextField(blank=True, default="")
+    
+    # Verification results
+    csv_holdings_verified = models.BooleanField(
+        null=True, blank=True,
+        help_text="Verified against Holdings CSV?"
+    )
+    rbc_pdf_verified = models.BooleanField(
+        null=True, blank=True,
+        help_text="Verified against RBC PDF?"
+    )
+    verification_report_path = models.CharField(
+        max_length=500, blank=True, default=""
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = "core_ledger_month_closure"
+        unique_together = [('account', 'statement_month', 'currency')]
+        ordering = ["-statement_month"]
+        indexes = [
+            models.Index(fields=["account", "statement_month", "currency"]),
+            models.Index(fields=["is_closed"]),
+        ]
+    
+    def __str__(self):
+        status = "CLOSED" if self.is_closed else "OPEN"
+        return f"{self.account.account_id} {self.currency} {self.statement_month} [{status}]"

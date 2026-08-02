@@ -13,14 +13,15 @@ Options:
 import glob
 import logging
 import os
-import sys
 import shutil
+import time
 from datetime import datetime
+from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from core.models import BrokerStatement, Transaction, PositionHistory
+from core.models import BrokerStatement, Transaction, PositionHistory, FileImportLog
 from imports.auto_import import auto_import
 from imports.parsers_holdings import import_holdings_snapshot
 
@@ -55,11 +56,16 @@ class Command(BaseCommand):
 
     def _import_activity(self, inbox: str, dry_run: bool) -> None:
         """Import Activity CSVs, clearing old CSV data first."""
-        # Find all CSV files
+        # Find all Activity CSV files (exclude Holdings and Dividends files)
         csv_files = []
         for pattern in ['*.csv', '**/*.csv']:
             csv_files.extend(glob.glob(os.path.join(inbox, pattern), recursive=True))
         csv_files = sorted(set(csv_files))
+        # Filter out Holdings and Dividends files
+        csv_files = [f for f in csv_files if not (
+            os.path.basename(f).lower().startswith('holdings') or
+            'dividend' in os.path.basename(f).lower()
+        )]
 
         if not csv_files:
             self.stdout.write(f"No CSV files found in {inbox}")
@@ -67,44 +73,64 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Found {len(csv_files)} CSV files")
 
+        # Setup processed directories (same as PDF import)
+        processed_dir = Path(
+            getattr(settings, 'IMPORT_PROCESSED_DIR', settings.BASE_DIR / 'processed')
+        )
+        errors_dir = processed_dir / 'errors'
+        for d in (processed_dir, errors_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
         if not dry_run:
             # Clear existing CSV-imported data
             self.stdout.write("Clearing existing CSV-imported data...")
             tx_count = Transaction.objects.count()
             stmt_count = BrokerStatement.objects.count()
+            fil_count = FileImportLog.objects.count()
             Transaction.objects.all().delete()
             BrokerStatement.objects.all().delete()
+            FileImportLog.objects.all().delete()
             self.stdout.write(
-                f"Cleared {tx_count} transactions and {stmt_count} statements"
+                f"Cleared {tx_count} transactions, {stmt_count} statements, {fil_count} file logs"
             )
 
+            # Clear import tracking file
+            import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
+            import_log.parent.mkdir(parents=True, exist_ok=True)
+            import_log.write_text('')
+            reject_log = Path('docs/reconciliation/CSV_Activity_Rejected.csv')
+            reject_log.write_text('')
+
         imported_total = 0
-        skipped_total = 0
         errors = 0
-        
-        # Setup processed directory
-        processed_dir = os.path.join(inbox, 'processed')
-        os.makedirs(processed_dir, exist_ok=True)
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
             self.stdout.write(f"Importing: {filename}")
             try:
-                auto_import(file_path, 'RBC', dry_run=dry_run)
+                trades_count = auto_import(file_path, 'RBC', dry_run=dry_run)
+                # If no trades were parsed, treat as error
+                if trades_count == 0 and not dry_run:
+                    self.stderr.write(f"  WARNING: No trades parsed from {filename}")
+                    errors += 1
+                    dest = errors_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                    continue
                 imported_total += 1
-                
-                # Move file to processed directory with timestamp
+                # Move to processed/ on success
                 if not dry_run:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    new_filename = f"{timestamp}_{filename}"
-                    dest_path = os.path.join(processed_dir, new_filename)
-                    shutil.move(file_path, dest_path)
-                    self.stdout.write(f"  Moved to: {new_filename}")
+                    dest = processed_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
             except Exception as e:
                 self.stderr.write(f"  ERROR importing {filename}: {e}")
                 errors += 1
-                import traceback
-                self.stderr.write(traceback.format_exc())
+                # Move to processed/errors/ on failure
+                if not dry_run:
+                    dest = errors_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
 
         # Report final counts
         if not dry_run:
@@ -138,19 +164,20 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Found {len(csv_files)} Holdings CSV files")
 
-        if not dry_run:
-            self.stdout.write("Clearing existing PositionHistory data...")
-            count = PositionHistory.objects.count()
-            PositionHistory.objects.all().delete()
-            self.stdout.write(f"Cleared {count} position history records")
+        # Setup processed directories (same as PDF import)
+        processed_dir = Path(
+            getattr(settings, 'IMPORT_PROCESSED_DIR', settings.BASE_DIR / 'processed')
+        )
+        errors_dir = processed_dir / 'errors'
+        for d in (processed_dir, errors_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
+        # Don't clear PositionHistory — snapshots are cumulative.
+        # Each new import closes old open positions and creates new ones.
 
         created_total = 0
         closed_total = 0
         errors = 0
-        
-        # Setup processed directory
-        processed_dir = os.path.join(inbox, 'processed')
-        os.makedirs(processed_dir, exist_ok=True)
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
@@ -161,21 +188,60 @@ class Command(BaseCommand):
                 )
                 created_total += created
                 closed_total += closed
-                
-                # Move file to processed directory with timestamp
-                if not dry_run:
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    new_filename = f"{timestamp}_{filename}"
-                    dest_path = os.path.join(processed_dir, new_filename)
-                    shutil.move(file_path, dest_path)
-                    self.stdout.write(f"  Moved to: {new_filename}")
+                if created_total + closed_total > 0:
+                    # Move to processed/ on success (positions were created or closed)
+                    if not dry_run:
+                        dest = processed_dir / filename
+                        _move_file(Path(file_path), dest)
+                        self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
+                else:
+                    # 0 positions created/closed — file has no parseable data
+                    if not dry_run:
+                        dest = errors_dir / filename
+                        _move_file(Path(file_path), dest)
+                        self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
             except Exception as e:
                 self.stderr.write(
                     f"  ERROR importing holdings {filename}: {e}"
                 )
                 errors += 1
-
+                # Move to processed/errors/ on failure
+                if not dry_run:
+                    dest = errors_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                
         self.stdout.write(
             f"Total: {created_total} created, {closed_total} closed "
             f"({errors} errors)"
         )
+
+
+def _move_file(src: Path, dest: Path) -> bool:
+    """Move src to dest, retrying up to 5 times on PermissionError.
+
+    Returns True if the file was moved, False otherwise.
+    If the source file is already gone (moved by a concurrent process),
+    logs a warning and returns False without raising.
+    """
+    if not src.exists():
+        logger.warning("_move_file: %s not found — already moved by another process", src.name)
+        return False
+
+    for attempt in range(5):
+        try:
+            shutil.move(str(src), str(dest))
+            logger.info("Moved %s -> %s", src.name, dest)
+            return True
+        except PermissionError:
+            if attempt == 4:
+                logger.error("Failed to move %s after 5 attempts", src.name)
+                return False
+            delay = 2 * (attempt + 1)
+            logger.warning("File locked, retrying move in %ds...", delay)
+            time.sleep(delay)
+        except FileNotFoundError:
+            logger.warning("_move_file: %s disappeared during move — already moved by another process", src.name)
+            return False
+
+    return False

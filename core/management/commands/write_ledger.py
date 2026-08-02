@@ -164,7 +164,8 @@ class Command(BaseCommand):
 
         # Get or create cash ledger account
         cash_ledger, _ = LedgerAccount.objects.get_or_create(
-            account=[PERSON_NAME]account_type='CASH',
+            account=tx.account,
+            account_type='CASH',
             currency=tx.currency,
             symbol='',
             defaults={
@@ -324,7 +325,8 @@ class Command(BaseCommand):
             account=tx.account,
             account_type='INCOME',
             currency=tx.currency,
-            symbol=[PERSON_NAME]defaults={
+            symbol=income_type,
+            defaults={
                 'quantity': Decimal('0'),
                 'cost_basis_total': Decimal('0'),
                 'account_id_str': tx.account.account_id,

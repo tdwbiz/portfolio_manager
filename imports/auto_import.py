@@ -5,10 +5,12 @@ This file does NOT configure Django itself — it expects the project's
 settings to already be loaded.
 """
 
+import csv
 import hashlib
 import logging
 import os
 from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -91,13 +93,22 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
             logger.warning(f"Skipping {os.path.basename(file_path)}: identical content already imported as {prior_log.filename}")
             return
 
+    # Setup import tracking
+    import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
+    reject_log = Path('docs/reconciliation/CSV_Activity_Rejected.csv')
+    import_log.parent.mkdir(parents=True, exist_ok=True)
+    reject_log.parent.mkdir(parents=True, exist_ok=True)
+    imported_trades = []
+    failed_trades = []
+    rejections = []
+
     # Parse CSV
     logger.info(f"Parsing {broker} CSV file: {file_path}")
     exchange_rate_cad: Decimal = Decimal('1.000000')
     if broker == 'IB':
-        trades = parse_ib_csv(file_path)
+        trades = parse_ib_csv(file_path, rejections)
     elif broker == 'RBC':
-        trades, exchange_rate_cad = parse_rbc_csv(file_path)
+        trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
     else:
         logger.error(f"Unsupported broker type: {broker}")
         return
@@ -149,12 +160,24 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                     quantity=trade['quantity'],
                     price=trade['price'],
                     currency=trade.get('currency', 'USD'),
+                    amount=trade['amount'],
                 )
 
                 # Check for duplicate by tx_hash
                 if Transaction.objects.filter(tx_hash=tx_hash).exists():
                     logger.debug(f"Duplicate transaction (hash match): {tx_hash}")
                     skipped_count += 1
+                    failed_trades.append({
+                        'Source_File': os.path.basename(file_path),
+                        'account': account_id,
+                        'date': str(trade['date']),
+                        'symbol': trade['symbol'],
+                        'type': trade['type'],
+                        'amount': trade['amount'],
+                        'currency': trade.get('currency', 'USD'),
+                        'quantity': trade['quantity'],
+                        'error': 'Duplicate (hash match)',
+                    })
                     continue
 
                 # Create transaction
@@ -181,6 +204,16 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                         tx_hash=tx_hash,
                     )
                     imported_count += 1
+                    imported_trades.append({
+                        'Source_File': os.path.basename(file_path),
+                        'account': account_id,
+                        'date': str(trade['date']),
+                        'symbol': trade['symbol'],
+                        'type': trade['type'],
+                        'amount': trade['amount'],
+                        'currency': trade.get('currency', 'USD'),
+                        'quantity': trade['quantity'],
+                    })
                 except Exception as e:
                     logger.error(f"Error creating transaction for {trade}: {e}")
                     raise
@@ -203,6 +236,40 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
 
     except Exception as e:
         logger.error(f"Import failed: {e}")
+
+    # Write imported transactions to tracking file (after commit)
+    if imported_trades:
+        with open(import_log, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity'
+            ])
+            if import_log.stat().st_size == 0:
+                writer.writeheader()
+            writer.writerows(imported_trades)
+
+    # Write failed/rejected transactions
+    all_rejections = failed_trades + [
+        {
+            'Source_File': r.get('Filename', ''),
+            'account': r.get('Account ID', ''),
+            'date': r.get('Date', ''),
+            'symbol': r.get('Symbol', ''),
+            'type': r.get('Type', ''),
+            'amount': r.get('Amount', ''),
+            'currency': r.get('Currency', ''),
+            'quantity': r.get('Quantity', ''),
+            'error': r.get('Reason Rejected', ''),
+        }
+        for r in rejections
+    ]
+    if all_rejections:
+        with open(reject_log, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity', 'error'
+            ])
+            if reject_log.stat().st_size == 0:
+                writer.writeheader()
+            writer.writerows(all_rejections)
 
 
 if __name__ == '__main__':

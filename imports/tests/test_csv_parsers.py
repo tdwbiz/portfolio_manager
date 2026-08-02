@@ -1,0 +1,550 @@
+"""Tests for RBC and IB CSV parsers."""
+
+import os
+import tempfile
+from datetime import date, datetime
+from decimal import Decimal
+from unittest.mock import patch
+
+from django.test import TestCase
+
+from imports.parsers import parse_rbc_csv, parse_ib_csv
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _write_csv(rows: list[list[str]]) -> str:
+    """Write CSV rows to a temp file and return the path."""
+    fd, path = tempfile.mkstemp(suffix='.csv')
+    with os.fdopen(fd, 'w', newline='', encoding='utf-8-sig') as f:
+        for row in rows:
+            f.write(','.join(row) + '\n')
+    return path
+
+
+# ---------------------------------------------------------------------------
+# RBC CSV Parser
+# ---------------------------------------------------------------------------
+
+class RbcCsvParserTests(TestCase):
+    """Test RBC CSV parsing."""
+
+    def test_parses_buy_with_settlement_date(self):
+        """BUY with settlement date should be parsed."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.37 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000001',
+             '-1666.20', 'CAD'],
+        ])
+
+        trades, rate = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        trade = trades[0]
+        self.assertEqual(trade['type'], 'BUY')
+        self.assertEqual(trade['symbol'], 'VFV')
+        self.assertEqual(trade['quantity'], Decimal('10'))
+        self.assertEqual(trade['price'], Decimal('166.62'))
+        self.assertEqual(trade['amount'], Decimal('-1666.20'))
+        self.assertEqual(trade['settlement_date'], date(2025, 10, 10))
+
+    def test_parses_dividend_distribution(self):
+        """DIST dividend should be parsed."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Distribution', 'VDY', 'Vanguard ETF',
+             '6182', '0.143', '', '90000001',
+             '886.81', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'DIST')
+        self.assertEqual(trades[0]['amount'], Decimal('886.81'))
+
+    def test_parses_dividend_reinvestment(self):
+        """DIV REIN should be parsed as a net-zero transaction."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Div Reinvest', 'RBF2010', 'RBF 2010',
+             '340', '10.00', 'October 10, 2025', '90000001',
+             '3400.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'DIV REIN')
+        self.assertEqual(trades[0]['quantity'], Decimal('340'))
+        self.assertEqual(trades[0]['price'], Decimal('10.00'))
+        # DIV REIN: debit = cost, credit = 0, net = 0
+        self.assertEqual(trades[0]['amount'], Decimal('3400.00'))
+
+    def test_parses_interest_received(self):
+        """INTEREST_RECEIVED should be parsed."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 01, 2025', 'Interest', 'RBF2010', 'RBF 2010',
+             '2.003', '0', '', '90000001',
+             '0', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'INT')
+        self.assertEqual(trades[0]['quantity'], Decimal('2.003'))
+        # Interest: no cash flow — amount = 0
+        self.assertEqual(trades[0]['amount'], Decimal('0'))
+
+    def test_parses_withdrawal(self):
+        """WDRAW withdrawal should be parsed."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Withdrawal', '', 'Withdrawal',
+             '0', '0', '', '90000001',
+             '-500.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'WDRAW')
+        self.assertEqual(trades[0]['amount'], Decimal('-500.00'))
+
+    def test_parses_deposit(self):
+        """DEP deposit should be parsed."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Deposit', '', 'Contribution',
+             '0', '0', '', '90000001',
+             '2000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'DEP')
+        self.assertEqual(trades[0]['amount'], Decimal('2000.00'))
+
+    def test_parses_fees_and_taxes(self):
+        """FEE and TAX should be parsed."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Fees', '', 'Management Fee',
+             '0', '0', '', '90000001',
+             '-15.00', 'CAD'],
+            ['October 08, 2025', 'Taxes', '', 'Tax Withholding',
+             '0', '0', '', '90000001',
+             '-50.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 2)
+        self.assertEqual(trades[0]['type'], 'FEE')
+        self.assertEqual(trades[1]['type'], 'TAX')
+
+    def test_parses_negative_amount_as_outflow(self):
+        """Negative amount should indicate money out."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '100', '166.62', 'October 10, 2025', '90000001',
+             '-16662.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(trades[0]['amount'], Decimal('-16662.00'))
+        self.assertTrue(trades[0]['amount'] < 0)
+
+    def test_parses_commission_calculated_from_gross_amount(self):
+        """Commission should be calculated as |gross - |amount||."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000001',
+             '-1702.80', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        gross = Decimal('10') * Decimal('166.62')
+        # Commission = |gross - |amount|| = |1666.20 - 1702.80| = 36.60
+        self.assertAlmostEqual(trades[0]['commission'], Decimal('36.60'), places=2)
+
+    def test_parses_exchange_rate(self):
+        """Exchange rate should be extracted from header."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.3720 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+        ])
+
+        _, rate = parse_rbc_csv(path)
+        self.assertEqual(rate, Decimal('1.3720'))
+
+    def test_exchange_rate_default_one_if_not_found(self):
+        """Default exchange rate should be 1.0 when not found."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        _, rate = parse_rbc_csv(path)
+        self.assertEqual(rate, Decimal('1.0'))
+
+    def test_skips_practice_accounts(self):
+        """Practice accounts should be skipped."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'AAPL', 'Apple',
+             '10', '150.00', 'October 10, 2025', 'PRACEF8C2DAE',
+             '-1500.00', 'USD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_parses_multiple_trades_in_order(self):
+        """Multiple trades should be parsed in file order."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.37 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 01, 2025', 'Distribution', 'VDY', 'Dividend',
+             '6182', '0.143', 'October 03, 2025', '90000001',
+             '886.81', 'CAD'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000001',
+             '-1666.20', 'CAD'],
+            ['October 15, 2025', 'Div Reinvest', 'RBF2010', 'RBF 2010',
+             '100', '10.00', 'October 17, 2025', '90000001',
+             '1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 3)
+        self.assertEqual(trades[0]['symbol'], 'VDY')
+        self.assertEqual(trades[1]['symbol'], 'VFV')
+        self.assertEqual(trades[2]['symbol'], 'RBF2010')
+
+    def test_date_formats(self):
+        """Various date formats should be parsed correctly."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['Oct 08, 2025', 'Buy', 'VFV', 'Test',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+            ['October 08, 2025', 'Buy', 'VDY', 'Test',
+             '100', '0.143', '', '90000001',
+             '14.30', 'CAD'],
+            ['08-Oct-25', 'Buy', 'VFV', 'Test',
+             '5', '100.00', '', '90000001',
+             '-500.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 3)
+        self.assertEqual(trades[0]['date'], date(2025, 10, 8))
+        self.assertEqual(trades[1]['date'], date(2025, 10, 8))
+        self.assertEqual(trades[2]['date'], date(2025, 10, 8))
+
+    def test_date_parse_error_skipped(self):
+        """Invalid date should be logged as warning and skipped."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['NOT A DATE', 'Buy', 'VFV', 'Test',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_insufficient_columns_skipped(self):
+        """Rows with fewer than 9 columns should be skipped."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV',
+             '-1000.00', 'CAD'],  # Only 5 columns
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_empty_activity_skipped(self):
+        """Rows with empty activity should be skipped."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', '', 'VFV', 'Test',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_numeric_parse_error_skipped(self):
+        """Rows with invalid numeric fields should be skipped."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Test',
+             'invalid', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_comma_in_amount_stripped(self):
+        """Amounts with commas should be handled correctly."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Test',
+             '100', '100.00', '', '90000001',
+             '-100,000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['amount'], Decimal('-100000.00'))
+
+    def test_dash_in_amount_treated_as_zero(self):
+        """Dash/dash amounts should be treated as zero."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Test',
+             '100', '100.00', '', '90000001',
+             '--', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['amount'], Decimal('0'))
+
+    def test_zero_quantity_skipped(self):
+        """Zero quantity should be skipped (not in trades)."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Test',
+             '0', '100.00', '', '90000001',
+             '0', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_empty_file_returns_no_trades(self):
+        """Empty file should return no trades."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_unexpected_header_not_treated_as_data(self):
+        """A row starting with 'Account' should not be treated as data."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.37 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['Account', 'Something', 'VFV', 'Test',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_activity_type_normalisation(self):
+        """Activity type should be normalised to canonical code."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'buy', 'VFV', 'Test',
+             '10', '100.00', '', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        trades, _ = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'BUY')
+
+
+# ---------------------------------------------------------------------------
+# IB CSV Parser
+# ---------------------------------------------------------------------------
+
+class IbCsvParserTests(TestCase):
+    """Test IB CSV parsing."""
+
+    def test_parses_transaction_history_format(self):
+        """Transaction History format should be parsed."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,AAPL stock,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'BUY')
+        self.assertEqual(trades[0]['symbol'], 'AAPL')
+        self.assertEqual(trades[0]['quantity'], Decimal('10'))
+        self.assertEqual(trades[0]['price'], Decimal('150.25'))
+        self.assertEqual(trades[0]['amount'], Decimal('1502.50'))
+
+    def test_parses_activity_statement_format(self):
+        """Activity Statement format should be parsed."""
+        content = (
+            "Trades\n"
+            "Date/Time,Symbol,Buy/Sell,Quantity,T. Price,Currency,Net Amount,Account\n"
+            "2024-01-15 10:30:00,AAPL,Buy,10,150.25,USD,1502.50,U1234567\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'BUY')
+        self.assertEqual(trades[0]['symbol'], 'AAPL')
+
+    def test_dividend_imported(self):
+        """Dividend transactions should be imported."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,Dividend paid,DIVIDEND,MSFT,"
+            "10,3.00,USD,30.00,0,30.00\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'DIV')
+
+    def test_fee_imported(self):
+        """Fee transactions should be imported."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,Commission fee,FEE,AAPL,"
+            "10,1.00,USD,10.00,0,10.00\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'FEE')
+
+    def test_transfer_imported(self):
+        """Transfer transactions should be imported."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,Wire transfer,TRANSFER,,,"
+            "0,0,0,USD,1000.00\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]['type'], 'TRANSFER')
+
+    def test_practice_account_skipped(self):
+        """Practice accounts should be skipped."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,PRACEF8C2DAE,Test,Buy,AAPL,"
+            "10,100.00,USD,1000.00,0,1000.00\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_empty_file_returns_no_trades(self):
+        """Empty file should return no trades."""
+        path = _write_csv([
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+        ])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_insufficient_columns_skipped(self):
+        """Rows with fewer than 13 columns should be skipped."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,Test\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 0)
+
+    def test_multiple_transactions_imported(self):
+        """Multiple transactions should all be imported."""
+        content = (
+            "Transaction History,Header,Date,Account,Description,Type,Symbol,"
+            "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
+            "Transaction History,Data,2024-01-15,U1234567,Buy,AAPL,"
+            "10,150.25,USD,1502.50,1.00,1503.50\n"
+            "Transaction History,Data,2024-01-16,U1234567,Sell,MSFT,"
+            "5,300.00,USD,1500.00,0.50,1499.50\n"
+        )
+        path = _write_csv([content])
+
+        trades = parse_ib_csv(path)
+        self.assertEqual(len(trades), 2)
+        self.assertEqual(trades[0]['type'], 'BUY')
+        self.assertEqual(trades[1]['type'], 'SELL')

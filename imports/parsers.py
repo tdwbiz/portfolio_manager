@@ -375,7 +375,7 @@ def _parse_ib_activity_statement(rows: List[List[str]],
                             continue
 
                         currency = row[7].strip() if len(row) > 7 else 'USD'
-                        
+
                         account_id = ''
                         if account_idx is not None and len(row) > account_idx:
                             account_id = row[account_idx].strip().upper()
@@ -408,6 +408,15 @@ def _parse_ib_activity_statement(rows: List[List[str]],
     return trades
 
 
+# ---------------------------------------------------------------------------
+# RBC CSV parser
+# ---------------------------------------------------------------------------
+
+VALID_ACCOUNTS = {
+    '90000002', '90000001', '90000008', '90000003',
+    '90000005', '90000006', '90000007', '90000004',
+}
+
 def parse_rbc_csv(file_path: str,
                   rejections: List[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Decimal]:
     """Parse RBC Activity Export CSV.
@@ -432,7 +441,22 @@ def parse_rbc_csv(file_path: str,
     trades: List[Dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
+    cleaned: List[str] = []
     filename = os.path.basename(file_path)
+
+    # Column mapping (will be set when header is found)
+    col_map = {
+        'date': 0,
+        'activity': 1,
+        'symbol': 2,
+        'quantity': 4,
+        'price': 5,
+        'settlement': 6,
+        'account': 7,
+        'value': 8,
+        'currency': 9,
+        'notes': 10,
+    }
 
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
@@ -455,13 +479,42 @@ def parse_rbc_csv(file_path: str,
                     # Detect data header row by first column value
                     if row[0].strip().strip('"') == 'Date':
                         found_header = True
+                        # Build column mapping from header
+                        header = [cell.strip().strip('"').lower() for cell in row]
+                        col_map = {}
+                        for i, col_name in enumerate(header):
+                            if 'date' in col_name and 'settlement' not in col_name:
+                                col_map['date'] = i
+                            elif 'activity' in col_name:
+                                col_map['activity'] = i
+                            elif 'symbol' in col_name and 'description' not in col_name:
+                                col_map['symbol'] = i
+                            elif 'quantity' in col_name:
+                                col_map['quantity'] = i
+                            elif 'price' in col_name:
+                                col_map['price'] = i
+                            elif 'settlement' in col_name:
+                                col_map['settlement'] = i
+                            elif 'account' in col_name:
+                                col_map['account'] = i
+                            elif 'value' in col_name:
+                                col_map['value'] = i
+                            elif 'currency' in col_name:
+                                col_map['currency'] = i
+                            elif 'notes' in col_name:
+                                col_map['notes'] = i
+                        continue
+
+                # Skip pre-header metadata rows (account balances, totals, disclaimers)
+                if not found_header:
                     continue
 
                 # Parse data rows — require at least 9 columns (up to Value)
                 if len(row) < 9:
+                    reason = "Too few columns (" + str(len(row)) + ")"
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': f'Too few columns ({len(row)})',
+                        'Reason Rejected': reason,
                         'Date': cleaned[0] if cleaned else '', 'Type': '', 'Symbol': '',
                         'Quantity': '', 'Price': '', 'Amount': '', 'Currency': '',
                         'Account ID': '', 'Notes': '',
@@ -470,30 +523,39 @@ def parse_rbc_csv(file_path: str,
 
                 cleaned = [cell.strip().strip('"') for cell in row]
 
-                activity = cleaned[1]
+                activity = cleaned[col_map.get('activity', 1)]
                 if not activity:
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': 'Missing activity type',
-                        'Date': cleaned[0], 'Type': '', 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
-                        'Quantity': '', 'Price': '', 'Amount': cleaned[8] if len(cleaned) > 8 else '',
-                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': '',
+                        'Date': cleaned[col_map.get('date', 0)], 'Type': '', 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
+                        'Quantity': '', 'Price': '', 'Amount': cleaned[col_map.get('value', 8)] if len(cleaned) > col_map.get('value', 8) else '',
+                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': '',
                     })
                     continue
 
                 type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
 
                 try:
-                    trade_date = datetime.strptime(cleaned[0], '%B %d, %Y').date()
+                    # Try multiple date formats
+                    try:
+                        trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%b %d, %Y').date()
+                    except ValueError:
+                        try:
+                            trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%B %d, %Y').date()
+                        except ValueError:
+                            # DD-Mon-YY format (e.g., '26-Jun-24')
+                            trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%d-%b-%y').date()
                 except ValueError:
-                    logger.warning(f"Row {row_num}: Could not parse date '{cleaned[0]}'")
+                    bad_date = cleaned[col_map.get('date', 0)]
+                    logger.warning("Row %d: Could not parse date '%s'", row_num, bad_date)
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': f"Invalid date: {cleaned[0]!r}",
-                        'Date': cleaned[0], 'Type': activity, 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
-                        'Quantity': cleaned[4] if len(cleaned) > 4 else '', 'Price': cleaned[5] if len(cleaned) > 5 else '',
-                        'Amount': cleaned[8] if len(cleaned) > 8 else '',
-                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': '',
+                        'Reason Rejected': 'Invalid date: ' + repr(bad_date),
+                        'Date': bad_date, 'Type': activity, 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
+                        'Quantity': cleaned[col_map.get('quantity', 4)] if len(cleaned) > col_map.get('quantity', 4) else '', 'Price': cleaned[col_map.get('price', 5)] if len(cleaned) > col_map.get('price', 5) else '',
+                        'Amount': cleaned[col_map.get('value', 8)] if len(cleaned) > col_map.get('value', 8) else '',
+                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': '',
                     })
                     continue
 
@@ -505,20 +567,27 @@ def parse_rbc_csv(file_path: str,
                     return Decimal(v)
 
                 try:
-                    quantity = abs(_to_decimal(cleaned[4]))
-                    price    = _to_decimal(cleaned[5])
-                    amount   = _to_decimal(cleaned[8])  # signed — negative = outflow
+                    quantity = abs(_to_decimal(cleaned[col_map.get('quantity', 4)]))
+                    price    = _to_decimal(cleaned[col_map.get('price', 5)])
+                    amount   = _to_decimal(cleaned[col_map.get('value', 8)])  # signed — negative = outflow
                 except Exception:
+                    bad_qty = cleaned[col_map.get('quantity', 4)]
+                    bad_price = cleaned[col_map.get('price', 5)]
+                    bad_amount = cleaned[col_map.get('value', 8)]
                     logger.warning(
-                        f"Row {row_num}: Could not parse numeric fields "
-                        f"(qty={cleaned[4]!r}, price={cleaned[5]!r}, value={cleaned[8]!r}), skipping"
+                        "Row %d: Could not parse numeric fields "
+                        "(qty=%r, price=%r, value=%r), skipping",
+                        row_num, bad_qty, bad_price, bad_amount
                     )
+                    reason = ('Invalid numeric fields (qty=' + repr(bad_qty)
+                               + ', price=' + repr(bad_price)
+                               + ', amount=' + repr(bad_amount) + ')')
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': f'Invalid numeric fields (qty={cleaned[4]!r}, price={cleaned[5]!r}, amount={cleaned[8]!r})',
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': cleaned[2] if len(cleaned) > 2 else '',
-                        'Quantity': cleaned[4], 'Price': cleaned[5], 'Amount': cleaned[8],
-                        'Currency': cleaned[9] if len(cleaned) > 9 else '', 'Account ID': cleaned[7] if len(cleaned) > 7 else '', 'Notes': cleaned[10] if len(cleaned) > 10 else '',
+                        'Reason Rejected': reason,
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
+                        'Quantity': bad_qty, 'Price': bad_price, 'Amount': bad_amount,
+                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': cleaned[col_map.get('notes', 10)] if len(cleaned) > col_map.get('notes', 10) else '',
                     })
                     continue
 
@@ -531,14 +600,14 @@ def parse_rbc_csv(file_path: str,
                 else:
                     commission = Decimal('0.00')
 
-                currency   = cleaned[9] if len(cleaned) > 9 else 'USD'
-                symbol     = cleaned[2]
-                notes      = cleaned[10] if len(cleaned) > 10 else ''
+                currency   = cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else 'USD'
+                symbol     = cleaned[col_map.get('symbol', 2)]
+                notes      = cleaned[col_map.get('notes', 10)] if len(cleaned) > col_map.get('notes', 10) else ''
 
                 # Settlement date (column 6) — optional
                 settlement_date = None
-                if len(cleaned) > 6:
-                    raw_sd = cleaned[6].strip()
+                if len(cleaned) > col_map.get('settlement', 6):
+                    raw_sd = cleaned[col_map.get('settlement', 6)].strip()
                     if raw_sd:
                         try:
                             settlement_date = datetime.strptime(raw_sd, '%B %d, %Y').date()
@@ -552,6 +621,18 @@ def parse_rbc_csv(file_path: str,
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': f'Practice account: {account_id}',
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': symbol,
+                        'Quantity': str(quantity), 'Price': str(price), 'Amount': str(amount),
+                        'Currency': currency, 'Account ID': account_id, 'Notes': notes,
+                    })
+                    continue
+
+                # Skip accounts not in whitelist
+                if account_id and account_id not in VALID_ACCOUNTS:
+                    logger.debug(f"Row {row_num}: Skipping unknown account '{account_id}'")
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': f'Unknown account: {account_id}',
                         'Date': str(trade_date), 'Type': activity, 'Symbol': symbol,
                         'Quantity': str(quantity), 'Price': str(price), 'Amount': str(amount),
                         'Currency': currency, 'Account ID': account_id, 'Notes': notes,

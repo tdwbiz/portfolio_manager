@@ -7,27 +7,27 @@ It implements double-entry bookkeeping where each transaction creates
 Usage:
     python manage.py write_ledger --account 90000001 --month 2024-01
     python manage.py write_ledger --account 90000001 --all-open
+    python manage.py write_ledger --all-open          # all accounts
+    python manage.py write_ledger --month 2024-01     # all accounts
 """
+import logging
 import os
 import sys
+
 import django
-import logging
-from datetime import date, timedelta
-from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction as db_transaction
+from django.db import transaction
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 sys.path.insert(0, r'C:\AI-DevTeam\projects\portfolio_manager')
 django.setup()
 
-from core.models import (
-    Account, Transaction, LedgerAccount, LedgerEntry,
-    MonthlyLedgerBalance, LedgerMonthClosure
-)
+from datetime import date, timedelta
+from decimal import Decimal
+
+from core.models import Account, LedgerAccount, LedgerEntry, LedgerMonthClosure, MonthlyLedgerBalance, Transaction
 
 logger = logging.getLogger(__name__)
-
 
 class Command(BaseCommand):
     help = 'Write ledger entries from Transaction records'
@@ -36,7 +36,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--account',
             type=str,
-            help='Account ID to process (e.g., 90000001)',
+            help='Account ID to process (e.g., 90000001). Omit to process all accounts.',
         )
         parser.add_argument(
             '--month',
@@ -46,7 +46,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--all-open',
             action='store_true',
-            help='Process all open (non-closed) months for the account',
+            help='Process all open (non-closed) months for the account(s)',
         )
         parser.add_argument(
             '--dry-run',
@@ -60,24 +60,32 @@ class Command(BaseCommand):
         all_open = options['all_open']
         dry_run = options['dry_run']
 
-        if not account_id:
-            raise CommandError('--account is required')
+        if not all_open and not month_str:
+            raise CommandError('Either --month or --all-open is required')
 
-        try:
-            account = Account.objects.get(account_id=account_id)
-        except Account.DoesNotExist:
-            raise CommandError(f'Account {account_id} not found')
+        # Determine which accounts to process
+        if account_id:
+            try:
+                account = Account.objects.get(account_id=account_id)
+            except Account.DoesNotExist:
+                raise CommandError(f'Account {account_id} not found')
+            accounts = [account]
+        else:
+            accounts = Account.objects.all()
+            if not accounts.exists():
+                raise CommandError('No accounts found')
+            self.stdout.write(f"Processing all {accounts.count()} accounts\n")
 
         if all_open:
-            self.write_all_open_months(account, dry_run)
-        elif month_str:
+            for account in accounts:
+                self.write_all_open_months(account, dry_run)
+        else:
             try:
                 month = date.fromisoformat(f'{month_str}-01')
             except ValueError:
                 raise CommandError(f'Invalid month format: {month_str}. Use YYYY-MM')
-            self.write_month(account, month, dry_run)
-        else:
-            raise CommandError('Either --month or --all-open is required')
+            for account in accounts:
+                self.write_month(account, month, dry_run)
 
     def write_all_open_months(self, account, dry_run):
         """Write ledger for all open (non-closed) months."""
@@ -121,7 +129,7 @@ class Command(BaseCommand):
             ).first()
 
             if closure and closure.is_closed:
-                self.stdout.write(f"  ⚠ Month {month.strftime('%Y-%m')} {currency} is CLOSED - skipping")
+                self.stdout.write(f"  \u26a0 Month {month.strftime('%Y-%m')} {currency} is CLOSED - skipping")
                 return
 
         # Get all transactions for this month
@@ -140,16 +148,16 @@ class Command(BaseCommand):
         self.stdout.write(f"  Found {transactions.count()} transactions")
 
         if dry_run:
-            self.stdout.write(f"  [DRY RUN] Would create ledger entries")
+            self.stdout.write('  [DRY RUN] Would create ledger entries')
             return
 
         # Process transactions
         entries_created = 0
-        with db_transaction.atomic():
+        with transaction.atomic():
             for tx in transactions:
                 entries_created += self.create_ledger_entries(tx, month)
 
-        self.stdout.write(f"  ✓ Created {entries_created} ledger entries")
+        self.stdout.write(f"  \u2713 Created {entries_created} ledger entries")
 
         # Create monthly balance snapshot
         self.create_monthly_balance_snapshot(account, month)
@@ -160,6 +168,11 @@ class Command(BaseCommand):
         Returns number of entries created.
         """
         entries_created = 0
+
+        # Skip if entries already exist (idempotent re-run)
+        if LedgerEntry.objects.filter(source_transaction=tx).exists():
+            return 0
+
         tx_type = tx.type.upper()
 
         # Get or create cash ledger account
@@ -169,8 +182,8 @@ class Command(BaseCommand):
             currency=tx.currency,
             symbol='',
             defaults={
-                'quantity': Decimal('0'),
-                'cost_basis_total': Decimal('0'),
+                'quantity': Decimal(0),
+                'cost_basis_total': Decimal(0),
                 'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-CASH",
@@ -200,7 +213,7 @@ class Command(BaseCommand):
                 tx.quantity, abs(tx.amount_cad), f"SELL {tx.symbol}"
             )
 
-        elif tx_type in ['DIV', 'DIVIDEND', 'DIST', 'INT', 'INTEREST_RECEIVED']:
+        elif tx_type in ['DIV', 'DIVIDEND', 'DIST', 'INT', 'INTEREST_RECEIVED', 'RETURN_OF_CAPITAL', 'WITHTAX']:
             # Income: DEBIT cash (in) + CREDIT income (revenue)
             entries_created += self._create_cash_entry(
                 cash_ledger, tx, statement_month, 'DEBIT',
@@ -208,8 +221,42 @@ class Command(BaseCommand):
             )
             entries_created += self._create_income_entry(
                 tx, statement_month, 'CREDIT',
-                abs(tx.amount_cad), f"{tx_type} {tx.symbol}"
+                abs(tx.amount_cad), f"{tx_type} {tx.symbol or ''}"
             )
+
+        elif tx_type == 'TAX':
+            # Tax withheld: CREDIT cash (out) + DEBIT tax expense
+            entries_created += self._create_cash_entry(
+                cash_ledger, tx, statement_month, 'CREDIT',
+                abs(tx.amount_cad), f"TAX {tx.notes[:80] if tx.notes else tx.symbol}"
+            )
+            # Create a tax expense ledger account
+            tax_ledger, _ = LedgerAccount.objects.get_or_create(
+                account=tx.account,
+                account_type='TAX',
+                currency=tx.currency,
+                defaults={
+                    'quantity': Decimal(0),
+                    'cost_basis_total': Decimal(0),
+                    'account_id_str': tx.account.account_id,
+                    'account_name': tx.account.name,
+                    'ledger_name': f"{tx.account.name}-{tx.currency}-TAX",
+                }
+            )
+            LedgerEntry.objects.create(
+                ledger_account=tax_ledger,
+                entry_date=tx.date,
+                entry_type='DEBIT',
+                cash_amount=abs(tx.amount_cad),
+                quantity_change=Decimal(0),
+                cost_basis_change=Decimal(0),
+                source_transaction=tx,
+                description=f"TAX {tx.notes[:80] if tx.notes else 'Tax Withheld'}",
+                statement_month=statement_month,
+                related_symbol=tx.symbol if tx.symbol else '',
+            )
+            tax_ledger.cost_basis_total += abs(tx.amount_cad)
+            tax_ledger.save()
 
         elif tx_type in ['DEP', 'DEPOSIT', 'CONTRIB']:
             # Deposit: DEBIT cash (in)
@@ -218,8 +265,8 @@ class Command(BaseCommand):
                 abs(tx.amount_cad), f"{tx_type}"
             )
 
-        elif tx_type in ['WDRAW', 'WITHDRAWAL', 'TFR OUT', 'WIRE TFR']:
-            # Withdrawal: CREDIT cash (out)
+        elif tx_type in ['WDRAW', 'WITHDRAWAL', 'TFR OUT', 'WIRE TFR', 'TRANSFER']:
+            # Withdrawal/transfer out: CREDIT cash (out)
             entries_created += self._create_cash_entry(
                 cash_ledger, tx, statement_month, 'CREDIT',
                 abs(tx.amount_cad), f"{tx_type}"
@@ -240,11 +287,97 @@ class Command(BaseCommand):
             # Stock split: DEBIT position (quantity up, cost per share down)
             entries_created += self._create_position_entry(
                 tx, statement_month, 'DEBIT',
-                tx.quantity, Decimal('0'), f"SPLIT {tx.symbol}"
+                tx.quantity, Decimal(0), f"SPLIT {tx.symbol}"
             )
 
+        elif tx_type in ['OTHER_FEE', 'FEE']:
+            # Fee: cash out
+            entries_created += self._create_cash_entry(
+                cash_ledger, tx, statement_month, 'CREDIT',
+                abs(tx.amount_cad), f"{tx_type}"
+            )
+
+        elif tx_type in ['CREDIT_INTEREST', 'INTEREST_RECEIVED']:
+            # Interest earned: DEBIT cash + CREDIT income
+            entries_created += self._create_cash_entry(
+                cash_ledger, tx, statement_month, 'DEBIT',
+                abs(tx.amount_cad), f"{tx_type}"
+            )
+            entries_created += self._create_income_entry(
+                tx, statement_month, 'CREDIT',
+                abs(tx.amount_cad), f"{tx_type}"
+            )
+
+        elif tx_type in ['DEBIT_INTEREST', 'INTEREST_PAID']:
+            # Interest paid: cash out
+            entries_created += self._create_cash_entry(
+                cash_ledger, tx, statement_month, 'CREDIT',
+                abs(tx.amount_cad), f"{tx_type}"
+            )
+
+        elif tx_type == 'OTHER':
+            # Other — treat as cash adjustment based on sign
+            amount = abs(tx.amount_cad)
+            desc = f"OTHER {tx.symbol}" if tx.symbol else ""
+            if not desc and tx.notes:
+                desc = f"OTHER {tx.notes[:40]}"
+            elif not desc:
+                desc = "OTHER"
+            if amount > 0:
+                entries_created += self._create_cash_entry(
+                    cash_ledger, tx, statement_month, 'CREDIT',
+                    amount, desc
+                )
+            else:
+                entries_created += self._create_cash_entry(
+                    cash_ledger, tx, statement_month, 'DEBIT',
+                    amount, desc
+                )
+
+        elif tx_type == 'REORGANIZATION':
+            # Corporate reorg has two parts:
+            #   DIS (in-kind): qty > 0, amount = 0  → new share count after reorg
+            #   CIL (cash in lieu): qty = 0, amount > 0 → fractional share paid in cash
+            if tx.quantity > Decimal(0):
+                # DIS: adjust position to new total quantity
+                entries_created += self._create_reorg_entry(tx, statement_month)
+            elif tx.amount_cad != Decimal(0):
+                # CIL: cash in lieu of fractional shares → income
+                entries_created += self._create_cash_entry(
+                    cash_ledger, tx, statement_month, 'DEBIT',
+                    abs(tx.amount_cad), f"CIL {tx.symbol}"
+                )
+                entries_created += self._create_income_entry(
+                    tx, statement_month, 'CREDIT',
+                    abs(tx.amount_cad), f"CIL {tx.symbol}"
+                )
+            else:
+                logger.info(f"Skipped REORGANIZATION (no qty, no cash): tx {tx.id}")
+
+        # ---- silent-skip types (bookkeeping, no cash effect) ----
+        elif tx_type in ['ADJUSTMENT', 'ADJUST', 'RTC', 'FOREX_TRADE_COMPONEN', 'FOREX_TRADE_COMPONENT']:
+            logger.info(f"Skipped: {tx_type} for tx {tx.id}")
+
+        elif tx_type in ['N_A', '0', '0_00', '10_00', '5_00',
+                         '1_USD___1_4187CAD', 'TRADES_THIS_MONTH']:
+            logger.info(f"Skipped placeholder: {tx_type} for tx {tx.id}")
+
+        # ---- catch-all for any stray type ----
         else:
-            logger.warning(f"Unknown transaction type: {tx_type} for tx {tx.id}")
+            logger.warning(
+                f"Unknown transaction type '{tx_type}' for tx {tx.id} — treating as cash adjustment"
+            )
+            amount = abs(tx.amount_cad)
+            if tx_type in ['WDRAW', 'WITHDRAWAL', 'TFR OUT', 'WIRE TFR', 'TRANSFER']:
+                entries_created += self._create_cash_entry(
+                    cash_ledger, tx, statement_month, 'CREDIT',
+                    amount, f"{tx_type}"
+                )
+            else:
+                entries_created += self._create_cash_entry(
+                    cash_ledger, tx, statement_month, 'DEBIT' if amount <= 0 else 'CREDIT',
+                    amount, f"{tx_type}"
+                )
 
         return entries_created
 
@@ -255,8 +388,8 @@ class Command(BaseCommand):
             entry_date=tx.date,
             entry_type=entry_type,
             cash_amount=amount if entry_type == 'DEBIT' else -amount,
-            quantity_change=Decimal('0'),
-            cost_basis_change=Decimal('0'),
+            quantity_change=Decimal(0),
+            cost_basis_change=Decimal(0),
             source_transaction=tx,
             description=description,
             statement_month=statement_month,
@@ -268,14 +401,14 @@ class Command(BaseCommand):
 
     def _create_position_entry(self, tx, statement_month, entry_type, quantity, cost_basis, description):
         """Create a position ledger entry and update ledger account balance."""
-        position_ledger, created = LedgerAccount.objects.get_or_create(
+        position_ledger, _ = LedgerAccount.objects.get_or_create(
             account=tx.account,
             account_type='POSITION',
             currency=tx.currency,
             symbol=tx.symbol,
             defaults={
-                'quantity': Decimal('0'),
-                'cost_basis_total': Decimal('0'),
+                'quantity': Decimal(0),
+                'cost_basis_total': Decimal(0),
                 'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
@@ -286,7 +419,7 @@ class Command(BaseCommand):
             ledger_account=position_ledger,
             entry_date=tx.date,
             entry_type=entry_type,
-            cash_amount=Decimal('0'),
+            cash_amount=Decimal(0),
             quantity_change=quantity if entry_type == 'DEBIT' else -quantity,
             cost_basis_change=cost_basis if entry_type == 'DEBIT' else -cost_basis,
             source_transaction=tx,
@@ -308,7 +441,7 @@ class Command(BaseCommand):
                 position_ledger.cost_basis_total / position_ledger.quantity
             ).quantize(Decimal('0.0001'))
         else:
-            position_ledger.cost_basis_per_unit = Decimal('0')
+            position_ledger.cost_basis_per_unit = Decimal(0)
 
         position_ledger.save()
         return 1
@@ -320,15 +453,17 @@ class Command(BaseCommand):
             income_type = 'DIVIDEND'
         elif income_type in ['INT', 'INTEREST_RECEIVED']:
             income_type = 'INTEREST'
+        elif income_type == 'RETURN_OF_CAPITAL':
+            income_type = 'RETURN_OF_CAPITAL'
 
-        income_ledger, created = LedgerAccount.objects.get_or_create(
+        income_ledger, _ = LedgerAccount.objects.get_or_create(
             account=tx.account,
             account_type='INCOME',
             currency=tx.currency,
             symbol=income_type,
             defaults={
-                'quantity': Decimal('0'),
-                'cost_basis_total': Decimal('0'),
+                'quantity': Decimal(0),
+                'cost_basis_total': Decimal(0),
                 'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-INCOME-{income_type}",
@@ -340,8 +475,8 @@ class Command(BaseCommand):
             entry_date=tx.date,
             entry_type=entry_type,
             cash_amount=amount if entry_type == 'CREDIT' else -amount,
-            quantity_change=Decimal('0'),
-            cost_basis_change=Decimal('0'),
+            quantity_change=Decimal(0),
+            cost_basis_change=Decimal(0),
             source_transaction=tx,
             description=description,
             statement_month=statement_month,
@@ -357,12 +492,108 @@ class Command(BaseCommand):
         income_ledger.save()
         return 1
 
+    def _create_reorg_entry(self, tx, statement_month):
+        """Handle REORGANIZATION DIS: adjust position quantity to new total.
+        
+        tx.quantity = new total shares after reorg (not a delta).
+        No cash effect — just a share count adjustment.
+        Cost basis is preserved.
+        """
+        position_ledger, _ = LedgerAccount.objects.get_or_create(
+            account=tx.account,
+            account_type='POSITION',
+            currency=tx.currency,
+            symbol=tx.symbol,
+            defaults={
+                'quantity': Decimal(0),
+                'cost_basis_total': Decimal(0),
+                'account_id_str': tx.account.account_id,
+                'account_name': tx.account.name,
+                'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
+            }
+        )
+
+        old_qty = position_ledger.quantity
+        new_qty = tx.quantity
+
+        # Distinguish: stock split (new total) vs stock dividend (increment)
+        # tx.notes is always None — use ratio heuristic instead:
+        #   split: new_qty / old_qty is close to a round number (2,3,4,10,20,30,40)
+        #   dividend: small increment relative to old_qty
+        COMMON_SPLITS = (2, 3, 4, 5, 10, 15, 20, 30, 40, 50)
+        is_split = False
+        abs_old = abs(old_qty)
+        if abs_old > 0 and new_qty > 0:
+            ratio = new_qty / abs_old
+            for s in COMMON_SPLITS:
+                if abs(ratio - s) < 0.2:
+                    is_split = True
+                    break
+        # fallback: if notes text contains "SPLIT" (RBC CSV captures it)
+        if not is_split and tx.notes:
+            if 'SPLIT' in tx.notes.upper():
+                is_split = True
+            elif 'DIV ON' in tx.notes.upper():
+                is_split = False  # explicitly a stock dividend
+            elif 'CIL' in tx.notes.upper():
+                is_split = False  # cash in lieu
+            elif 'EXP' in tx.notes.upper():
+                is_split = False  # option expiration
+            elif 'DIV REIN' in tx.notes.upper():
+                is_split = False
+            elif 'TFR' in tx.notes.upper():
+                is_split = False
+
+        if is_split:
+            # Stock split: tx.quantity = new total share count
+            qty_change = new_qty - old_qty
+            label = f"STK SPLIT {tx.symbol} ({old_qty:.0f} -> {new_qty:.0f})"
+        else:
+            # Stock dividend: tx.quantity = additional shares received
+            qty_change = new_qty
+            new_qty = old_qty + qty_change
+            label = f"STK DIV {tx.symbol} ({old_qty:.0f} + {qty_change:.0f} = {new_qty:.0f})"
+
+        # Preserve cost basis — reorg doesn't change total cost
+        cb_change = Decimal(0)
+
+        if qty_change == Decimal(0):
+            logger.info(f"Skipped REORGANIZATION (no qty change): {tx.symbol} tx {tx.id}")
+            return 0
+
+        entry_type = 'DEBIT' if qty_change > 0 else 'CREDIT'
+
+        LedgerEntry.objects.create(
+            ledger_account=position_ledger,
+            entry_date=tx.date,
+            entry_type=entry_type,
+            cash_amount=Decimal(0),
+            quantity_change=qty_change,
+            cost_basis_change=cb_change,
+            source_transaction=tx,
+            description=label,
+            statement_month=statement_month,
+        )
+
+        # Update ledger account
+        position_ledger.quantity = new_qty
+        if position_ledger.quantity > 0:
+            position_ledger.cost_basis_per_unit = (
+                position_ledger.cost_basis_total / position_ledger.quantity
+            ).quantize(Decimal('0.0001'))
+        else:
+            position_ledger.cost_basis_per_unit = Decimal(0)
+        position_ledger.save()
+
+        logger.info(f"REORGANIZATION {tx.symbol}: {old_qty:.0f} -> {new_qty:.0f} shares ({'split' if is_split else 'div'})")
+        return 1
+
     def create_monthly_balance_snapshot(self, account, month):
         """Create MonthlyLedgerBalance snapshot for all ledger accounts."""
         ledger_accounts = LedgerAccount.objects.filter(account=account)
 
         for ledger in ledger_accounts:
-            balance, _ = MonthlyLedgerBalance.objects.update_or_create(
+            _, _ = MonthlyLedgerBalance.objects.update_or_create(
                 ledger_account=ledger,
                 statement_month=month,
                 defaults={
@@ -372,4 +603,4 @@ class Command(BaseCommand):
                 }
             )
 
-        self.stdout.write(f"  ✓ Created monthly balance snapshot")
+        self.stdout.write('  Created monthly balance snapshot')

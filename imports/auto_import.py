@@ -9,13 +9,19 @@ import csv
 import hashlib
 import logging
 import os
+import re
 from decimal import Decimal
 from pathlib import Path
 
+from datetime import date
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
+
+from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
+from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 # Verify Django is configured
 if not settings.configured:
@@ -23,10 +29,7 @@ if not settings.configured:
         "Django is not configured. Run this script via: python manage.py auto_import"
     )
 
-from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
-from imports.parsers import parse_ib_csv, parse_rbc_csv
-import re
-from datetime import date
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +70,7 @@ def extract_statement_date(content: str) -> date | None:
     return None
 
 
-def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
+def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
     """
     Import a broker statement file.
     
@@ -78,7 +81,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
     """
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
-        return
+        return 0
 
     # Read file bytes for hashing
     with open(file_path, 'rb') as f:
@@ -91,7 +94,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
         prior_log = FileImportLog.objects.filter(content_hash=content_hash).first()
         if prior_log:
             logger.warning(f"Skipping {os.path.basename(file_path)}: identical content already imported as {prior_log.filename}")
-            return
+            return 0
 
     # Setup import tracking
     import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
@@ -111,11 +114,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
         trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
     else:
         logger.error(f"Unsupported broker type: {broker}")
-        return
+        return 0
 
     if not trades:
         logger.warning("No trades found in the file.")
-        return
+        return 0
 
     logger.info(f"Found {len(trades)} trades to import.")
 
@@ -123,9 +126,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
         logger.info("Dry run complete. No changes made to the database.")
         for i, trade in enumerate(trades, 1):
             logger.info(f"  {i}. {trade}")
-        return
+        return len(trades)
 
     # Import to DB
+    imported_count = 0
+    skipped_count = 0
     try:
         with transaction.atomic():
             # Create BrokerStatement
@@ -201,6 +206,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
                         currency=trade.get('currency', 'USD'),
                         exchange_rate_cad=rate,
                         amount_cad=amount_cad,
+                        notes=trade.get('notes', ''),
                         tx_hash=tx_hash,
                     )
                     imported_count += 1
@@ -239,6 +245,9 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
 
     # Write imported transactions to tracking file (after commit)
     if imported_trades:
+        # Ensure import_log file exists before checking size
+        if not import_log.exists():
+            import_log.touch()
         with open(import_log, 'a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=[
                 'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity'
@@ -267,9 +276,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> None:
             writer = csv.DictWriter(f, fieldnames=[
                 'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity', 'error'
             ])
-            if reject_log.stat().st_size == 0:
+            if reject_log.exists() and reject_log.stat().st_size == 0:
                 writer.writeheader()
             writer.writerows(all_rejections)
+
+    return imported_count
 
 
 if __name__ == '__main__':

@@ -15,13 +15,12 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime
 from pathlib import Path
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 
-from core.models import BrokerStatement, Transaction, PositionHistory, FileImportLog
+from core.models import Transaction
 from imports.auto_import import auto_import
 from imports.parsers_holdings import import_holdings_snapshot
 
@@ -55,7 +54,12 @@ class Command(BaseCommand):
             return self._import_activity(inbox, dry_run)
 
     def _import_activity(self, inbox: str, dry_run: bool) -> None:
-        """Import Activity CSVs, clearing old CSV data first."""
+        """Import Activity CSVs incrementally.
+
+        Only new files are processed. Duplicate transactions (same tx_hash)
+        are skipped automatically. Previously imported files in processed/
+        are ignored - only CSVs remaining in inbox/ are parsed.
+        """
         # Find all Activity CSV files (exclude Holdings and Dividends files)
         csv_files = []
         for pattern in ['*.csv', '**/*.csv']:
@@ -80,26 +84,6 @@ class Command(BaseCommand):
         errors_dir = processed_dir / 'errors'
         for d in (processed_dir, errors_dir):
             d.mkdir(parents=True, exist_ok=True)
-
-        if not dry_run:
-            # Clear existing CSV-imported data
-            self.stdout.write("Clearing existing CSV-imported data...")
-            tx_count = Transaction.objects.count()
-            stmt_count = BrokerStatement.objects.count()
-            fil_count = FileImportLog.objects.count()
-            Transaction.objects.all().delete()
-            BrokerStatement.objects.all().delete()
-            FileImportLog.objects.all().delete()
-            self.stdout.write(
-                f"Cleared {tx_count} transactions, {stmt_count} statements, {fil_count} file logs"
-            )
-
-            # Clear import tracking file
-            import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
-            import_log.parent.mkdir(parents=True, exist_ok=True)
-            import_log.write_text('')
-            reject_log = Path('docs/reconciliation/CSV_Activity_Rejected.csv')
-            reject_log.write_text('')
 
         imported_total = 0
         errors = 0
@@ -172,7 +156,7 @@ class Command(BaseCommand):
         for d in (processed_dir, errors_dir):
             d.mkdir(parents=True, exist_ok=True)
 
-        # Don't clear PositionHistory — snapshots are cumulative.
+        # Don't clear PositionHistory - snapshots are cumulative.
         # Each new import closes old open positions and creates new ones.
 
         created_total = 0
@@ -195,7 +179,7 @@ class Command(BaseCommand):
                         _move_file(Path(file_path), dest)
                         self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
                 else:
-                    # 0 positions created/closed — file has no parseable data
+                    # 0 positions created/closed - file has no parseable data
                     if not dry_run:
                         dest = errors_dir / filename
                         _move_file(Path(file_path), dest)
@@ -210,7 +194,7 @@ class Command(BaseCommand):
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
-                
+
         self.stdout.write(
             f"Total: {created_total} created, {closed_total} closed "
             f"({errors} errors)"
@@ -225,7 +209,7 @@ def _move_file(src: Path, dest: Path) -> bool:
     logs a warning and returns False without raising.
     """
     if not src.exists():
-        logger.warning("_move_file: %s not found — already moved by another process", src.name)
+        logger.warning("_move_file: %s not found", src.name)
         return False
 
     for attempt in range(5):
@@ -241,7 +225,7 @@ def _move_file(src: Path, dest: Path) -> bool:
             logger.warning("File locked, retrying move in %ds...", delay)
             time.sleep(delay)
         except FileNotFoundError:
-            logger.warning("_move_file: %s disappeared during move — already moved by another process", src.name)
+            logger.warning("_move_file: %s disappeared during move", src.name)
             return False
 
     return False

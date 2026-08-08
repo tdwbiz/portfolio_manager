@@ -14,7 +14,7 @@ def compute_tx_hash(
     quantity,
     price,
     currency: str,
-    amount=None,
+    amount=None,  # ignored — same trade = same hash regardless of amount
 ) -> str:
     """Return a SHA-256 hex digest that uniquely identifies a transaction.
 
@@ -22,10 +22,9 @@ def compute_tx_hash(
     same trade imported from two different overlapping export files always
     produces the same hash.
 
-    NOTE: 'amount' is optional. When provided it is included in the hash
-    to distinguish multiple transactions of the same type on the same day
-    (e.g. two DEP on the same date). For BUY/SELL trades amount is already
-    derivable from quantity*price so it is redundant.
+    NOTE: 'amount' parameter is accepted for backwards compatibility but
+    is NOT included in the hash. This allows overlapping CSV exports with
+    slightly different amounts to produce the same hash.
     """
     key = "|".join(
         [
@@ -37,7 +36,6 @@ def compute_tx_hash(
             f"{Decimal(str(quantity)):.4f}",
             f"{Decimal(str(price)):.4f}",
             currency or "",
-            f"{Decimal(str(amount)):.2f}" if amount is not None else "",
         ]
     )
     return hashlib.sha256(key.encode()).hexdigest()
@@ -1161,9 +1159,6 @@ class LedgerAccount(models.Model):
     
     def __str__(self):
         return self.ledger_name
-        if self.symbol:
-            parts.append(self.symbol)
-        return '-'.join(parts)
 
 
 class LedgerEntry(models.Model):

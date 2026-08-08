@@ -87,7 +87,45 @@ aider --model openai/qwen35B-code --openai-api-base http://127.0.0.1:11437/v1
 
 ## Phase F (IN PROGRESS — CSV Master Import)
 **Branch:** `feature_csv_master_import`
-**Test count:** 208 total (25 new + 183 existing), 1 pre-existing failure (unrelated)
+**Test count:** 220 total (1 pre-existing failure in `test_chart_data_empty` — unrelated mock issue)
+
+### Ledger System (NEW)
+- **`LedgerAccount` model** — per-account ledger accounts: CASH, POSITION (per symbol), DIVIDEND, INTEREST, TAX, RETURN_OF_CAPITAL
+- **`LedgerEntry` model** — double-entry bookkeeping records from Transactions
+- **`LedgerMonthClosure` model** — marks months as reviewed/closed
+- **`MonthlyLedgerBalance` model** — monthly snapshot of ledger balances (quantity, cost_basis_total, cost_basis_per_unit)
+- **`write_ledger` management command** — creates ledger entries from Transaction records
+  - `python manage.py write_ledger --account <ID> --month YYYY-MM` — single account/month
+  - `python manage.py write_ledger --all-open` — all open (unclosed) months for a single account
+  - `python manage.py write_ledger --all-open --account <ID>` — all open for specific account
+  - **Idempotent**: skips transactions that already have ledger entries (`LedgerEntry.objects.filter(source_transaction=tx).exists()`) — safe to re-run
+  - **Skips closed months**: checks `LedgerMonthClosure.is_closed` — closed months are not overwritten
+  - **No manual close yet** — `LedgerMonthClosure` table may be empty initially; all months treated as open
+  - **REORGANIZATION handling**: notes-based pattern matching — "SPLIT" = stock split, "DIV ON" = stock dividend, "CIL" = cash in lieu, "EXP" = option expiration, "DIV REIN" = dividend reinvestment, "TFR" = transfer
+  - **TAX transactions**: create separate TAX ledger account (DEBIT tax expense + CREDIT cash)
+  - **OTHER/UNKNOWN types**: logged as warnings, not errors — safe to skip
+  - **REORGANIZATION with negative shares**: treated as stock dividend (e.g., 9PYDBZ1: -1 → 0 shares)
+- **Ledger view**: `core/views_ledger.py` — `/ledger/<account_id>/<year>/<month>/`
+- **T-account format**: For a given account/month — opening balance, all debits/credits, closing balance per position (shares) and cash
+- **Holdings ledger**: Each stock gets its own position ledger account showing quantity changes (opens, closes, dividends in kind, splits)
+
+### Import Commands
+```powershell
+# Import all Activity CSVs from inbox/
+python manage.py import_csv
+
+# Import Holdings CSVs into PositionHistory
+python manage.py import_csv --holdings
+
+# Dry run (parse without writing)
+python manage.py import_csv --dry-run
+
+# Write ledger entries for all open months
+python manage.py write_ledger --all-open
+
+# Write ledger for specific account and month
+python manage.py write_ledger --account 90000003 --month 2025-02
+```
 
 ### Strategy: CSV as Master for Activity
 - PDF VL extraction is unreliable (hallucinates transactions, misses real ones)
@@ -210,6 +248,15 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
 - **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
 - **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
+- **`write_ledger --all-open` is idempotent** — does NOT wipe existing ledger entries. Skips transactions that already have `LedgerEntry` records. Safe to re-run.
+- **`write_ledger` skips closed months** — checks `LedgerMonthClosure.is_closed`. No manual close UI yet; table starts empty so all months are open.
+- **REORGANIZATION notes-based matching** — uses `tx.notes` text: "SPLIT" = stock split, "DIV ON" = stock dividend, "CIL" = cash in lieu, "EXP" = option expiration, "DIV REIN" = dividend reinvestment, "TFR" = transfer
+- **TAX transactions** create a separate TAX ledger account (DEBIT tax expense + CREDIT cash), NOT treated as other
+- **OTHER ASSIGNMENT** (e.g., option assignment) — ignore in write_ledger; the SELL transaction already handles the quantity/price
+- **Import CSV idempotent** — deduplicates by `tx_hash`. Running again won't create duplicates unless hash changed.
+- **Import CSV does NOT clear existing transactions** — only new/changed files are processed. Previously imported files moved to `processed/` are skipped.
+- **`transaction.atomic()` context manager** — pyright false positive: `Object of type (...) -> object cannot be used with "with"`. Works fine at runtime.
+- **`Style.WARNING`/`Style.SUCCESS`** — pyright false positive. These work at runtime via Django's command output API.
 
 ## Reconciliation Work (feature_rbc_statements_reconciliation)
 - Active branch for verifying PDF data integrity and planning CSV reconciliation
@@ -297,6 +344,15 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
 - **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
 - **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
+- **`write_ledger --all-open` is idempotent** — does NOT wipe existing ledger entries. Skips transactions that already have `LedgerEntry` records. Safe to re-run.
+- **`write_ledger` skips closed months** — checks `LedgerMonthClosure.is_closed`. No manual close UI yet; table starts empty so all months are open.
+- **REORGANIZATION notes-based matching** — uses `tx.notes` text: "SPLIT" = stock split, "DIV ON" = stock dividend, "CIL" = cash in lieu, "EXP" = option expiration, "DIV REIN" = dividend reinvestment, "TFR" = transfer
+- **TAX transactions** create a separate TAX ledger account (DEBIT tax expense + CREDIT cash), NOT treated as other
+- **OTHER ASSIGNMENT** (e.g., option assignment) — ignore in write_ledger; the SELL transaction already handles the quantity/price
+- **Import CSV idempotent** — deduplicates by `tx_hash`. Running again won't create duplicates unless hash changed.
+- **Import CSV does NOT clear existing transactions** — only new/changed files are processed. Previously imported files moved to `processed/` are skipped.
+- **`transaction.atomic()` context manager** — pyright false positive: `Object of type (...) -> object cannot be used with "with"`. Works fine at runtime.
+- **`Style.WARNING`/`Style.SUCCESS`** — pyright false positive. These work at runtime via Django's command output API.
 
 ### RBC Monthly PDF Parser Bugs
 - **`"Continued on Next Page"` was case-sensitive** — PDF text uses uppercase `"- CONTINUED ON NEXT PAGE -"` but parser checked lowercase. Fixed with `lines[i].lower()`.

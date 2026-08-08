@@ -8,8 +8,7 @@ import io
 import logging
 import os
 import re
-from datetime import date, timedelta
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from core.models import Account, PositionHistory
@@ -52,10 +51,7 @@ def parse_holdings_csv(file_path: str) -> list[dict]:
             'utf-8', b'', 0, 1, 'Could not decode file with any supported encoding'
         )
 
-    try:
-        reader = csv.reader(io.StringIO(raw_content))
-    except Exception:
-        reader = None
+    reader = csv.reader(io.StringIO(raw_content))
 
     # --- Extract account_id (3 sources, priority order) ---
 
@@ -76,7 +72,7 @@ def parse_holdings_csv(file_path: str) -> list[dict]:
     # 3) First column of first data row (Pattern B fallback):
     #    If no Account: line exists anywhere in the file (very rare),
     #    the first column of the first real data row IS the account ID.
-    if not account_id and raw_content and reader:
+    if not account_id and raw_content:
         # Find the first data row by scanning raw text for header markers
         lines = raw_content.split('\n')
         data_start_idx = None
@@ -107,10 +103,12 @@ def parse_holdings_csv(file_path: str) -> list[dict]:
         )
         if date_match:
             try:
-                snapshot_date = datetime.strptime(
-                    date_match.group(1).replace(',', '').strip(),
-                    '%b %d %Y',
-                ).date()
+                cleaned = date_match.group(1).replace(',', '').strip()
+                # Try abbreviated (Jan) and full (January) month names
+                try:
+                    snapshot_date = datetime.strptime(cleaned, '%b %d %Y').date()
+                except ValueError:
+                    snapshot_date = datetime.strptime(cleaned, '%B %d %Y').date()
             except Exception:
                 pass
 

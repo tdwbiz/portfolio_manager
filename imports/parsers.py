@@ -6,7 +6,7 @@ import os
 import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 #   BUY, SELL, DIV, DIST, INT, TRANSFER, DEP, WDRAW, TAX, WITHTAX, FEE, OTHER
 
 # Maps raw broker type strings → (canonical_code, display_label)
-_IB_TYPE_MAP: Dict[str, Tuple[str, str]] = {
+_IB_TYPE_MAP: dict[str, tuple[str, str]] = {
     # Trades
     'Buy':                              ('BUY',      'Buy'),
     'Sell':                             ('SELL',     'Sell'),
@@ -49,7 +49,7 @@ _IB_TYPE_MAP: Dict[str, Tuple[str, str]] = {
     'Other':                            ('OTHER',    'Other'),
 }
 
-_RBC_TYPE_MAP: Dict[str, Tuple[str, str]] = {
+_RBC_TYPE_MAP: dict[str, tuple[str, str]] = {
     # Trades
     'Buy':                              ('BUY',      'Buy'),
     'Sell':                             ('SELL',     'Sell'),
@@ -77,7 +77,7 @@ _RBC_TYPE_MAP: Dict[str, Tuple[str, str]] = {
 }
 
 
-def _normalize_type(raw: str, type_map: Dict[str, Tuple[str, str]]) -> Tuple[str, str]:
+def _normalize_type(raw: str, type_map: dict[str, tuple[str, str]]) -> tuple[str, str]:
     """Return (code, label) for a raw broker type string.
 
     Uses the TransactionType registry to auto-create unknown types.
@@ -97,7 +97,7 @@ def _normalize_type(raw: str, type_map: Dict[str, Tuple[str, str]]) -> Tuple[str
     return (code, label)
 
 
-def parse_ib_csv(file_path: str, rejections: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+def parse_ib_csv(file_path: str, rejections: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Parse Interactive Brokers CSV — supports two formats:
 
     1. Activity Statement (multi-section): first column is the section name
@@ -117,7 +117,7 @@ def parse_ib_csv(file_path: str, rejections: List[Dict[str, Any]] = None) -> Lis
     """
     if rejections is None:
         rejections = []  # caller didn't ask for them — discard silently
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
 
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
@@ -152,9 +152,9 @@ def parse_ib_csv(file_path: str, rejections: List[Dict[str, Any]] = None) -> Lis
     return trades
 
 
-def _parse_ib_transaction_history(rows: List[List[str]],
-                                   rejections: List[Dict[str, Any]],
-                                   filename: str = '') -> List[Dict[str, Any]]:
+def _parse_ib_transaction_history(rows: list[list[str]],
+                                   rejections: list[dict[str, Any]],
+                                   filename: str = '') -> list[dict[str, Any]]:
     """Parse IB Transaction History CSV format.
 
     Columns (0-based):
@@ -174,7 +174,7 @@ def _parse_ib_transaction_history(rows: List[List[str]],
 
     All row types are imported.
     """
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
 
     for row_num, row in enumerate(rows, start=1):
         if len(row) < 13:
@@ -259,14 +259,14 @@ def _parse_ib_transaction_history(rows: List[List[str]],
     return trades
 
 
-def _parse_ib_activity_statement(rows: List[List[str]],
-                                  rejections: List[Dict[str, Any]],
-                                  filename: str = '') -> List[Dict[str, Any]]:
+def _parse_ib_activity_statement(rows: list[list[str]],
+                                  rejections: list[dict[str, Any]],
+                                  filename: str = '') -> list[dict[str, Any]]:
     """Parse IB Activity Statement CSV format (multi-section with "Trades" header)."""
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     in_trades_section: bool = False
-    header: List[str] = []
-    account_idx: int = None
+    header: list[str] = []
+    account_idx: int | None = None
 
     for row_num, row in enumerate(rows, start=1):
         if not row or all(cell.strip() == '' for cell in row):
@@ -418,7 +418,7 @@ VALID_ACCOUNTS = {
 }
 
 def parse_rbc_csv(file_path: str,
-                  rejections: List[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Decimal]:
+                  rejections: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], Decimal]:
     """Parse RBC Activity Export CSV.
 
     Handles the real RBC format: quoted CSV with a metadata header block,
@@ -438,10 +438,10 @@ def parse_rbc_csv(file_path: str,
 
     if rejections is None:
         rejections = []
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     filename = os.path.basename(file_path)
 
     # Column mapping (will be set when header is found)

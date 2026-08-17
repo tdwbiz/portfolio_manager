@@ -134,6 +134,24 @@ python manage.py write_ledger --account 90000003 --month 2025-02
 - Holdings CSV provides position snapshots for `PositionHistory`
 - Given CSV activity + beginning balances + month-end market values → can build `CoreMonthlyStatement`
 
+### CSV Row Patterns (verified 2026-08-15, all-accounts quantity recon)
+- **Dividend reinvestment is posted as a `DIV`/`DIST` row with `qty > 0` and NEGATIVE `amount_cad`** (notes start "REI - ... REINV@C$X.XX"). Normal dividends have qty=0, positive amount. Any quantity math MUST add the REI qty. (`scripts/quantity_reconciliation_all.py::classify()` handles this as 'DIV-REIN'.)
+- **Sign-flipped rows exist in the cleaned activity CSV** — some BUY rows carry POSITIVE `amount_cad` (cash in). Six bogus rows identified (SPHD/VO 2020-11-06 in SUSAN_RRIF; MSFT 2021-07-19, ARKK 2020-12-16 in TOM_TFSA; ZNQ 2020-08-24 in TS_CAR_LIVING) plus PLTR 2020-12-02 "BUY" in TOM_TFSA — dividends' "ON X SHS" counts prove the position never changed. Details: `docs/reconciliation/quantity_recon_findings_2026-08-15.md`.
+- **Long options** (symbol NOT starting with `9`, e.g. 8UJDMB6 QQQ put): EXP row is `−qty` (position goes to 0), unlike short calls which are `+qty`. `classify()` branches on `tx.symbol.startswith('9')`.
+- **Cleaned CSV is missing all RBF2010/RBF2014 INT rows for Dec 2023, Dec 2024, Dec 2025** (zero INT rows dated in those months anywhere). Causes the small fractional RBF residuals in every account; restore from source statements.
+- **Anchor file gotchas (2019-09-30 hand-made holdings):** TS_HUISGELD VFV must be 3791 (not 5872); TOM_RRSP needs VDY 295 added; SUSAN_RRIF ZLB must be 1612 (REI +9 posts 2019-10-02, so Sep-30 count is pre-REI).
+- **Chain-dump tool:** `scripts/dump_chains.py <db_account_id> <SYM...>` — running balance + dividend "ON X SHS" checkpoints. Account DB ids: 60 TOM_LIF, 61 TS_HUISGELD, 62 SUSAN_LIF, 63 TOM_RRSP, 64 SUSAN_RRIF, 65 TOM_TFSA, 66 TS_CAR_LIVING, 67 SUSAN_TFSA (filter `Transaction.account_id` by DB id, NOT broker id).
+
+### Quantity Reconciliation (start snapshot + activity = end snapshot)
+- **Script:** `scripts/quantity_reconciliation.py` — replays all quantity-affecting transactions from the 2019-04-14 anchor to the 2026-08-02 end snapshot for TOM_RRSP (DB id 63). Report: `docs/reconciliation/quantity_recon_tom_rrsp.md`
+- **Both holdings CSVs are multi-account exports** — import correctly filters to the account's rows, so snapshots are complete per account.
+- **Quantity rules (verified):** BUY +qty; SELL −qty; INT with qty>0 = RBF2010/RBF2014 interest reinvested as $10 shares (+qty, amount_cad=0); REORGANIZATION: `EXP` +qty (short option expires), `DIS … STK SPLIT/STK DIV` +qty (qty is the ADDITION, e.g. NVDA 4:1 on 100 shs → +300), `CIL` = 0; OTHER `ASN` +qty (short assigned — underlying share delivery is a separate SELL row); TRANSFER = 0 (intra-account currency transfer).
+- **Options in this account are SHORT CALLS:** SELL "OPEN CONTRACT" opens the short (negative state is normal), BUY "CLOSE CONTRACT" closes it, EXP/ASN extinguish. All 34 option symbols close to exactly 0.
+- **DLR** = HORIZONS/GLOBAL X USD CURRENCY ETF: every conversion is a paired BUY+SELL (net 0 shares) + two TRANSFERs (USD↔CAD sub-account). Not in either snapshot; nets to zero at total level.
+- **Symbol alias:** activity CSV `NVRU` = holdings export `NVU.UN` (Northview Apartment REIT).
+- **Result: 25/38 real positions reconcile exactly.** 13 documented gaps = missing rows in the "Cleaned UP" activity CSV, each corroborated by dividend "ON X SHS" share counts: CHP.UN −1518 (missing buy May/Jun 2019), XDIV −1233, RQI −1000, SPY −52 (Sep 2019; Oct 2019 div "ON 309 SHS" = 187+70+52), VDY −295, NVU.UN −700 (anchor price $28.49 vs sale $0.135 — needs review), DGRO +1900 (original anchor lot left the account by Jun/Sep 2019 - dividends prove only 2417 held, not 4317), PCI +772, IRM +278, VOO +50, SHOP +10, RBF2010 −0.419 / RBF2014 −1.718 (unrecorded interest accruals, both liquidated 2026-05-20).
+- PDF cross-check (`RbcMonthlyTransaction`) confirmed the overall picture but is too noisy/hallucinated to fill the gaps.
+
 ### Changes Implemented
 - **Fixed `compute_tx_hash`** — removed `amount` so overlapping CSV exports with slightly different amounts produce the same hash
 - **New `PositionHistory.market_price` / `market_value`** — from Holdings CSV snapshots
@@ -341,6 +359,7 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **Naive datetime warning:** Suppressed in `settings_test.py` — Django `auto_now_add=True` fields can trigger warnings during tests when TZ support is active.
 - **Template bug:** Fixed malformed HTML in `accounts.html` — currency badge span was empty with stray `</span>`.
 - **Transaction requires statement FK:** Always create `BrokerStatement` in tests before creating `Transaction`.
+- **PRACEF8C2DAE is a PRACTICE account** — NEVER import its transactions or holdings. Appears in RBC CSV/PDF exports as a multi-account Goal container. Skip all rows with account_id starting with PRACEF. This applies to both activity CSV and holdings CSV imports.
 - **CSV sign convention changed:** Tests that create transactions with `type="BUY"` must use **negative** `amount_cad` (e.g., `-1950.00`), not positive. The old convention of `+1950` for buys and separate commission subtraction is obsolete. Commission is already in `amount_cad`.
 - **Test DB uses SQLite in-memory** — always run with `--settings=portfolio_manager.settings_test`. Production uses MSSQL.
 - **Batch generation** (`batch_generate_statements`) processes **all accounts** by default. Use `--account ID` for a single account or `--dry-run` to preview.
@@ -355,6 +374,7 @@ Phase D was implemented in a previous session. The code, views, templates, model
 - **`Style.WARNING`/`Style.SUCCESS`** — pyright false positive. These work at runtime via Django's command output API.
 
 ### RBC Monthly PDF Parser Bugs
+- **PRACEF8C2DAE** is a practice/account grouping container — NEVER import its data. Any CSV row with account_id starting with PRACEF should be skipped entirely. This applies to Holdings CSV and Activity CSV imports.
 - **`"Continued on Next Page"` was case-sensitive** — PDF text uses uppercase `"- CONTINUED ON NEXT PAGE -"` but parser checked lowercase. Fixed with `lines[i].lower()`.
 - **`"Opening Balance"` / `"Closing Balance"` were case-sensitive** — same issue, fixed with `.lower()`.
 - **DIST transactions have activity type AFTER quantity/rate** — unlike DIV REIN/DIVIDEND where activity is on line 2, DIST has: date → security name → quantity → rate → description → ACTIVITY TYPE → "ON X SHS" → "REC ... PAY ...". Parser scans forward to find the activity type and collects pre-activity lines as description/quantity/rate.

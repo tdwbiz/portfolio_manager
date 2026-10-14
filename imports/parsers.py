@@ -614,8 +614,9 @@ def parse_rbc_csv(file_path: str,
                         except ValueError:
                             pass
 
-                # Capture Account column (index 7) — skip practice accounts
-                account_id = cleaned[7].strip().upper() if len(cleaned) > 7 else ''
+                # Capture Account column — skip practice accounts
+                account_idx = col_map.get('account', 7)
+                account_id = cleaned[account_idx].strip().upper() if len(cleaned) > account_idx else ''
                 if account_id.startswith('PRAC'):
                     logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
                     rejections.append({
@@ -653,6 +654,7 @@ def parse_rbc_csv(file_path: str,
                     'exchange_rate_cad': usd_to_cad_rate,
                     'account_id':        account_id,
                     'notes':             notes,
+                    'row_number':        row_num,
                 })
 
     except FileNotFoundError:

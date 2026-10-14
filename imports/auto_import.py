@@ -23,54 +23,37 @@ from django.utils import timezone
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
-# Verify Django is configured
-if not settings.configured:
-    raise ImproperlyConfigured(
-        "Django is not configured. Run this script via: python manage.py auto_import"
-    )
-
-
-
 logger = logging.getLogger(__name__)
 
 
-def extract_statement_date(content: str) -> date | None:
-    """Extract statement date from CSV content using regex.
+def _setup_duplicate_logger() -> None:
+    """Set up a one-shot file handler for duplicate logging."""
+    dup_logger = logging.getLogger('imports.duplicates')
+    dup_logger.setLevel(logging.INFO)
 
-    Tries multiple common date patterns found in broker CSV headers.
+    for handler in dup_logger.handlers[:]:
+        dup_logger.removeHandler(handler)
 
-    Args:
-        content: Raw CSV file content as string.
+    dup_log_path = Path('docs/reconciliation/CSV_Duplicates.csv')
+    dup_log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    Returns:
-        Extracted date or None if not found.
-    """
-    # Pattern 1: "Statement Date: MM/DD/YYYY" or "Statement Date: MM-DD-YYYY"
-    patterns = [
-        r'Statement\s+Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        r'Statement\s+Period[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        r'Period\s+End[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        r'Report\s+Date[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',  # YYYY-MM-DD or YYYY/MM/DD
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, content, re.IGNORECASE)
-        if match:
-            date_str = match.group(1).replace('/', '-')
-            try:
-                parts = date_str.split('-')
-                if len(parts) == 3:
-                    # Handle YYYY-MM-DD vs MM-DD-YYYY
-                    if len(parts[0]) == 4:
-                        return date(int(parts[0]), int(parts[1]), int(parts[2]))
-                    else:
-                        return date(int(parts[2]), int(parts[0]), int(parts[1]))
-            except (ValueError, IndexError):
-                continue
-    return None
+    try:
+        dup_handler = logging.FileHandler(dup_log_path, encoding='utf-8')
+        dup_handler.setFormatter(logging.Formatter('%(message)s'))
+        dup_logger.addHandler(dup_handler)
+
+        # Write header if file doesn't exist or is empty
+        if not dup_log_path.exists() or dup_log_path.stat().st_size == 0:
+            with open(dup_log_path, 'w', encoding='utf-8', newline='') as f:
+                f.write('Source_File,CSV_Line,Account,Date,Symbol,Type,Quantity,Price,Amount,Currency,Notes\n')
+    except PermissionError:
+        # File is locked (e.g. open in Excel) — fall back to console logger
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter('%(message)s'))
+        dup_logger.addHandler(console_handler)
 
 
-def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
+def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int, int, int]:
     """
     Import a broker statement file.
     
@@ -78,10 +61,17 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
         file_path: Path to the CSV file.
         broker: 'IB' or 'RBC'.
         dry_run: If True, only parse and report.
+    
+    Returns:
+        Tuple of (imported_count, skipped_count, parsed_count).
+        - dry_run: parsed_count = number of trades found (imported_count, skipped_count always 0)
+        - actual: imported_count = transactions written to DB,
+                  skipped_count = duplicates already in DB,
+                  parsed_count = total trades found by parser
     """
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
-        return 0
+        return (0, 0, 0)
 
     # Read file bytes for hashing
     with open(file_path, 'rb') as f:
@@ -94,7 +84,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
         prior_log = FileImportLog.objects.filter(content_hash=content_hash).first()
         if prior_log:
             logger.warning(f"Skipping {os.path.basename(file_path)}: identical content already imported as {prior_log.filename}")
-            return 0
+            return (0, 0, 1)
 
     # Setup import tracking
     import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
@@ -114,11 +104,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
         trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
     else:
         logger.error(f"Unsupported broker type: {broker}")
-        return 0
+        return (0, 0, 0)
 
     if not trades:
         logger.warning("No trades found in the file.")
-        return 0
+        return (0, 0, 0)
 
     logger.info(f"Found {len(trades)} trades to import.")
 
@@ -126,7 +116,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
         logger.info("Dry run complete. No changes made to the database.")
         for i, trade in enumerate(trades, 1):
             logger.info(f"  {i}. {trade}")
-        return len(trades)
+        return (0, 0, len(trades))
+
+    # Set up duplicate logger — writes CSV with line numbers
+    _setup_duplicate_logger()
+    dup_logger = logging.getLogger('imports.duplicates')
 
     # Import to DB
     imported_count = 0
@@ -141,24 +135,42 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
             )
             logger.info(f"Created BrokerStatement: {statement}")
 
-            imported_count = 0
-            skipped_count = 0
-
             for trade in trades:
                 # Get account_id from trade
-                account_id = trade.get('account_id', '').strip().upper()
-                if account_id:
-                    account, _ = Account.objects.get_or_create(
-                        account_id=account_id,
-                        defaults={'name': account_id, 'broker': broker}
-                    )
+                raw_account_id = trade.get('account_id', '').strip().upper()
+                
+                # Skip PRACEF practice accounts
+                if raw_account_id.startswith('PRACEF'):
+                    skipped_count += 1
+                    continue
+                
+                # Normalize account ID to 8-digit canonical form
+                if raw_account_id:
+                    digits = re.sub(r'\D', '', raw_account_id)
+                    normalized_id = digits[:8] if len(digits) >= 8 else digits
+                else:
+                    normalized_id = None
+                
+                if normalized_id:
+                    try:
+                        account = Account.objects.get(account_id=normalized_id)
+                    except Account.DoesNotExist:
+                        logger.warning(
+                            "Account %r not found in database — skipping transaction "
+                            "(do not auto-create accounts from CSV)",
+                            normalized_id
+                        )
+                        skipped_count += 1
+                        continue
                 else:
                     account = None
+                    skipped_count += 1
+                    continue
 
                 # Compute tx_hash for deduplication
                 tx_hash = compute_tx_hash(
                     broker=broker,
-                    account_id=account_id,
+                    account_id=normalized_id,
                     date=trade['date'],
                     symbol=trade['symbol'],
                     tx_type=trade['type'],
@@ -166,15 +178,23 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
                     price=trade['price'],
                     currency=trade.get('currency', 'USD'),
                     amount=trade['amount'],
+                    row_number=trade.get('row_number'),
                 )
 
                 # Check for duplicate by tx_hash
                 if Transaction.objects.filter(tx_hash=tx_hash).exists():
-                    logger.debug(f"Duplicate transaction (hash match): {tx_hash}")
                     skipped_count += 1
+                    row_num = trade.get('row_number', '')
+                    # Write duplicate detail to dedicated logfile
+                    dup_logger.info(
+                        f'{os.path.basename(file_path)},Line {row_num},{normalized_id},'  
+                        f'{trade["date"]},{trade["symbol"]},{trade["type"]},'  
+                        f'{trade["quantity"]},{trade["price"]},{trade["amount"]},'  
+                        f'{trade.get("currency", "USD")},{trade.get("notes", "")}'
+                    )
                     failed_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': account_id,
+                        'account': normalized_id,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],
@@ -182,6 +202,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
                         'currency': trade.get('currency', 'USD'),
                         'quantity': trade['quantity'],
                         'error': 'Duplicate (hash match)',
+                        'CSV_Line': row_num,
                     })
                     continue
 
@@ -212,7 +233,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
                     imported_count += 1
                     imported_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': account_id,
+                        'account': normalized_id,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],
@@ -274,13 +295,13 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> int:
     if all_rejections:
         with open(reject_log, 'a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=[
-                'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity', 'error'
+                'Source_File', 'account', 'date', 'symbol', 'type', 'amount', 'currency', 'quantity', 'error', 'CSV_Line'
             ])
             if reject_log.exists() and reject_log.stat().st_size == 0:
                 writer.writeheader()
             writer.writerows(all_rejections)
 
-    return imported_count
+    return (imported_count, skipped_count, len(trades))
 
 
 if __name__ == '__main__':

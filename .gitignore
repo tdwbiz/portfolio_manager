@@ -76,3 +76,4 @@ dmypy.json
 # Coverage
 htmlcov/
 .aider*
+docs/rbc_*.csv

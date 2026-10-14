@@ -77,3 +77,12 @@ dmypy.json
 htmlcov/
 .aider*
 docs/rbc_*.csv
+# private data and run outputs: keep local, never commit
+docs/reconciliation/
+RECONCILIATION_REPORT.md
+recon_output.txt
+batch_results.txt
+test_output*.txt
+test_final.txt
+test_results.txt
+specs/**/*.pdf

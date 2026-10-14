@@ -92,16 +92,26 @@ class Command(BaseCommand):
             filename = os.path.basename(file_path)
             self.stdout.write(f"Importing: {filename}")
             try:
-                trades_count = auto_import(file_path, 'RBC', dry_run=dry_run)
-                # If no trades were parsed, treat as error
-                if trades_count == 0 and not dry_run:
+                imported_count, skipped_count, parsed_count = auto_import(file_path, 'RBC', dry_run=dry_run)
+                # Only flag as error when parser found zero trades
+                if parsed_count == 0 and not dry_run:
                     self.stderr.write(f"  WARNING: No trades parsed from {filename}")
                     errors += 1
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
                     continue
+                # Track success (even if all trades were duplicates — still a valid import)
                 imported_total += 1
+                if parsed_count > 0 and imported_count == 0:
+                    if skipped_count > 0:
+                        self.stdout.write(self.style.SUCCESS(
+                            f"  All {parsed_count} trades already imported ({skipped_count} duplicates, no new transactions)"
+                        ))
+                    else:
+                        self.stdout.write(self.style.SUCCESS(
+                            f"  All {parsed_count} trades already imported (no new transactions)"
+                        ))
                 # Move to processed/ on success
                 if not dry_run:
                     dest = processed_dir / filename

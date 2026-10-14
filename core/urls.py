@@ -2,6 +2,8 @@ from django.urls import path
 
 from imports import views as import_views
 
+from .views_ledger import ledger_month_view
+
 from .views import (
     gap_analysis,
     generate_annual_reports_view,
@@ -110,4 +112,5 @@ urlpatterns = [
     ),
     path("annual-reports/", annual_reports_view, name="annual_reports"),
     path("health/", health_check, name="health_check"),
+    path("ledger/<str:account_id>/<int:year>/<int:month>/", ledger_month_view, name="ledger_month"),
 ]

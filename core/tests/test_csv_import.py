@@ -732,19 +732,37 @@ class TransactionSettlementDateTests(TestCase):
 class AutoImportTests(TestCase):
     """Test the auto_import function directly."""
 
+    def setUp(self):
+        self.account = Account.objects.create(
+            account_id='90000001',
+            name='Test Account',
+            broker='RBC',
+            category='TAXABLE',
+            owner='Test',
+        )
+        self.statement = BrokerStatement.objects.create(
+            source='RBC',
+            file_date=date.today(),
+        )
+
+    def tearDown(self):
+        self.account.delete()
+        self.statement.delete()
+
     def test_returns_count_zero_for_empty_file(self):
-        """auto_import should return 0 for files with no trades."""
+        """auto_import should return (0, 0) for files with no trades."""
         path = self._write_csv([
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
         ])
 
-        count = auto_import(path, 'RBC')
-        self.assertEqual(count, 0)
+        imported, parsed = auto_import(path, 'RBC')
+        self.assertEqual(imported, 0)
+        self.assertEqual(parsed, 0)
 
     def test_returns_count_of_imported_trades(self):
-        """auto_import should return the count of imported trades."""
+        """auto_import should return (imported, parsed) counts."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -755,17 +773,19 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        count = auto_import(path, 'RBC')
-        self.assertEqual(count, 1)
+        imported, parsed = auto_import(path, 'RBC')
+        self.assertEqual(imported, 1)
+        self.assertEqual(parsed, 1)
 
     def test_returns_zero_on_exception(self):
-        """auto_import should return 0 on exception."""
+        """auto_import should return (0, 0) on exception."""
         path = '/nonexistent/path/file.csv'
-        count = auto_import(path, 'RBC')
-        self.assertEqual(count, 0)
+        imported, parsed = auto_import(path, 'RBC')
+        self.assertEqual(imported, 0)
+        self.assertEqual(parsed, 0)
 
     def test_dry_run_returns_count(self):
-        """auto_import with dry_run should still return the count."""
+        """auto_import with dry_run should return (0, parsed_count)."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -776,8 +796,9 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        count = auto_import(path, 'RBC', dry_run=True)
-        self.assertEqual(count, 1)
+        imported, parsed = auto_import(path, 'RBC', dry_run=True)
+        self.assertEqual(imported, 0)
+        self.assertEqual(parsed, 1)
 
     def _write_csv(self, rows: list[list[str]]) -> str:
         """Write CSV rows to a temp file and return the path."""
@@ -805,6 +826,15 @@ class ImportCsvManagementCommandTests(TestCase):
         os.makedirs(self.processed_dir)
         os.makedirs(self.errors_dir)
 
+        # Create account needed for RBC import
+        self.account = Account.objects.create(
+            account_id='90000001',
+            name='Test Account',
+            broker='RBC',
+            category='TAXABLE',
+            owner='Test',
+        )
+
         # Create a test RBC CSV
         self.rbc_csv = os.path.join(self.inbox_dir, 'test_rbc.csv')
         with open(self.rbc_csv, 'w', newline='', encoding='utf-8-sig') as f:
@@ -823,6 +853,9 @@ class ImportCsvManagementCommandTests(TestCase):
 
     def tearDown(self):
         import shutil
+        # Clean up any PositionHistory that references the account before deleting
+        PositionHistory.objects.filter(account=self.account).delete()
+        self.account.delete()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_imports_activity_and_moves_to_processed(self):

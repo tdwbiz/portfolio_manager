@@ -1,0 +1,125 @@
+{% extends "core/base.html" %}
+
+{% block title %}Ledger - {{ account.account_id }} - {{ stmt_month|date:"F Y" }}{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-start">
+    <div>
+        <h1><i class="bi bi-journal-text"></i> Ledger — {{ account.name }}</h1>
+        <p class="text-muted">{{ account.account_id }} · {{ stmt_month|date:"F Y" }}</p>
+    </div>
+    <div>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'account_detail' account.account_id %}">
+            <i class="bi bi-arrow-left"></i> Account
+        </a>
+    </div>
+</div>
+
+<!-- Month navigation -->
+<div class="d-flex justify-content-between mb-3">
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'ledger_month' account.account_id prev_month|date:"Y" prev_month|date:"m" %}">
+        &laquo; {{ prev_month|date:"F Y" }}
+    </a>
+    <a class="btn btn-sm btn-outline-primary ms-2" href="{% url 'ledger_month' account.account_id next_month|date:"Y" next_month|date:"m" %}">
+        {{ next_month|date:"F Y" }} &raquo;
+    </a>
+</div>
+
+<!-- Net cash summary -->
+<div class="alert {% if total_net_cash >= 0 %}alert-success{% else %}alert-danger{% endif %}">
+    <strong>Net Cash Flow:</strong> ${{ total_net_cash|floatformat:2 }}
+</div>
+
+{% if not sections %}
+<div class="alert alert-info">
+    No ledger entries found for {{ stmt_month|date:"F Y" }}.
+</div>
+{% endif %}
+
+{% for section in sections %}
+<div class="card mb-4">
+    <div class="card-header">
+        <strong>{{ section.ledger_account.ledger_name }}</strong>
+        <span class="badge bg-secondary ms-2">{{ section.ledger_account.account_type }}</span>
+        <span class="badge bg-info ms-1">{{ section.ledger_account.currency }}</span>
+        {% if section.ledger_account.symbol %}
+        <span class="badge bg-warning ms-1">{{ section.ledger_account.symbol }}</span>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-striped mb-0">
+            <thead class="table-dark">
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Type</th>
+                    {% if section.ledger_account.account_type == "POSITION" %}
+                    <th class="text-end">Qty</th>
+                    <th class="text-end">Cost Basis</th>
+                    {% else %}
+                    <th class="text-end">Cash Amount</th>
+                    {% if section.ledger_account.account_type == "CASH" %}
+                    <th>Symbol</th>
+                    {% endif %}
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in section.entries %}
+                <tr>
+                    <td>{{ entry.entry_date|date:"Y-m-d" }}</td>
+                    <td>{{ entry.description }}</td>
+                    <td>
+                        <span class="badge {% if entry.entry_type == 'DEBIT' %}bg-success{% else %}bg-danger{% endif %}">
+                            {{ entry.entry_type }}
+                        </span>
+                    </td>
+                    {% if section.ledger_account.account_type == "POSITION" %}
+                    <td class="text-end">{{ entry.quantity_change|floatformat:4 }}</td>
+                    <td class="text-end">{{ entry.cost_basis_change|floatformat:2 }}</td>
+                    {% else %}
+                    <td class="text-end {% if entry.cash_amount >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ entry.cash_amount|floatformat:2 }}
+                    </td>
+                    {% if section.ledger_account.account_type == "CASH" and entry.related_symbol %}
+                    <td>{{ entry.related_symbol }}</td>
+                    {% endif %}
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot class="table-light fw-bold">
+                <tr>
+                    <td colspan="2">Opening</td>
+                    {% if section.ledger_account.account_type == "POSITION" %}
+                    <td></td>
+                    <td class="text-end">{{ section.opening_qty|floatformat:4 }}</td>
+                    <td class="text-end">{{ section.opening_cb|floatformat:2 }}</td>
+                    {% else %}
+                    <td></td>
+                    <td class="text-end">—</td>
+                    {% if section.ledger_account.account_type == "CASH" %}
+                    <td></td>
+                    {% endif %}
+                    {% endif %}
+                </tr>
+                <tr class="table-primary">
+                    <td colspan="2">Closing</td>
+                    {% if section.ledger_account.account_type == "POSITION" %}
+                    <td></td>
+                    <td class="text-end">{{ section.closing_qty|floatformat:4 }}</td>
+                    <td class="text-end">{{ section.closing_cb|floatformat:2 }}</td>
+                    {% else %}
+                    <td></td>
+                    <td class="text-end">{{ section.net_cash|floatformat:2 }}</td>
+                    {% if section.ledger_account.account_type == "CASH" %}
+                    <td></td>
+                    {% endif %}
+                    {% endif %}
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

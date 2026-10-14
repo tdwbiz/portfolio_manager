@@ -14,7 +14,8 @@ def compute_tx_hash(
     quantity,
     price,
     currency: str,
-    amount=None,  # ignored — same trade = same hash regardless of amount
+    amount=None,
+    row_number=None,
 ) -> str:
     """Return a SHA-256 hex digest that uniquely identifies a transaction.
 
@@ -22,22 +23,40 @@ def compute_tx_hash(
     same trade imported from two different overlapping export files always
     produces the same hash.
 
-    NOTE: 'amount' parameter is accepted for backwards compatibility but
-    is NOT included in the hash. This allows overlapping CSV exports with
-    slightly different amounts to produce the same hash.
+    For BUY/SELL trades, amount is excluded so overlapping CSV exports with
+    slightly different amounts still match.
+
+    For non-trade types (DEP, WDRAW, TRANSFER, etc.), amount IS included
+    because two transfers of different amounts on the same date are different
+    transactions.
+
+    When row_number is provided (e.g. from CSV import), it is appended to the
+    hash so that identical rows at different positions in the CSV get different
+    hashes. This handles recurring deposits of the same amount (e.g. $400/month
+    car fund where both spouses deposit $400 separately).
     """
-    key = "|".join(
-        [
-            broker or "",
-            account_id or "",
-            str(date),
-            symbol or "",
-            tx_type or "",
-            f"{Decimal(str(quantity)):.4f}",
-            f"{Decimal(str(price)):.4f}",
-            currency or "",
-        ]
-    )
+    key_parts = [
+        broker or "",
+        account_id or "",
+        str(date),
+        symbol or "",
+        tx_type or "",
+        f"{Decimal(str(quantity)):.4f}",
+        f"{Decimal(str(price)):.4f}",
+        currency or "",
+    ]
+
+    # Include amount for non-trade types
+    trade_types = ('BUY', 'SELL')
+    if tx_type not in trade_types and amount is not None:
+        key_parts.append(f"{Decimal(str(amount)).quantize(Decimal('0.01')):.2f}")
+
+    # Include row_number if provided — makes identical CSV rows at different
+    # positions produce different hashes (handles recurring same-amount deposits)
+    if row_number is not None:
+        key_parts.append(str(row_number))
+
+    key = "|".join(key_parts)
     return hashlib.sha256(key.encode()).hexdigest()
 
 

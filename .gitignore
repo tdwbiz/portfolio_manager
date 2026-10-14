@@ -87,3 +87,9 @@ test_final.txt
 test_results.txt
 specs/**/*.pdf
 db_test.sqlite3
+tests/e2e/*.txt
+tests/e2e/test_report.json
+docs/examples/
+files_in/
+logs/
+temp/

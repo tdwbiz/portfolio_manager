@@ -198,7 +198,7 @@ reverse_generate_monthly_statements(account, anchor_month, known_ending_cad, kno
 ### UI Flow
 
 ```
-Account: [TOM_LIF ▼]
+Account: [ACCOUNT_B ▼]
 Anchor Month: [2024-06-01 ▼]
   Ending Balance CAD: [45,123.45]
   Ending Balance USD: [23,456.78]  (optional)

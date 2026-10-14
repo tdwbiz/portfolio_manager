@@ -412,10 +412,11 @@ def _parse_ib_activity_statement(rows: list[list[str]],
 # RBC CSV parser
 # ---------------------------------------------------------------------------
 
-VALID_ACCOUNTS = {
-    '90000002', '90000001', '90000008', '90000003',
-    '90000005', '90000006', '90000007', '90000004',
-}
+def valid_accounts() -> set[str]:
+    """Whitelist of known RBC account IDs, from settings.RBC_ACCOUNTS
+    (environment variable RBC_ACCOUNTS in .env)."""
+    from django.conf import settings
+    return set(settings.RBC_ACCOUNTS)
 
 def parse_rbc_csv(file_path: str,
                   rejections: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], Decimal]:
@@ -628,7 +629,7 @@ def parse_rbc_csv(file_path: str,
                     continue
 
                 # Skip accounts not in whitelist
-                if account_id and account_id not in VALID_ACCOUNTS:
+                if account_id and account_id not in valid_accounts():
                     logger.debug(f"Row {row_num}: Skipping unknown account '{account_id}'")
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,

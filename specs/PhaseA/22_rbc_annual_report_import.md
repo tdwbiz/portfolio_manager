@@ -376,7 +376,7 @@ The first occurrence of either header marks the start of that section. Pages bef
 **Account metadata extraction (from Page 1):**
 
 ```python
-# Account number: "Account 695- 62 2 59" → "900-00005"
+# Account number: "Account 900- 00 0 05" → "900-00005"
 acct_match = re.search(r'Account\s+(\d+)\s*[\s-]*(\d+)', cleaned_text)
 account_number = f"{acct_match.group(1)}-{acct_match.group(2)}" if acct_match else ''
 

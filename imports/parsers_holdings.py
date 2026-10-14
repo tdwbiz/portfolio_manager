@@ -61,9 +61,9 @@ def parse_holdings_csv(file_path: str) -> list[dict]:
         if acct_match:
             account_id = acct_match.group(0)
 
-    # 2) PDF text / header line: "Account: 90000008 - LIF_SUSAN"
+    # 2) PDF text / header line: "Account: 90000008 - ACCOUNT_H"
     #    Pattern B files have NO Account: line in CSV header section.
-    #    But the PDF content has: "Account: 90000008 - LIF_SUSAN"
+    #    But the PDF content has: "Account: 90000008 - ACCOUNT_H"
     if not account_id and raw_content:
         acct_match = re.search(r'Account:\s*(\d{5,})', raw_content)
         if acct_match:

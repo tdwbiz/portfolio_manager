@@ -86,3 +86,4 @@ test_output*.txt
 test_final.txt
 test_results.txt
 specs/**/*.pdf
+db_test.sqlite3

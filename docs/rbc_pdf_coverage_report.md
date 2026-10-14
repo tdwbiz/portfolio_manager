@@ -100,7 +100,7 @@
 
 
 
-### 90000004 - SUSAN_TFSA
+### 90000004 - ACCOUNT_D
 
 **Type:** TFSA | **Currency:** CAD
 
@@ -148,7 +148,7 @@
 
 
 
-### 90000006 - TOM_TFSA
+### 90000006 - ACCOUNT_F
 
 **Type:** TFSA | **Currency:** CAD
 
@@ -210,7 +210,7 @@
 
 
 
-### 90000007 - TS_CAR_LIVING
+### 90000007 - ACCOUNT_G
 
 **Type:** TAXABLE | **Currency:** CAD
 
@@ -250,7 +250,7 @@
 
 
 
-### 90000001 - TS_HUISGELD
+### 90000001 - ACCOUNT_A
 
 **Type:** TAXABLE | **Currency:** CAD
 
@@ -278,7 +278,7 @@
 
 
 
-### 90000002 - TOM_LIF
+### 90000002 - ACCOUNT_B
 
 **Type:** LIRA | **Currency:** CAD
 
@@ -344,7 +344,7 @@
 
 
 
-### 90000008 - SUSAN_LIF
+### 90000008 - ACCOUNT_H
 
 **Type:** LIRA | **Currency:** CAD
 
@@ -374,7 +374,7 @@
 
 
 
-### 90000005 - SUSAN_RRIF
+### 90000005 - ACCOUNT_E
 
 **Type:** RRSP | **Currency:** CAD
 
@@ -410,7 +410,7 @@
 
 
 
-### 90000003 - TOM_RRSP
+### 90000003 - ACCOUNT_C
 
 **Type:** RRSP | **Currency:** CAD
 
@@ -507,7 +507,7 @@
 
 
 
-### 90000004 - SUSAN_TFSA
+### 90000004 - ACCOUNT_D
 
 **Type:** TFSA
 
@@ -533,7 +533,7 @@
 
 
 
-### 90000006 - TOM_TFSA
+### 90000006 - ACCOUNT_F
 
 **Type:** TFSA
 
@@ -559,7 +559,7 @@
 
 
 
-### 90000007 - TS_CAR_LIVING
+### 90000007 - ACCOUNT_G
 
 **Type:** TAXABLE
 
@@ -585,7 +585,7 @@
 
 
 
-### 90000001 - TS_HUISGELD
+### 90000001 - ACCOUNT_A
 
 **Type:** TAXABLE
 
@@ -611,7 +611,7 @@
 
 
 
-### 90000002 - TOM_LIF
+### 90000002 - ACCOUNT_B
 
 **Type:** LIRA
 
@@ -639,7 +639,7 @@
 
 
 
-### 90000008 - SUSAN_LIF
+### 90000008 - ACCOUNT_H
 
 **Type:** LIRA
 
@@ -665,7 +665,7 @@
 
 
 
-### 90000005 - SUSAN_RRIF
+### 90000005 - ACCOUNT_E
 
 **Type:** RRSP
 
@@ -693,7 +693,7 @@
 
 
 
-### 90000003 - TOM_RRSP
+### 90000003 - ACCOUNT_C
 
 **Type:** RRSP
 
@@ -744,21 +744,21 @@ Accounts with balance continuity gaps (top 10):
 
 | 12345678 | Auto-created from PDF: 12345-6 | 3 | 2 | Yes | Yes |
 
-| 90000004 | SUSAN_TFSA | 53 | 53 | Yes | No |
+| 90000004 | ACCOUNT_D | 53 | 53 | Yes | No |
 
-| 90000002 | TOM_LIF | 63 | 63 | Yes | No |
+| 90000002 | ACCOUNT_B | 63 | 63 | Yes | No |
 
-| 90000006 | TOM_TFSA | 64 | 64 | No | No |
+| 90000006 | ACCOUNT_F | 64 | 64 | No | No |
 
-| 90000007 | TS_CAR_LIVING | 65 | 21 | No | No |
+| 90000007 | ACCOUNT_G | 65 | 21 | No | No |
 
-| 90000001 | TS_HUISGELD | 72 | 0 | No | No |
+| 90000001 | ACCOUNT_A | 72 | 0 | No | No |
 
-| 90000008 | SUSAN_LIF | 72 | 0 | No | No |
+| 90000008 | ACCOUNT_H | 72 | 0 | No | No |
 
-| 90000005 | SUSAN_RRIF | 72 | 72 | No | No |
+| 90000005 | ACCOUNT_E | 72 | 72 | No | No |
 
-| 90000003 | TOM_RRSP | 71 | 71 | No | No |
+| 90000003 | ACCOUNT_C | 71 | 71 | No | No |
 
 
 
@@ -774,21 +774,21 @@ Accounts with balance continuity gaps (top 10):
 
 | 12345678 | Auto-created from PDF: 12345-6 | 6 | 6 | 12 | 0.0% |
 
-| 90000007 | TS_CAR_LIVING | 2 | 6 | 8 | 33.3% |
+| 90000007 | ACCOUNT_G | 2 | 6 | 8 | 33.3% |
 
-| 90000004 | SUSAN_TFSA | 0 | 6 | 6 | 50.0% |
+| 90000004 | ACCOUNT_D | 0 | 6 | 6 | 50.0% |
 
-| 90000006 | TOM_TFSA | 0 | 6 | 6 | 50.0% |
+| 90000006 | ACCOUNT_F | 0 | 6 | 6 | 50.0% |
 
-| 90000001 | TS_HUISGELD | 0 | 6 | 6 | 50.0% |
+| 90000001 | ACCOUNT_A | 0 | 6 | 6 | 50.0% |
 
-| 90000008 | SUSAN_LIF | 0 | 6 | 6 | 50.0% |
+| 90000008 | ACCOUNT_H | 0 | 6 | 6 | 50.0% |
 
-| 90000002 | TOM_LIF | 0 | 4 | 4 | 66.7% |
+| 90000002 | ACCOUNT_B | 0 | 4 | 4 | 66.7% |
 
-| 90000005 | SUSAN_RRIF | 0 | 2 | 2 | 83.3% |
+| 90000005 | ACCOUNT_E | 0 | 2 | 2 | 83.3% |
 
-| 90000003 | TOM_RRSP | 0 | 2 | 2 | 83.3% |
+| 90000003 | ACCOUNT_C | 0 | 2 | 2 | 83.3% |
 
 
 

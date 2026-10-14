@@ -28,6 +28,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 sys.path.insert(0, r'C:\AI-DevTeam\projects\portfolio_manager')
 django.setup()
 
+from django.conf import settings
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -39,11 +41,8 @@ from core.models import (
 
 OUTPUT_DIR = r'C:\AI-DevTeam\projects\portfolio_manager\docs\reconciliation'
 
-# Only RBC accounts with holdings data
-RBC_ACCOUNT_IDS = [
-    '90000004', '90000006', '90000007', '90000001',
-    '90000002', '90000008', '90000005', '90000003',
-]
+# Only RBC accounts with holdings data — from settings (env var RBC_ACCOUNTS)
+RBC_ACCOUNT_IDS = list(settings.RBC_ACCOUNTS)
 
 
 def get_months_for_account(account):

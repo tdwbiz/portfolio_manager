@@ -26,7 +26,7 @@ from imports.parsers_annual import (
 SAMPLE_2259_6PAGE = """
 Annual Investment Performance Report
 E L S I E S M A R A I S R I F Account
-Account 695- 62 2 59
+Account 900- 00 0 05
 from January 1, 2025 to December 31, 2025
 
 Your Canadian dollar account

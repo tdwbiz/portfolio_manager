@@ -16,8 +16,8 @@ This report compares transactions sourced from **CSV exports** (`core_transactio
 
 | Finding | Detail |
 |---------|--------|
-| CSV date coverage | All accounts start 2020 (TS_CAR_LIVING starts 2021) |
-| PDF date coverage | Back to 2013 (TOM_TFSA) / 2014 / 2015 / 2017 / 2018 / 2019 depending on account |
+| CSV date coverage | All accounts start 2020 (ACCOUNT_G starts 2021) |
+| PDF date coverage | Back to 2013 (ACCOUNT_F) / 2014 / 2015 / 2017 / 2018 / 2019 depending on account |
 | **Critical gap** | 2020 CSV is DIVIDENDS-ONLY — all BUY/SELL/TRANSFER/DEPOSIT/WITHDRAWAL are missing |
 | Pre-2020 gap | Every account has years of PDF-only history with zero CSV transactions |
 | Total PDF-ONLY txns to backfill | ~748 transactions across all accounts in PDF-ONLY periods |
@@ -58,20 +58,20 @@ This report compares transactions sourced from **CSV exports** (`core_transactio
 
 | Account | CSV Start | CSV End | PDF Start | PDF End | CSV txns | PDF txns |
 |---------|-----------|---------|-----------|---------|----------|----------|
-| TOM_LIF | 2020-03-31 | 2026-04-30 | 2018-11-08 | 2026-04-30 | 280 | 408 |
-| TS_HUISGELD | 2020-01-06 | 2026-04-29 | 2017-11-06 | 2026-04-30 | 226 | 283 |
-| SUSAN_LIF | 2020-01-08 | 2026-04-27 | 2019-05-31 | 2026-04-24 | 190 | 203 |
-| TOM_RRSP | 2020-01-03 | 2026-04-30 | 2014-01-06 | 2026-04-30 | 539 | 881 |
-| SUSAN_RRIF | 2020-01-03 | 2026-04-27 | 2015-12-30 | 2026-04-24 | 304 | 433 |
-| TOM_TFSA | 2020-03-03 | 2026-04-24 | 2013-12-31 | 2026-04-30 | 296 | 515 |
-| TS_CAR_LIVING | 2021-01-05 | 2026-04-30 | 2020-08-19 | 2026-04-30 | 592 | 622 |
-| SUSAN_TFSA | 2020-03-03 | 2026-04-02 | 2014-02-18 | 2026-04-30 | 192 | 405 |
+| ACCOUNT_B | 2020-03-31 | 2026-04-30 | 2018-11-08 | 2026-04-30 | 280 | 408 |
+| ACCOUNT_A | 2020-01-06 | 2026-04-29 | 2017-11-06 | 2026-04-30 | 226 | 283 |
+| ACCOUNT_H | 2020-01-08 | 2026-04-27 | 2019-05-31 | 2026-04-24 | 190 | 203 |
+| ACCOUNT_C | 2020-01-03 | 2026-04-30 | 2014-01-06 | 2026-04-30 | 539 | 881 |
+| ACCOUNT_E | 2020-01-03 | 2026-04-27 | 2015-12-30 | 2026-04-24 | 304 | 433 |
+| ACCOUNT_F | 2020-03-03 | 2026-04-24 | 2013-12-31 | 2026-04-30 | 296 | 515 |
+| ACCOUNT_G | 2021-01-05 | 2026-04-30 | 2020-08-19 | 2026-04-30 | 592 | 622 |
+| ACCOUNT_D | 2020-03-03 | 2026-04-02 | 2014-02-18 | 2026-04-30 | 192 | 405 |
 
 ### 3.2 Year-by-Year Transaction Counts (CSV vs PDF)
 
 Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 
-#### TOM_LIF (id=60, account_id=90000002)
+#### ACCOUNT_B (id=60, account_id=90000002)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -85,7 +85,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 90 | 89 | +1 | ok |
 | 2026 | 28 | 27 | +1 | ok |
 
-#### TS_HUISGELD (id=61, account_id=90000001)
+#### ACCOUNT_A (id=61, account_id=90000001)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -100,9 +100,9 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 37 | 39 | -2 | ok |
 | 2026 | 17 | 16 | +1 | ok |
 
-> Note: TS_HUISGELD 2020 CSV=50 > PDF=35 — CSV appears to have full activity in 2020 for this account (not dividend-filtered). PDF may be missing some months.
+> Note: ACCOUNT_A 2020 CSV=50 > PDF=35 — CSV appears to have full activity in 2020 for this account (not dividend-filtered). PDF may be missing some months.
 
-#### SUSAN_LIF (id=62, account_id=90000008)
+#### ACCOUNT_H (id=62, account_id=90000008)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -115,7 +115,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 40 | 41 | -1 | ok |
 | 2026 | 12 | 11 | +1 | ok |
 
-#### TOM_RRSP (id=63, account_id=90000003)
+#### ACCOUNT_C (id=63, account_id=90000003)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -133,7 +133,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 83 | 83 | 0 | ✅ perfect match |
 | 2026 | 40 | 32 | +8 | ok (CSV captures more recent activity) |
 
-#### SUSAN_RRIF (id=64, account_id=90000005)
+#### ACCOUNT_E (id=64, account_id=90000005)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -150,7 +150,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 80 | 80 | 0 | ✅ perfect match |
 | 2026 | 36 | 36 | 0 | ✅ perfect match |
 
-#### TOM_TFSA (id=65, account_id=90000006)
+#### ACCOUNT_F (id=65, account_id=90000006)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -169,9 +169,9 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 66 | 89 | -23 | Significant gap |
 | 2026 | 18 | 19 | -1 | ok |
 
-> ⚠️ TOM_TFSA has the most significant ongoing gaps — PDF consistently has 20-40% more transactions than CSV even in recent years.
+> ⚠️ ACCOUNT_F has the most significant ongoing gaps — PDF consistently has 20-40% more transactions than CSV even in recent years.
 
-#### TS_CAR_LIVING (id=66, account_id=90000007)
+#### ACCOUNT_G (id=66, account_id=90000007)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -183,7 +183,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 155 | 165 | -10 | Minor gap |
 | 2026 | 52 | 56 | -4 | ok |
 
-#### SUSAN_TFSA (id=67, account_id=90000004)
+#### ACCOUNT_D (id=67, account_id=90000004)
 
 | Year | CSV | PDF | Delta | Note |
 |------|-----|-----|-------|------|
@@ -201,7 +201,7 @@ Legend: `CSV / PDF`  |  `!!` = major gap  |  `--` = no data
 | 2025 | 43 | 63 | -20 | Significant gap |
 | 2026 | 13 | 15 | -2 | ok |
 
-> ⚠️ SUSAN_TFSA has the worst ongoing gap — PDF has ~40-65% more transactions than CSV in every year from 2021 onwards. Needs full 2021-2025 backfill from PDF.
+> ⚠️ ACCOUNT_D has the worst ongoing gap — PDF has ~40-65% more transactions than CSV in every year from 2021 onwards. Needs full 2021-2025 backfill from PDF.
 
 ---
 
@@ -217,11 +217,11 @@ CSV exports were not available for any account before 2020 (some accounts: befor
 **B) 2020: Filtered dividend-only CSV export**  
 The CSV file `Activity Dividends 2020 Tom & Susan Aftree Inkomste January 2, 2021.csv` was a **dividends-only export** from RBC. This means ALL BUY, SELL, TRANSFER, DEPOSIT, WITHDRAWAL transactions for 2020 are absent from CSV for most accounts.  
 Evidence: `2020 CSV types = {DIV, TAX, WDRAW only}` across all "Aftree" accounts.  
-Exception: TS_HUISGELD, SUSAN_LIF, SUSAN_RRIF had additional 2020 CSV files that captured more types.
+Exception: ACCOUNT_A, ACCOUNT_H, ACCOUNT_E had additional 2020 CSV files that captured more types.
 
 **C) 2021–2025: Patchy/overlapping CSV exports**  
 Some months are missing because user pulled CSV exports at irregular intervals (start/end dates didn't align perfectly). The PDF monthly statements are complete month-by-month.  
-TOM_TFSA and SUSAN_TFSA show the largest ongoing gap, suggesting some CSV export files for these accounts may be missing entirely.
+ACCOUNT_F and ACCOUNT_D show the largest ongoing gap, suggesting some CSV export files for these accounts may be missing entirely.
 
 ---
 
@@ -256,28 +256,28 @@ Use this mapping for backfill SQL:
 
 ### PDF-ONLY months (CSV has ZERO transactions for these months)
 
-#### TOM_LIF
+#### ACCOUNT_B
 `(2018,11), (2018,12), (2019,1)-(2019,12), (2020,5), (2020,6), (2020,9), (2021,9), (2023,9), (2023,12), (2024,3), (2024,12)`
 
-#### TS_HUISGELD
+#### ACCOUNT_A
 `(2017,11), (2017,12), (2018,12), (2019,1)-(2019,12)`
 
-#### SUSAN_LIF
+#### ACCOUNT_H
 `(2019,5)-(2019,12)`
 
-#### TOM_RRSP
+#### ACCOUNT_C
 `(2014,1)-(2014,5), (2014,12), (2015,12), (2016,12), (2017,11), (2017,12), (2018,1)-(2018,12), (2019,1)-(2019,12)`
 
-#### SUSAN_RRIF
+#### ACCOUNT_E
 `(2015,12), (2016,12), (2017,11), (2017,12), (2018,1)-(2018,12), (2019,1)-(2019,12)`
 
-#### TOM_TFSA
+#### ACCOUNT_F
 `(2013,12), (2014,1)-(2014,3), (2014,12), (2015,12), (2016,12), (2017,11), (2017,12), (2018,1)-(2018,6), (2018,9)-(2018,12), (2019,3), (2019,4), (2019,6), (2019,9), (2019,10), (2019,12), (2020,1), (2020,10), (2020,11), (2021,10), (2023,3), (2023,6)`
 
-#### TS_CAR_LIVING
+#### ACCOUNT_G
 `(2020,8), (2020,9), (2020,10), (2020,11), (2020,12)`
 
-#### SUSAN_TFSA
+#### ACCOUNT_D
 `(2014,2)-(2014,4), (2014,12), (2015,12), (2016,12), (2017,12), (2018,3)-(2018,6), (2018,9), (2018,10), (2018,12), (2019,3), (2019,4), (2019,6), (2019,7), (2019,9), (2019,10), (2019,12), (2020,1), (2021,7), (2021,10)`
 
 ---
@@ -719,18 +719,18 @@ The delta counts in Section 3.2 on shared months are **not errors** — they are
 
 | # | Account | Action | Phase | Priority |
 |---|---------|--------|-------|----------|
-| 1 | TOM_RRSP | Backfill 2014–2019 from PDF (316 txns) | 1 | 🔴 HIGH |
-| 2 | SUSAN_TFSA | Backfill 2014–2019 from PDF (106 txns) | 1 | 🔴 HIGH |
-| 3 | TOM_TFSA | Backfill 2013–2019 from PDF (88 txns) | 1 | 🔴 HIGH |
-| 4 | SUSAN_RRIF | Backfill 2015–2019 from PDF (99 txns) | 1 | 🔴 HIGH |
-| 5 | TOM_LIF | Backfill 2018–2019 from PDF (77 txns) | 1 | 🔴 HIGH |
-| 6 | TS_HUISGELD | Backfill 2017–2019 from PDF (63 txns) | 1 | 🔴 HIGH |
-| 7 | SUSAN_LIF | Backfill 2019-05–2019-12 from PDF (16 txns) | 1 | 🟡 MEDIUM |
-| 8 | TS_CAR_LIVING | Backfill 2020-08–2020-12 from PDF (14 txns) | 1 | 🟡 MEDIUM |
-| 9 | ALL (excl TS_HUISGELD/SUSAN_LIF) | Add 2020 BUY/SELL/non-income from PDF | 2 | 🔴 HIGH |
-| 10 | TOM_TFSA | Backfill isolated months 2020-10, 2020-11, 2021-10, 2023-03, 2023-06 | 3 | 🟡 MEDIUM |
-| 11 | SUSAN_TFSA | Backfill isolated months 2021-07, 2021-10 | 3 | 🟡 MEDIUM |
-| 12 | TOM_LIF | Backfill isolated months 2021-09, 2023-09, 2023-12, 2024-03, 2024-12 | 3 | 🟡 MEDIUM |
+| 1 | ACCOUNT_C | Backfill 2014–2019 from PDF (316 txns) | 1 | 🔴 HIGH |
+| 2 | ACCOUNT_D | Backfill 2014–2019 from PDF (106 txns) | 1 | 🔴 HIGH |
+| 3 | ACCOUNT_F | Backfill 2013–2019 from PDF (88 txns) | 1 | 🔴 HIGH |
+| 4 | ACCOUNT_E | Backfill 2015–2019 from PDF (99 txns) | 1 | 🔴 HIGH |
+| 5 | ACCOUNT_B | Backfill 2018–2019 from PDF (77 txns) | 1 | 🔴 HIGH |
+| 6 | ACCOUNT_A | Backfill 2017–2019 from PDF (63 txns) | 1 | 🔴 HIGH |
+| 7 | ACCOUNT_H | Backfill 2019-05–2019-12 from PDF (16 txns) | 1 | 🟡 MEDIUM |
+| 8 | ACCOUNT_G | Backfill 2020-08–2020-12 from PDF (14 txns) | 1 | 🟡 MEDIUM |
+| 9 | ALL (excl ACCOUNT_A/ACCOUNT_H) | Add 2020 BUY/SELL/non-income from PDF | 2 | 🔴 HIGH |
+| 10 | ACCOUNT_F | Backfill isolated months 2020-10, 2020-11, 2021-10, 2023-03, 2023-06 | 3 | 🟡 MEDIUM |
+| 11 | ACCOUNT_D | Backfill isolated months 2021-07, 2021-10 | 3 | 🟡 MEDIUM |
+| 12 | ACCOUNT_B | Backfill isolated months 2021-09, 2023-09, 2023-12, 2024-03, 2024-12 | 3 | 🟡 MEDIUM |
 | 13 | ALL | After backfill: update `exchange_rate_cad` and `amount_cad` for USD rows | Post | 🟡 MEDIUM |
 | 14 | ALL | Going forward: export full-activity CSV (not dividend-only) monthly | Process | 🔵 INFO |
 

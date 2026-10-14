@@ -235,6 +235,23 @@ _json_raw = (
 )
 IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / "processed" / "json_logs"
 
+# RBC account configuration via environment variables (.env)
+# RBC_ACCOUNTS: comma-separated list of "id:label" pairs,
+#   e.g. "90000001:ACCOUNT_A,90000002:ACCOUNT_B"
+# Parsed into a dict {account_id: label} for easy lookup.
+def _parse_rbc_accounts(raw: str) -> dict[str, str]:
+    accounts: dict[str, str] = {}
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        acc_id, _, label = part.partition(":")
+        accounts[acc_id.strip()] = label.strip()
+    return accounts
+
+RBC_ACCOUNTS = _parse_rbc_accounts(os.getenv("RBC_ACCOUNTS", ""))
+RBC_DEFAULT_ACCOUNT = os.getenv("RBC_DEFAULT_ACCOUNT", "").strip()
+
 # Vision-language (VL) model settings — qwen2.5-vl-72b on port 11440 via llama.cpp
 VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11440/v1")
 VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "qwen2.5-vl")

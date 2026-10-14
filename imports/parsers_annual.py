@@ -133,7 +133,7 @@ AMOUNT_INVESTED_HEADER = re.compile(r'^\s*Amount\s+invested\s*$', re.IGNORECASE)
 # Period header
 PERIOD_HEADER = re.compile(r'from\s+(\w+\s+\d+,\s+\d+)\s+to\s+(\w+\s+\d+,\s+\d+)', re.IGNORECASE)
 
-# Account metadata — match "RRSP Account 695- 62 2 59" or "LIF Account 900-00008"
+# Account metadata — match "RRSP Account 900- 00 0 05" or "LIF Account 900-00008"
 ACCOUNT_NUMBER_PATTERN = re.compile(r'Account\s+(\d{3})\s*[-\s]*(\d{3,5})', re.IGNORECASE)
 # Only match known account type codes before "Account"
 ACCOUNT_TYPE_PATTERN = re.compile(

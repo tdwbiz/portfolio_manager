@@ -1113,11 +1113,11 @@ class LedgerAccount(models.Model):
     # Denormalized fields for quick lookup without joins
     account_id_str = models.CharField(
         max_length=50, db_index=True,
-        help_text="Denormalized account ID (e.g., 90000001)"
+        help_text="Denormalized account ID (e.g., '90000001')"
     )
     account_name = models.CharField(
         max_length=100,
-        help_text="Denormalized account name (e.g., TS_HUISGELD)"
+        help_text="Denormalized account name (e.g., 'ACCOUNT_A')"
     )
     ledger_name = models.CharField(
         max_length=150, db_index=True,

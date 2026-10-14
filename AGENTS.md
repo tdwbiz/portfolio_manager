@@ -10,6 +10,15 @@
 
 > **Note:** The `venv/` folder in this project has been removed. Always use `ai-env` for everything.
 
+### RBC Account Configuration (env-driven)
+- Real RBC account numbers are **not** stored in the repo. They come from `.env`:
+  - `RBC_ACCOUNTS` — comma list of `id:label` pairs, e.g. `90000001:ACCOUNT_A,90000002:ACCOUNT_B`
+  - `RBC_DEFAULT_ACCOUNT` — default account ID for script `--account` flags
+- Exposed in `settings.py` as `settings.RBC_ACCOUNTS` (dict `{id: label}`) and `settings.RBC_DEFAULT_ACCOUNT`. See `.env.example`.
+- Used by: the CSV parser account whitelist (`imports/parsers.py`), `merge_duplicate_accounts`, `scripts/generate_accounting_ledger.py`, and the `--account` defaults in `scripts/ledger_high_change.py`, `pdf_internal_reconciliation.py`, `reconcile_holdings.py`, `reconcile_tx.py`, `verify_pdf_integrity.py`.
+- **If `RBC_ACCOUNTS` is empty, RBC CSV rows are rejected as unknown accounts** — set it in `.env` before importing.
+- Tests use fake accounts `90000001`-`90000008` (labels `ACCOUNT_A`...`ACCOUNT_H`) via `settings_test.py` — no `.env` needed.
+
 ## Key Commands
 ```powershell
 # Run tests
@@ -272,7 +281,7 @@ Phase D was implemented in a previous session. The code, views, templates, model
   - Usage: `python scripts/ledger_high_change.py --account 90000001 --currency CAD --start-date 2019-01-01`
   - Reports saved to `docs/reconciliation/ledger_high_change_<account>_<currency>.md`
 
-### TS_HUISGELD (90000001) CAD
+### ACCOUNT_A (90000001) CAD
 - Start date 2019-01-01, Start balance $393,437.82
 - 90 PDF statements total (2017-11 to 2026-04), 88 in analysis (excludes 2 pre-2019)
 - Balance chain intact across all 88 statements (only $12.28 offset on first statement from start balance)

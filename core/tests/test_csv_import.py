@@ -327,9 +327,9 @@ class HoldingsImportTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
             account_id='90000001',
-            name='TAXABLE_TOM_SUSAN',
+            name='ACCOUNT_A',
             broker='RBC',
-            owner='TOM',
+            owner='ACCOUNT_A',
             currency='CAD',
         )
 
@@ -362,7 +362,7 @@ class HoldingsImportTests(TestCase):
         """Old open positions should be closed when a new snapshot arrives."""
         # Create an existing open position
         PositionHistory.objects.create(
-            owner='TOM',
+            owner='ACCOUNT_A',
             account=self.account,
             symbol='VDY',
             quantity=Decimal('5000'),
@@ -444,16 +444,16 @@ class PositionHistoryQueryTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
             account_id='90000001',
-            name='TAXABLE_TOM_SUSAN',
+            name='ACCOUNT_A',
             broker='RBC',
-            owner='TOM',
+            owner='ACCOUNT_A',
             currency='CAD',
         )
 
     def test_current_holdings_query(self):
         """Current holdings have date_to IS NULL and quantity > 0."""
         PositionHistory.objects.create(
-            owner='TOM',
+            owner='ACCOUNT_A',
             account=self.account,
             symbol='VDY',
             quantity=Decimal('6182'),
@@ -477,7 +477,7 @@ class PositionHistoryQueryTests(TestCase):
     def test_historical_holdings_as_of_date(self):
         """Historical holdings should be queryable by date_from <= date."""
         PositionHistory.objects.create(
-            owner='TOM',
+            owner='ACCOUNT_A',
             account=self.account,
             symbol='VDY',
             quantity=Decimal('5000'),
@@ -538,9 +538,9 @@ class TransactionDedupTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
             account_id='90000001',
-            name='TAXABLE_TOM_SUSAN',
+            name='ACCOUNT_A',
             broker='RBC',
-            owner='TOM',
+            owner='ACCOUNT_A',
             currency='CAD',
         )
 
@@ -679,9 +679,9 @@ class TransactionSettlementDateTests(TestCase):
         )
         self.account = Account.objects.create(
             account_id='90000001',
-            name='TAXABLE_TOM_SUSAN',
+            name='ACCOUNT_A',
             broker='RBC',
-            owner='TOM',
+            owner='ACCOUNT_A',
             currency='CAD',
         )
 

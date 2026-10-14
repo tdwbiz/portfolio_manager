@@ -25,14 +25,14 @@ ORDER  BY id;
 
 | id | account_id | name            | currency |
 |----|------------|-----------------|----------|
-| 60 | 90000002   | TOM_LIF         | CAD      |
-| 61 | 90000001   | TS_HUISGELD     | CAD      |
-| 62 | 90000008   | SUSAN_LIF       | CAD      |
-| 63 | 90000003   | TOM_RRSP        | CAD      |
-| 64 | 90000005   | SUSAN_RRIF      | CAD      |
-| 65 | 90000006   | TOM_TFSA        | CAD      |
-| 66 | 90000007   | TS_CAR_LIVING   | CAD      |
-| 67 | 90000004   | SUSAN_TFSA      | CAD      |
+| 60 | 90000002   | ACCOUNT_B         | CAD      |
+| 61 | 90000001   | ACCOUNT_A     | CAD      |
+| 62 | 90000008   | ACCOUNT_H       | CAD      |
+| 63 | 90000003   | ACCOUNT_C        | CAD      |
+| 64 | 90000005   | ACCOUNT_E      | CAD      |
+| 65 | 90000006   | ACCOUNT_F        | CAD      |
+| 66 | 90000007   | ACCOUNT_G   | CAD      |
+| 67 | 90000004   | ACCOUNT_D      | CAD      |
 
 ---
 
@@ -40,7 +40,7 @@ ORDER  BY id;
 
 **Issue:** 46 rows where the same (account, statement_date, currency) was imported twice under different filenames. These are the same physical PDFs imported in two separate batches (May 31 original-named files + June 1 retry with Statement-XXXX naming). All values are identical except for `id` and `file_name`.
 
-**Exception:** TOM_TFSA 2017-12-29 CAD/USD has slightly different `total_market_value` between the two files — the older file should be kept.
+**Exception:** ACCOUNT_F 2017-12-29 CAD/USD has slightly different `total_market_value` between the two files — the older file should be kept.
 
 ### Identify all duplicates
 
@@ -89,18 +89,18 @@ ORDER BY a.name, m.statement_date, m.currency, m.id;
 
 | Account        | Dates with duplicates                                                             | Currencies  |
 |----------------|-----------------------------------------------------------------------------------|-------------|
-| TOM_LIF        | 2019-12-31, 2020-12-31, 2022-11-30                                                | CAD + USD   |
-| TS_HUISGELD    | 2017-12-29, 2019-12-31, 2020-12-31, 2022-11-30                                    | CAD only    |
-| SUSAN_LIF      | 2019-12-31, 2020-12-31, 2022-11-30                                                | CAD only    |
-| TOM_RRSP       | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                       | CAD + USD   |
-| SUSAN_RRIF     | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                       | CAD + USD   |
-| TOM_TFSA       | 2017-12-29†, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                      | CAD + USD   |
-| TS_CAR_LIVING  | 2022-11-30                                                                        | CAD only    |
-| SUSAN_TFSA     | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-10-31                       | CAD + USD   |
+| ACCOUNT_B        | 2019-12-31, 2020-12-31, 2022-11-30                                                | CAD + USD   |
+| ACCOUNT_A    | 2017-12-29, 2019-12-31, 2020-12-31, 2022-11-30                                    | CAD only    |
+| ACCOUNT_H      | 2019-12-31, 2020-12-31, 2022-11-30                                                | CAD only    |
+| ACCOUNT_C       | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                       | CAD + USD   |
+| ACCOUNT_E     | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                       | CAD + USD   |
+| ACCOUNT_F       | 2017-12-29†, 2018-12-31, 2019-12-31, 2020-12-31, 2022-11-30                      | CAD + USD   |
+| ACCOUNT_G  | 2022-11-30                                                                        | CAD only    |
+| ACCOUNT_D     | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-10-31                       | CAD + USD   |
 
-> †TOM_TFSA 2017-12-29: The two imports have **different** `total_market_value` (CAD: 30,246.76 vs 30,300.06; USD: 57,010.00 vs 57,248.89). Keep the newer Statement-5044 file (higher IDs 15290/15291) which has the higher values. This is the **only** case where values differ.
+> †ACCOUNT_F 2017-12-29: The two imports have **different** `total_market_value` (CAD: 30,246.76 vs 30,300.06; USD: 57,010.00 vs 57,248.89). Keep the newer Statement-5044 file (higher IDs 15290/15291) which has the higher values. This is the **only** case where values differ.
 
-### Delete the older duplicates (keep lower ID except TOM_TFSA 2017-12-29)
+### Delete the older duplicates (keep lower ID except ACCOUNT_F 2017-12-29)
 
 ```sql
 -- Step 1: Delete child rows (transactions) for duplicate monthly statements
@@ -116,7 +116,7 @@ WHERE  rbc_monthly_id IN (
                  AND  m_new.currency        = m_old.currency
                  AND  m_new.id             > m_old.id   -- keep the higher ID (newer)
            )
-      -- Exception: TOM_TFSA 2017-12-29 — keep the NEWER file (higher ID)
+      -- Exception: ACCOUNT_F 2017-12-29 — keep the NEWER file (higher ID)
       AND  m_old.id NOT IN (14659, 14660)  -- IDs to explicitly protect listed below
 );
 
@@ -153,10 +153,10 @@ WHERE  id IN (
 );
 ```
 
-> **Note on TOM_TFSA 2017-12-29 (ids 14659 CAD / 14660 USD):** These are the older-but-**wrong** files (`90000006-2017Dec29...`). The newer `Statement-5044 2017-12-29` (ids 15290 CAD / 15291 USD) has the higher market values. The DELETE above already excludes 14659/14660 from deletion, meaning they are **kept** — but they have the wrong/lower values. To resolve: run the DELETE above without the exception clause, or swap manually:
+> **Note on ACCOUNT_F 2017-12-29 (ids 14659 CAD / 14660 USD):** These are the older-but-**wrong** files (`90000006-2017Dec29...`). The newer `Statement-5044 2017-12-29` (ids 15290 CAD / 15291 USD) has the higher market values. The DELETE above already excludes 14659/14660 from deletion, meaning they are **kept** — but they have the wrong/lower values. To resolve: run the DELETE above without the exception clause, or swap manually:
 
 ```sql
--- Alternative: explicitly delete just the wrong TOM_TFSA 2017-12-29 entries
+-- Alternative: explicitly delete just the wrong ACCOUNT_F 2017-12-29 entries
 DELETE FROM dbo.core_rbcmonthlytransaction WHERE rbc_monthly_id IN (14659, 14660);
 DELETE FROM dbo.core_rbcmonthlybalance     WHERE rbc_monthly_id IN (14659, 14660);
 DELETE FROM dbo.core_rbcmonthly            WHERE id              IN (14659, 14660);
@@ -205,9 +205,9 @@ ORDER BY ann.report_year DESC, a.name, ann.currency;
 
 ---
 
-## 4. ACCOUNT: TOM_LIF (90000002) — id=60
+## 4. ACCOUNT: ACCOUNT_B (90000002) — id=60
 
-**Annual years:** 2018–2025 (CAD only; TOM_LIF does not have a USD annual section)  
+**Annual years:** 2018–2025 (CAD only; ACCOUNT_B does not have a USD annual section)  
 **Monthly range:** 2018-11-30 → 2026-04-30 (152 CAD + 75 USD statements)
 
 ### Annual vs December Monthly
@@ -226,12 +226,12 @@ ORDER BY ann.report_year DESC, a.name, ann.currency;
 | 2018 | CAD |   173,714.13  |    173,714.13  |      0.00  | ✅ MATCH |
 
 **No missing December months. No anomalies.**  
-USD holdings appear in monthly statements but TOM_LIF annual only covers CAD — USD holdings are under the CAD annual section (LIF accounts hold both, reported as one section).
+USD holdings appear in monthly statements but ACCOUNT_B annual only covers CAD — USD holdings are under the CAD annual section (LIF accounts hold both, reported as one section).
 
 ### Missing monthly months
 
 ```sql
--- Expected 12 months per year; find gaps for TOM_LIF
+-- Expected 12 months per year; find gaps for ACCOUNT_B
 WITH months AS (
     SELECT DISTINCT YEAR(statement_date) AS yr, MONTH(statement_date) AS mo
     FROM   dbo.core_rbcmonthly
@@ -256,7 +256,7 @@ ORDER BY c.yr, c.mo;
 
 ---
 
-## 5. ACCOUNT: TS_HUISGELD (90000001) — id=61
+## 5. ACCOUNT: ACCOUNT_A (90000001) — id=61
 
 **Annual years:** 2017–2025 (CAD only)  
 **Monthly range:** 2017-11-30 → 2026-04-30 (95 CAD statements)
@@ -275,9 +275,9 @@ ORDER BY c.yr, c.mo;
 | 2018 | CAD |   393,437.82  |    392,318.80  | -1,119.02  | 🔴 LARGE |
 | 2017 | CAD |   386,231.44  |    386,231.44  |      0.00  | ✅ MATCH |
 
-> **Systematic negative delta on TS_HUISGELD:** Every year 2018–2025 (except 2017 and 2019) shows the annual ending value **higher** than December monthly market value by ~$1,100–$2,800. This is consistent and likely explained by **accrued dividends or distributions** that are recorded in the annual report as of Dec 31 but not yet settled/reflected in the last December statement (which uses the last business day, not Dec 31). Alternatively, the VL annual parser may be capturing a slightly different "total" field. This is **not a data error** but a systematic timing difference inherent to RBC reporting.
+> **Systematic negative delta on ACCOUNT_A:** Every year 2018–2025 (except 2017 and 2019) shows the annual ending value **higher** than December monthly market value by ~$1,100–$2,800. This is consistent and likely explained by **accrued dividends or distributions** that are recorded in the annual report as of Dec 31 but not yet settled/reflected in the last December statement (which uses the last business day, not Dec 31). Alternatively, the VL annual parser may be capturing a slightly different "total" field. This is **not a data error** but a systematic timing difference inherent to RBC reporting.
 
-### Missing monthly months for TS_HUISGELD (CAD)
+### Missing monthly months for ACCOUNT_A (CAD)
 
 ```sql
 WITH months AS (
@@ -303,7 +303,7 @@ ORDER BY c.yr, c.mo;
 
 ---
 
-## 6. ACCOUNT: SUSAN_LIF (90000008) — id=62
+## 6. ACCOUNT: ACCOUNT_H (90000008) — id=62
 
 **Annual years:** 2019–2025 (CAD only; LIF started 2019)  
 **Monthly range:** 2019-05-31 → 2026-04-30 (87 CAD statements)
@@ -320,13 +320,13 @@ ORDER BY c.yr, c.mo;
 | 2020 | CAD |   121,226.48  |    120,849.51  |  -376.97 | ⚠️ DIFF |
 | 2019 | CAD |   117,632.44  |    117,632.44  |     0.00 | ✅ MATCH |
 
-> **Consistent small negative delta:** ~$377–$541 annually. Same timing/accrual pattern as TS_HUISGELD but smaller in proportion. Not a data error.
+> **Consistent small negative delta:** ~$377–$541 annually. Same timing/accrual pattern as ACCOUNT_A but smaller in proportion. Not a data error.
 
 **Missing months (CAD):** 2019-Jan→Apr (account opened May 2019 — correct)
 
 ---
 
-## 7. ACCOUNT: TOM_RRSP (90000003) — id=63
+## 7. ACCOUNT: ACCOUNT_C (90000003) — id=63
 
 **Annual years:** 2017–2025 (CAD + USD)  
 **Monthly range:** 2014-01-31 → 2026-04-30 (106 CAD + 106 USD statements)  
@@ -355,7 +355,7 @@ ORDER BY c.yr, c.mo;
 
 > **2023 USD $1,148 diff:** Larger than usual but consistent with the USD holding being larger (USD portfolio ~$295K). Likely accruals. Not flagged as anomaly.
 
-> ✅ **RESOLVED (2026-06-01):** TOM_RRSP 2022–2024 CAD/USD chain breaks fixed:
+> ✅ **RESOLVED (2026-06-01):** ACCOUNT_C 2022–2024 CAD/USD chain breaks fixed:
 > - 2022 USD: record was missing (VL parse miss) — created manually with beg=341,500.77, end=234,191.13
 > - 2024 CAD: `bal_beginning_value` corrected to 88.30 (was 61,322.23 — wrong column)
 > - 2024 USD: `bal_beginning_value` corrected to 296,174.25 (was 129,492.87 — wrong column)
@@ -381,7 +381,7 @@ ORDER BY yr, currency;
 
 ---
 
-## 8. ACCOUNT: SUSAN_RRIF (90000005) — id=64
+## 8. ACCOUNT: ACCOUNT_E (90000005) — id=64
 
 **Annual years:** 2017–2025 (CAD + USD)  
 **Monthly range:** 2015-12-31 → 2026-04-30 (108 CAD + 108 USD statements)
@@ -405,8 +405,8 @@ ORDER BY yr, currency;
 | 2018 | USD |    87,018.60  | *(see note)*   |    —        |         |
 | 2017 | CAD |    47,822.72  |     47,822.72  |       0.00  | ✅ MATCH |
 
-> ✅ **RESOLVED (2026-06-01):** SUSAN_RRIF 2019 & 2020 CAD anomaly fixed by re-parsing from correct PDFs.
-> - Root cause: the original import had processed `90000008-2019Dec31...pdf` (SUSAN_LIF) and `90000007-2020Dec31...pdf` (TS_CAR_LIVING) and incorrectly assigned those records to SUSAN_RRIF.
+> ✅ **RESOLVED (2026-06-01):** ACCOUNT_E 2019 & 2020 CAD anomaly fixed by re-parsing from correct PDFs.
+> - Root cause: the original import had processed `90000008-2019Dec31...pdf` (ACCOUNT_H) and `90000007-2020Dec31...pdf` (ACCOUNT_G) and incorrectly assigned those records to ACCOUNT_E.
 > - Fixed: bad records deleted, correct PDFs (`90000005-2019Dec31...pdf`, `90000005-2020Dec31...pdf`) re-parsed and imported.
 > - 2019 ending = 55,963.42 (now matches Dec monthly ✅); 2020 ending = 69,231.23 (delta −389 vs Dec monthly ⚠️ normal accruals).
 > - Full year-over-year chain 2017→2025 is intact (each year beginning = prior year ending).
@@ -489,7 +489,7 @@ ORDER BY c.yr, c.mo;
 
 ---
 
-## 9. ACCOUNT: TOM_TFSA (90000006) — id=65
+## 9. ACCOUNT: ACCOUNT_F (90000006) — id=65
 
 **Annual years:** 2017–2025 (CAD + USD)  
 **Monthly range:** 2014-01-31 → 2026-04-30 (93 CAD + 93 USD statements)
@@ -510,12 +510,12 @@ ORDER BY c.yr, c.mo;
 | 2018 | CAD |       19.47   |         19.47  |   0.00  | ✅ MATCH |
 | 2017 | CAD |    30,300.06  |     30,300.06  |   0.00  | ✅ MATCH |
 
-> ✅ **RESOLVED (2026-06-01):** TOM_TFSA 2018–2021 CAD chain breaks fixed:
+> ✅ **RESOLVED (2026-06-01):** ACCOUNT_F 2018–2021 CAD chain breaks fixed:
 > - 2019 `bal_beginning_value` corrected to 19.47 (was 42.31 — VL wrote ending into beginning)
 > - 2021 `bal_beginning_value` corrected to 23.24 (was 32.00 — same parser bug)
 > - Full CAD chain 2017→2025 intact.
 
-> **TOM_TFSA 2024 USD:** Annual exists in DB (from 2024 annual report) but 2024 USD `ann_ending` = 280,674.53 (beginning of 2025). The 2024 annual report for USD shows this as beginning of 2025 period. Check December 2024 USD monthly for market value:
+> **ACCOUNT_F 2024 USD:** Annual exists in DB (from 2024 annual report) but 2024 USD `ann_ending` = 280,674.53 (beginning of 2025). The 2024 annual report for USD shows this as beginning of 2025 period. Check December 2024 USD monthly for market value:
 
 ```sql
 SELECT id, statement_date, currency, total_market_value
@@ -530,7 +530,7 @@ WHERE  account_id = 65
 
 ---
 
-## 10. ACCOUNT: TS_CAR_LIVING (90000007) — id=66
+## 10. ACCOUNT: ACCOUNT_G (90000007) — id=66
 
 **Annual years:** 2021–2024 (CAD + partial USD from 2024)  
 **Monthly range:** 2020-08-31 → 2026-04-30 (65 CAD + 20 USD statements)  
@@ -562,7 +562,7 @@ ORDER BY statement_date, currency;
 
 ---
 
-## 11. ACCOUNT: SUSAN_TFSA (90000004) — id=67
+## 11. ACCOUNT: ACCOUNT_D (90000004) — id=67
 
 **Annual years:** 2017–2025 (CAD + USD)  
 **Monthly range:** 2014-02-28 → 2026-04-30 (80 CAD + 80 USD statements)
@@ -582,12 +582,12 @@ ORDER BY statement_date, currency;
 | 2018 | CAD |       23.45   |         23.45  |   0.00  | ✅ MATCH |
 | 2017 | CAD |        7.54   |          7.54  |   0.00  | ✅ MATCH |
 
-> ✅ **RESOLVED (2026-06-01):** SUSAN_TFSA 2017–2019 CAD chain breaks fixed:
+> ✅ **RESOLVED (2026-06-01):** ACCOUNT_D 2017–2019 CAD chain breaks fixed:
 > - 2018 `bal_beginning_value` corrected to 7.54 (was 23.45 — VL wrote ending into beginning)
 > - 2019 `bal_beginning_value` corrected to 23.45 (was 48.14 — same parser bug)
 > - Full CAD chain 2017→2025 intact.
 
-> **SUSAN_TFSA is the cleanest account** — perfect match on all years.
+> **ACCOUNT_D is the cleanest account** — perfect match on all years.
 
 **Missing months (CAD):** 2025-Feb + Aug, 2024-Feb + May + Aug + Nov, 2023-Jan + Feb + Nov (sparse — TFSA had low activity, statements may simply not have been issued)
 
@@ -629,8 +629,8 @@ ORDER BY ann.report_year DESC, a.name, ann.currency;
 |-----------|-------|-------|
 | ✅ MATCH  | ~52   | |delta| < $100 |
 | ⚠️ DIFF   | ~20   | $100–$1,000 — accruals/timing |
-| 🔴 LARGE  | ~10   | $1,000–$10,000 — TS_HUISGELD systematic pattern |
-| ✅ FIXED   | 2    | SUSAN_RRIF 2019 & 2020 CAD — re-parsed 2026-06-01 |
+| 🔴 LARGE  | ~10   | $1,000–$10,000 — ACCOUNT_A systematic pattern |
+| ✅ FIXED   | 2    | ACCOUNT_E 2019 & 2020 CAD — re-parsed 2026-06-01 |
 | NO DEC    | 0    | All years have a December monthly |
 
 ---
@@ -700,7 +700,7 @@ WHERE  y1.account_id BETWEEN 60 AND 67
 ORDER BY a.name, curr.currency, y1.report_year;
 ```
 
-> Any row returned here indicates a break in the year-over-year chain — the 2021 SUSAN_RRIF beginning (69,231) not matching 2020 ending (6,908) will show here, confirming the parse error.
+> Any row returned here indicates a break in the year-over-year chain — the 2021 ACCOUNT_E beginning (69,231) not matching 2020 ending (6,908) will show here, confirming the parse error.
 
 ---
 
@@ -709,14 +709,14 @@ ORDER BY a.name, curr.currency, y1.report_year;
 | Priority | Account       | Issue                                              | Action |
 |----------|---------------|----------------------------------------------------|--------|
 | ~~HIGH~~ | ALL           | ~~46 duplicate monthly statements~~                | ✅ Done 2026-06-01 — DELETE SQL executed |
-| ~~HIGH~~ | SUSAN_RRIF    | ~~2019 & 2020 CAD annual parse errors~~ | ✅ Fixed 2026-06-01 — re-parsed correct PDFs |
-| ~~HIGH~~ | SUSAN_TFSA    | ~~2018 & 2019 CAD chain breaks (VL beg=end bug)~~ | ✅ Fixed 2026-06-01 — `bal_beginning_value` corrected directly |
-| ~~HIGH~~ | TOM_TFSA      | ~~2019 & 2021 CAD chain breaks (VL beg=end bug)~~ | ✅ Fixed 2026-06-01 — `bal_beginning_value` corrected directly |
-| ~~HIGH~~ | TOM_RRSP      | ~~2022 USD missing + 2024 CAD/USD wrong beg~~     | ✅ Fixed 2026-06-01 — 2022 USD created manually; 2024 beg values corrected |
-| MEDIUM   | TS_HUISGELD   | Consistent annual>monthly delta $1,100–$2,800/yr   | Investigate — likely accrued income timing |
-| MEDIUM   | TS_CAR_LIVING | 2025 annual report missing                         | Locate and import PDF |
+| ~~HIGH~~ | ACCOUNT_E    | ~~2019 & 2020 CAD annual parse errors~~ | ✅ Fixed 2026-06-01 — re-parsed correct PDFs |
+| ~~HIGH~~ | ACCOUNT_D    | ~~2018 & 2019 CAD chain breaks (VL beg=end bug)~~ | ✅ Fixed 2026-06-01 — `bal_beginning_value` corrected directly |
+| ~~HIGH~~ | ACCOUNT_F      | ~~2019 & 2021 CAD chain breaks (VL beg=end bug)~~ | ✅ Fixed 2026-06-01 — `bal_beginning_value` corrected directly |
+| ~~HIGH~~ | ACCOUNT_C      | ~~2022 USD missing + 2024 CAD/USD wrong beg~~     | ✅ Fixed 2026-06-01 — 2022 USD created manually; 2024 beg values corrected |
+| MEDIUM   | ACCOUNT_A   | Consistent annual>monthly delta $1,100–$2,800/yr   | Investigate — likely accrued income timing |
+| MEDIUM   | ACCOUNT_G | 2025 annual report missing                         | Locate and import PDF |
 | LOW      | Multiple      | Scattered missing monthly months                   | Locate PDFs if available; otherwise document as unavailable |
-| INFO     | TOM_RRSP / SUSAN_TFSA / TOM_TFSA | Monthlies pre-date earliest annual (2014–2016) | No annual PDFs exist for those years — expected |
+| INFO     | ACCOUNT_C / ACCOUNT_D / ACCOUNT_F | Monthlies pre-date earliest annual (2014–2016) | No annual PDFs exist for those years — expected |
 
 ---
 

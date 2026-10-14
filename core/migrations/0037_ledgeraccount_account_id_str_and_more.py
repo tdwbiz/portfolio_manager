@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
             name="account_name",
             field=models.CharField(
                 default="",
-                help_text="Denormalized account name (e.g., TS_HUISGELD)",
+                help_text="Denormalized account name (e.g., ACCOUNT_A)",
                 max_length=100,
             ),
             preserve_default=False,

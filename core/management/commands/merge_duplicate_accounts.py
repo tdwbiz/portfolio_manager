@@ -1,5 +1,6 @@
 """One-time management command to merge auto-created duplicate RBC accounts
-into the 8 canonical accounts (IDs 60-67).
+into the canonical accounts listed in settings.RBC_ACCOUNTS (env var
+RBC_ACCOUNTS in .env).
 
 Safe to run multiple times — skips accounts that are already canonical or
 have no linked data.
@@ -7,6 +8,7 @@ have no linked data.
 import re
 import logging
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -14,17 +16,8 @@ from core.models import Account, RbcMonthly, RbcAnnual
 
 logger = logging.getLogger(__name__)
 
-# The 8 canonical account_ids — digits only, no dashes.
-CANONICAL_IDS = {
-    '90000002',  # TOM_LIF
-    '90000001',  # TS_HUISGELD
-    '90000008',  # SUSAN_LIF
-    '90000003',  # TOM_RRSP
-    '90000005',  # SUSAN_RRIF
-    '90000006',  # TOM_TFSA
-    '90000007',  # TS_CAR_LIVING
-    '90000004',  # SUSAN_TFSA
-}
+# The canonical account_ids (digits only, no dashes) — from settings.
+CANONICAL_IDS = set(settings.RBC_ACCOUNTS)
 
 
 def _normalize(raw: str) -> str:
@@ -61,7 +54,7 @@ def _find_target(dupe: Account, canonical_map: dict) -> Account | None:
 
 
 class Command(BaseCommand):
-    help = 'Merge auto-created duplicate RBC accounts into the 8 canonical accounts.'
+    help = 'Merge auto-created duplicate RBC accounts into the canonical accounts (settings.RBC_ACCOUNTS).'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -79,11 +72,11 @@ class Command(BaseCommand):
             a.account_id: a
             for a in Account.objects.filter(account_id__in=CANONICAL_IDS)
         }
-        if len(canonical_map) != 8:
+        if len(canonical_map) != len(CANONICAL_IDS):
             found = set(canonical_map.keys())
             missing = CANONICAL_IDS - found
             self.stderr.write(self.style.ERROR(
-                f'Only found {len(canonical_map)}/8 canonical accounts. Missing: {missing}'
+                f'Only found {len(canonical_map)}/{len(CANONICAL_IDS)} canonical accounts. Missing: {missing}'
             ))
             return
 

@@ -18,10 +18,10 @@ Specs 01–21 are complete. The application already supports:
 RBC also provides **Annual Reports** — separate PDF documents delivered alongside monthly statements. These are distinct from statement PDFs and contain different data:
 
 **Annual Report structure** (based on 4 sample files in the specs folder):
-- `Annual Report-2259 2025-12-31.pdf` — 6 pages, RIF account 900-00005
-- `Annual Report-4033 2025-12-31.pdf` — 4 pages, LIF account 900-00008
-- `Annual Report-5362 2025-12-31.pdf` — 6 pages, RRSP account 900-00003
-- `Annual Report-7620 2025-12-31.pdf` — 6 pages, IF account 690-7762
+- `Annual Report-0005 2025-12-31.pdf` — 6 pages, RIF account 900-00005
+- `Annual Report-0008 2025-12-31.pdf` — 4 pages, LIF account 900-00008
+- `Annual Report-0003 2025-12-31.pdf` — 6 pages, RRSP account 900-00003
+- `Annual Report-0002 2025-12-31.pdf` — 6 pages, IF account 690-7762
 
 Each annual report PDF contains **six data sections** organized by report type and currency:
 
@@ -531,7 +531,7 @@ Add an "Annual Reports" nav link in `core/templates/core/base.html` alongside ex
 
 Add the following test methods:
 
-- `test_parse_annual_report_2259`: Parse `Annual Report-2259 2025-12-31.pdf`; assert:
+- `test_parse_annual_report_0005`: Parse `Annual Report-0005 2025-12-31.pdf`; assert:
   - `report_year == 2025`
   - `account_number == '900-00005'`
   - `account_type_code == 'RIF'`
@@ -541,7 +541,7 @@ Add the following test methods:
   - `charges` includes `{'category': 'Total transaction charges', 'amount': Decimal('49.75'), 'currency': 'CAD'}`
   - `compensation` includes `{'type': 'Trailing commission', 'amount': Decimal('6.42'), 'currency': 'CAD'}`
 
-- `test_parse_annual_report_4033`: Parse `Annual Report-4033 2025-12-31.pdf`; assert:
+- `test_parse_annual_report_0008`: Parse `Annual Report-0008 2025-12-31.pdf`; assert:
   - `account_type_code == 'LIF'`
   - `balances` has 1 entry (CAD only — no USD section)
   - CAD `ending_market_value == Decimal('205722.34')`
@@ -598,10 +598,10 @@ Human approval required before any git push or DB migration.
 
 | File | Pages | Account Type | Account Number |
 |------|-------|-------------|----------------|
-| `Annual Report-2259 2025-12-31.pdf` | 6 | RIF | 900-00005 |
-| `Annual Report-4033 2025-12-31.pdf` | 4 | LIF | 900-00008 |
-| `Annual Report-5362 2025-12-31.pdf` | 6 | RRSP | 900-00003 |
-| `Annual Report-7620 2025-12-31.pdf` | 6 | IF | 690-7762 |
+| `Annual Report-0005 2025-12-31.pdf` | 6 | RIF | 900-00005 |
+| `Annual Report-0008 2025-12-31.pdf` | 4 | LIF | 900-00008 |
+| `Annual Report-0003 2025-12-31.pdf` | 6 | RRSP | 900-00003 |
+| `Annual Report-0002 2025-12-31.pdf` | 6 | IF | 690-7762 |
 
 ### Page layout (6-page example)
 
@@ -615,7 +615,7 @@ Human approval required before any git push or DB migration.
 - Page 5: USD charges, USD third-party compensation, additional notes
 - Page 6: Additional notes continued, legal disclaimers, trademarks
 
-### 4-page example (e.g., account 4033)
+### 4-page example (e.g., account 0008)
 
 **Pages 1–2: Annual Investment Performance Report**
 - Page 1: Account info, CAD account change in value

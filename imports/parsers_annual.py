@@ -514,7 +514,7 @@ def parse_rbc_annual_report(file_path: str) -> dict[str, Any]:
                 account_number = f"{prefix}-{suffix}"
                 break
     # Fallback: if no account found via "Account" pattern, try filename-based extraction.
-    # Filenames look like "Annual Report-2259 2022-12-31.pdf" where 2259 is the last 4 digits.
+    # Filenames look like "Annual Report-0005 2022-12-31.pdf" where 2259 is the last 4 digits.
     if not account_number:
         basename = os.path.basename(file_path)
         fname_match = re.search(r'Annual\s*Report[-\s]*(\d{4})', basename, re.IGNORECASE)

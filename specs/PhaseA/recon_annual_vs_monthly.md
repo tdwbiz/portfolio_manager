@@ -98,7 +98,7 @@ ORDER BY a.name, m.statement_date, m.currency, m.id;
 | ACCOUNT_G  | 2022-11-30                                                                        | CAD only    |
 | ACCOUNT_D     | 2017-12-29, 2018-12-31, 2019-12-31, 2020-12-31, 2022-10-31                       | CAD + USD   |
 
-> †ACCOUNT_F 2017-12-29: The two imports have **different** `total_market_value` (CAD: 30,246.76 vs 30,300.06; USD: 57,010.00 vs 57,248.89). Keep the newer Statement-5044 file (higher IDs 15290/15291) which has the higher values. This is the **only** case where values differ.
+> †ACCOUNT_F 2017-12-29: The two imports have **different** `total_market_value` (CAD: 30,246.76 vs 30,300.06; USD: 57,010.00 vs 57,248.89). Keep the newer Statement-0006 file (higher IDs 15290/15291) which has the higher values. This is the **only** case where values differ.
 
 ### Delete the older duplicates (keep lower ID except ACCOUNT_F 2017-12-29)
 
@@ -153,7 +153,7 @@ WHERE  id IN (
 );
 ```
 
-> **Note on ACCOUNT_F 2017-12-29 (ids 14659 CAD / 14660 USD):** These are the older-but-**wrong** files (`90000006-2017Dec29...`). The newer `Statement-5044 2017-12-29` (ids 15290 CAD / 15291 USD) has the higher market values. The DELETE above already excludes 14659/14660 from deletion, meaning they are **kept** — but they have the wrong/lower values. To resolve: run the DELETE above without the exception clause, or swap manually:
+> **Note on ACCOUNT_F 2017-12-29 (ids 14659 CAD / 14660 USD):** These are the older-but-**wrong** files (`90000006-2017Dec29...`). The newer `Statement-0006 2017-12-29` (ids 15290 CAD / 15291 USD) has the higher market values. The DELETE above already excludes 14659/14660 from deletion, meaning they are **kept** — but they have the wrong/lower values. To resolve: run the DELETE above without the exception clause, or swap manually:
 
 ```sql
 -- Alternative: explicitly delete just the wrong ACCOUNT_F 2017-12-29 entries

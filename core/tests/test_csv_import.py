@@ -750,19 +750,20 @@ class AutoImportTests(TestCase):
         self.statement.delete()
 
     def test_returns_count_zero_for_empty_file(self):
-        """auto_import should return (0, 0) for files with no trades."""
+        """auto_import should return (0, 0, 0) for files with no trades."""
         path = self._write_csv([
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
         ])
 
-        imported, parsed = auto_import(path, 'RBC')
+        imported, skipped, parsed = auto_import(path, 'RBC')
         self.assertEqual(imported, 0)
+        self.assertEqual(skipped, 0)
         self.assertEqual(parsed, 0)
 
     def test_returns_count_of_imported_trades(self):
-        """auto_import should return (imported, parsed) counts."""
+        """auto_import should return (imported, skipped, parsed) counts."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -773,19 +774,21 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        imported, parsed = auto_import(path, 'RBC')
+        imported, skipped, parsed = auto_import(path, 'RBC')
         self.assertEqual(imported, 1)
+        self.assertEqual(skipped, 0)
         self.assertEqual(parsed, 1)
 
     def test_returns_zero_on_exception(self):
-        """auto_import should return (0, 0) on exception."""
+        """auto_import should return (0, 0, 0) on exception."""
         path = '/nonexistent/path/file.csv'
-        imported, parsed = auto_import(path, 'RBC')
+        imported, skipped, parsed = auto_import(path, 'RBC')
         self.assertEqual(imported, 0)
+        self.assertEqual(skipped, 0)
         self.assertEqual(parsed, 0)
 
     def test_dry_run_returns_count(self):
-        """auto_import with dry_run should return (0, parsed_count)."""
+        """auto_import with dry_run should return (0, 0, parsed_count)."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -796,8 +799,9 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        imported, parsed = auto_import(path, 'RBC', dry_run=True)
+        imported, skipped, parsed = auto_import(path, 'RBC', dry_run=True)
         self.assertEqual(imported, 0)
+        self.assertEqual(skipped, 0)
         self.assertEqual(parsed, 1)
 
     def _write_csv(self, rows: list[list[str]]) -> str:

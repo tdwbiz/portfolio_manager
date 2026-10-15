@@ -57,14 +57,13 @@ class PerformanceChartTests(TestCase):
 
     @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_empty(self, mock_compute):
+        """Empty market value series returns no labels and no datasets."""
         mock_compute.return_value = []
         response = self.client.get(reverse('portfolio_chart_data'))
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data['labels'], [])
-        self.assertEqual(len(data['datasets']), 1)
-        self.assertEqual(data['datasets'][0]['id'], 'market_value')
-        self.assertEqual(data['datasets'][0]['data'], [])
+        self.assertEqual(data['datasets'], [])
 
     @patch('core.views_portfolio.compute_portfolio_value_series')
     def test_chart_data_with_date_range(self, mock_compute):

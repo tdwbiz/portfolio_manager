@@ -224,7 +224,7 @@ class WatcherClassificationTest(TestCase):
         finally:
             os.unlink(path)
 
-def test_classify_monthly_statement(self):
+    def test_classify_monthly_statement(self):
         """PDF with 'monthly statement' text is classified as statement."""
         text = "RBC Monthly Statement\nAs of Date: 05/31/2024"
         path = self._create_test_pdf(text)

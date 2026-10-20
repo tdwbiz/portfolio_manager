@@ -375,9 +375,9 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     """
     base_url = settings.VL_MODEL_BASE_URL
     model = settings.VL_MODEL_NAME
-    dpi = getattr(settings, 'VL_PAGE_DPI', 150)
-    max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
-    timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
+    dpi = settings.VL_PAGE_DPI
+    max_retries = settings.VL_MAX_RETRIES
+    timeout = settings.VL_TIMEOUT_SECONDS
 
     logger.info(
         "parse_rbc_monthly_vl: rendering %s at %d DPI (all pages)",
@@ -421,7 +421,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
     """
     doc = fitz.open(file_path)
     total = len(doc)
-    max_pages = getattr(settings, 'VL_MONTHLY_MAX_PAGES', 0)
+    max_pages = settings.VL_MONTHLY_MAX_PAGES
     
     # 0 means unlimited - render all pages
     if max_pages <= 0:

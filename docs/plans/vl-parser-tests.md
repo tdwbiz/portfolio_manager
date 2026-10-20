@@ -110,14 +110,8 @@ No migrations. No model/view/template changes.
 
 ## Open questions
 
-1. **Which resolution for `ExtractStatementDateTest`?** Recommended: delete the
-   class (option 1). Option 2 (restore `extract_statement_date` from commit
-   `4f8991e`) only makes sense if tdw wants CSV-header statement dates again —
-   nothing currently consumes them. Option 3 (repoint at an existing function)
-   is not possible; no equivalent exists.
-2. **Include `VL_MONTHLY_MAX_PAGES`** (`parsers_monthly_vl.py` L424) in the
-   getattr cleanup? It is the same dead-fallback pattern and settings always
-   defines it, but it was not in the original list.
-3. `getattr` fallbacks for `IMPORT_INBOX_DIR`, `IMPORT_PROCESSED_DIR`, etc. in
-   watcher/management commands are the same pattern but out of scope here —
-   leave them (assumed yes)?
+**Resolved by tdw:**
+
+1. **Resolution for `ExtractStatementDateTest`: delete the class (option 1).**
+2. **Include `VL_MONTHLY_MAX_PAGES` in the getattr cleanup: yes.**
+3. **Leave the `IMPORT_*` getattr fallbacks alone: yes** (out of scope).

@@ -1,4 +1,5 @@
-"""PDF document-type classifier using Qwen2.5-VL.
+"""PDF document-type classifier using the configured OpenAI-compatible VL model
+(default: Halogen).
 
 Renders only the first page of a PDF and asks the VL model whether the
 document is an RBC Annual Investment Performance Report or an RBC monthly
@@ -121,7 +122,7 @@ def classify_pdf(file_path: str) -> str:
         return hint
 
     base_url = settings.VL_MODEL_BASE_URL
-    model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
+    model = settings.VL_MODEL_NAME
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
     timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
@@ -133,7 +134,15 @@ def classify_pdf(file_path: str) -> str:
         logger.error("classify_pdf: failed to render %s — %s", file_path, exc)
         return 'unknown'
 
-    client = VLClient(base_url=base_url, model=model, timeout=timeout, max_retries=max_retries)
+    client = VLClient(
+        base_url=base_url,
+        model=model,
+        api_key=settings.VL_MODEL_API_KEY,
+        timeout=timeout,
+        max_retries=max_retries,
+        max_tokens=settings.VL_MAX_TOKENS,
+        temperature=settings.VL_TEMPERATURE,
+    )
     try:
         raw = client.extract_json(pages_b64, CLASSIFY_PROMPT)
         doc_type = str(raw.get('doc_type', 'unknown')).lower().strip()

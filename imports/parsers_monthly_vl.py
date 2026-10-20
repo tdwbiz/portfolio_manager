@@ -1,7 +1,8 @@
 """Vision-language parser for RBC monthly brokerage account statements.
 
-Uses Qwen2.5-VL-7B on port 11440 to extract structured data from PDF pages
-rendered as PNG images.  Hard error on failure — no regex fallback.
+Uses the configured OpenAI-compatible vision model (settings.VL_MODEL_NAME,
+default: Halogen) to extract structured data from PDF pages rendered as PNG
+images.  Hard error on failure — no regex fallback.
 
 Returned value is a **list** of section dicts (one per currency found in the
 statement), matching the shape that manage_inbox_import / manage_pdf_import
@@ -350,7 +351,7 @@ Rules:
 # ---------------------------------------------------------------------------
 
 def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
-    """Parse an RBC monthly statement PDF using the Qwen2.5-VL vision model.
+    """Parse an RBC monthly statement PDF using the configured VL vision model.
 
     Falls back to a regex-based parser if the VL model fails after all retries.
 
@@ -373,7 +374,7 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
         If required fields (statement_date, account_number) are missing.
     """
     base_url = settings.VL_MODEL_BASE_URL
-    model = getattr(settings, 'VL_MODEL_NAME', 'gemma-gen')
+    model = settings.VL_MODEL_NAME
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
     timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
@@ -389,7 +390,15 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     )
 
     try:
-        client = VLClient(base_url=base_url, model=model, timeout=timeout, max_retries=max_retries)
+        client = VLClient(
+            base_url=base_url,
+            model=model,
+            api_key=settings.VL_MODEL_API_KEY,
+            timeout=timeout,
+            max_retries=max_retries,
+            max_tokens=settings.VL_MAX_TOKENS,
+            temperature=settings.VL_TEMPERATURE,
+        )
         raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
         return _coerce_response(raw, file_path)
     except (VLParseError, Exception) as exc:

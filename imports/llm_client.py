@@ -1,7 +1,8 @@
-"""Thin OpenAI-compatible client for the qwen2.5-vl vision-language model.
+"""Thin OpenAI-compatible client for a vision-language (VL) model.
 
 Sends one or more PDF pages (as base64 PNG images) and a structured prompt to
-the llama.cpp server (port 11440), then extracts the JSON response.
+any OpenAI-compatible vision endpoint (default: Halogen on port 11435), then
+extracts the JSON response.
 
 Hard error on failure — no fallback to regex.
 """
@@ -22,9 +23,11 @@ class VLParseError(Exception):
 
 
 class VLClient:
-    """Client for the qwen2.5-vl vision-language model on port 11440."""
+    """Client for an OpenAI-compatible vision-language model (default: Halogen)."""
 
-    def __init__(self, base_url: str, model: str, timeout: int = 120, max_retries: int = 2):
+    def __init__(self, base_url: str, model: str, api_key: str = 'not-used',
+                 timeout: int = 120, max_retries: int = 2,
+                 max_tokens: int = 8192, temperature: float = 0.1):
         # Disable OpenAI library's built-in retries — we handle retries ourselves with full logging
         self._httpx_client = httpx.Client(
             timeout=httpx.Timeout(timeout, connect=30),
@@ -32,7 +35,7 @@ class VLClient:
         )
         self._client = OpenAI(
             base_url=base_url,
-            api_key='not-used',
+            api_key=api_key,
             timeout=timeout,
             http_client=self._httpx_client,
             max_retries=0,  # We manage retries ourselves
@@ -41,9 +44,12 @@ class VLClient:
         self._max_retries = max_retries
         self._base_url = base_url
         self._timeout = timeout
+        self._max_tokens = max_tokens
+        self._temperature = temperature
         # Log connection info on init
-        logger.info("VLClient: connecting to %s model=%s timeout=%ds retries=%d",
-                     base_url, model, timeout, max_retries)
+        logger.info("VLClient: connecting to %s model=%s timeout=%ds retries=%d "
+                     "max_tokens=%d temperature=%s",
+                     base_url, model, timeout, max_retries, max_tokens, temperature)
         self._diag_connection(base_url)
 
     def extract_json(self, pages: list[str], prompt: str) -> dict:
@@ -91,12 +97,19 @@ class VLClient:
                 kwargs: dict[str, Any] = {
                     "model": self._model,
                     "messages": [{"role": "user", "content": content}],
-                    "temperature": 0.1,
-                    "max_tokens": 8192,
+                    "temperature": self._temperature,
+                    "max_tokens": self._max_tokens,
                 }
                 response = self._client.chat.completions.create(**kwargs)
                 elapsed = time.monotonic() - t0
-                text = response.choices[0].message.content or ''
+                choice = response.choices[0]
+                if choice.finish_reason == 'length':
+                    logger.warning(
+                        "VLClient: attempt %d response truncated (finish_reason='length') — "
+                        "output hit max_tokens=%d; consider raising VL_MAX_TOKENS",
+                        attempt, self._max_tokens,
+                    )
+                text = choice.message.content or ''
                 logger.info("VLClient: attempt %d got response in %.1fs, content=%d chars",
                             attempt, elapsed, len(text))
 
@@ -172,16 +185,33 @@ class VLClient:
 
     @staticmethod
     def _diag_connection(base_url: str):
-        """Quick connectivity diagnostic on init."""
+        """Quick connectivity diagnostic on init.
+
+        Tolerates both ``/models`` response shapes — llama.cpp
+        ``{"models": [{"name": ...}]}`` and OpenAI-compatible (Halogen)
+        ``{"data": [{"id": ...}]}`` — plus any unexpected body. This is a
+        log line only: it must never raise, so a failed or unparseable
+        connection test cannot prevent the client from being created.
+        """
         try:
             # Try to reach /v1/models endpoint
             with httpx.Client(timeout=5) as client:
                 resp = client.get(f"{base_url}/models")
+                body = resp.json()
+                model_ids: list[str] = []
+                if isinstance(body, dict):
+                    for m in body.get('models') or []:
+                        if isinstance(m, dict):
+                            model_ids.append(str(m.get('name') or m.get('id')))
+                    if not model_ids:
+                        for m in body.get('data') or []:
+                            if isinstance(m, dict):
+                                model_ids.append(str(m.get('id') or m.get('name')))
                 logger.info("VLClient: connection test OK — status=%d models=%s",
-                            resp.status_code,
-                            [m['name'] for m in resp.json().get('models', [])])
-        except Exception:
-            logger.exception("VLClient: connection test FAILED")
+                            resp.status_code, model_ids)
+        except Exception as exc:
+            logger.warning("VLClient: connection test FAILED (%s: %s)",
+                           type(exc).__name__, exc)
 
     @staticmethod
     def _extract_json_from_text(text: str) -> dict:

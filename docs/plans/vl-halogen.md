@@ -47,12 +47,12 @@ Found while reading the code:
    use a different sampling default. Keep the values but make them settings-
    driven (`VL_MAX_TOKENS`, `VL_TEMPERATURE`) so they can be tuned via `.env`
    without a code change.
-4. **`api_key='not-used'`**: llama.cpp ignored the key. If Halogen requires an
-   auth token, add `VL_MODEL_API_KEY` (default `'not-used'`). See open questions.
+4. **`api_key='not-used'`**: llama.cpp ignored the key. Live test confirms
+   Halogen needs no API key, so add `VL_MODEL_API_KEY` with default `'not-used'`
+   and it can stay unset in `.env`.
 5. **Image format**: base64 PNG data URLs with `"detail": "high"` — standard
-   OpenAI chat-completions vision format; Halogen is OpenAI-compatible so this
-   should work. `detail` is an OpenAI extension; harmless if ignored, but note
-   it as a thing to verify on the first live smoke test.
+   OpenAI chat-completions vision format. Live test confirms Halogen accepts
+   `detail: "high"`; keep as-is.
 6. **Response parsing** (`_extract_json_from_text`): strips markdown fences /
    first `{...}` block, fixes trailing commas. Model-agnostic; keep as-is.
 7. **No mmproj handling in this repo** — `--mmproj` was a llama.cpp launch flag,
@@ -96,16 +96,17 @@ VL_MODEL_NAME = "halogen-qwen3.8-flash-next"
 
 ### `imports/parsers_monthly_vl.py`, `imports/parsers_annual_vl.py`, `imports/classify_pdf_vl.py`
 - `model = getattr(settings, 'VL_MODEL_NAME', '<stale literal>')` → `model = settings.VL_MODEL_NAME`.
-- Pass `api_key=settings.VL_MODEL_API_KEY`, `max_tokens=settings.VL_MAX_TOKENS`, `temperature=settings.VL_TEMPERATURE` to `VLClient(...)` (use `getattr(settings, ..., default)` for the two new ones so the parsers don't break on settings that lack them).
+- Pass `api_key=settings.VL_MODEL_API_KEY`, `max_tokens=settings.VL_MAX_TOKENS`, `temperature=settings.VL_TEMPERATURE` to `VLClient(...)` — plain `settings.X` for the new settings too, no `getattr` fallbacks (settings always defines them).
 - Module docstrings: drop "Qwen2.5-VL-7B on port 11440" wording.
 
 ### `.env.example`
 Add a VL section:
 ```
 # VL (vision) model for PDF statement parsing — OpenAI-compatible endpoint.
-# Default points at Halogen on saturn Ubuntu; leave unset to use the default.
-VL_MODEL_BASE_URL=http://127.0.0.1:11435/v1
-VL_MODEL_NAME=halogen-qwen3.8-flash-next
+# All lines optional: unset means the code default (Halogen on saturn Ubuntu)
+# is used. Uncomment and change only to override.
+# VL_MODEL_BASE_URL=http://127.0.0.1:11435/v1
+# VL_MODEL_NAME=halogen-qwen3.8-flash-next
 # VL_MODEL_API_KEY=not-used
 # VL_MAX_TOKENS=8192
 # VL_TEMPERATURE=0.1
@@ -123,6 +124,7 @@ exists.
 Update the two stale spots: example `VL_MODEL_BASE_URL=http://localhost:11440/v1`
 → Halogen example, and the troubleshooting note claiming the app raises
 `ImproperlyConfigured` without it (it never has — it falls back to the default).
+Decision: correct the doc only; do not add validation.
 
 ## Migrations
 
@@ -136,18 +138,11 @@ the class); none may open a network connection. `VLClient.__init__` runs
 network — none may; keep patching the class**.
 
 Add (`tests/test_vl_config.py`, new):
-1. `test_settings_defaults_are_halogen` — with `VL_MODEL_BASE_URL`/`VL_MODEL_NAME`
-   unset (use `override_env`-style `patch.dict(os.environ, …)` + re-import, or
-   simply assert the values `settings_test.py` provides are the Halogen ones).
-2. `test_env_overrides` — `importlib.reload` of settings is fragile in Django;
-   instead test the env-parsing pattern by calling the same `os.getenv(...)`
-   defaults helper if one is extracted, or drop this test and rely on (1).
-   Decide during implementation; prefer the simple assertion.
-3. `test_parsers_use_settings_model_name` — patch `VLClient` in each of the three
+1. `test_parsers_use_settings_model_name` — patch `VLClient` in each of the three
    modules, run the entry point with a stubbed render + canned JSON (monthly
    already has this shape), and assert `VLClient` was constructed with
    `model=settings.VL_MODEL_NAME` and `base_url=settings.VL_MODEL_BASE_URL`.
-4. `test_diag_connection_tolerates_unknown_shape` — call
+2. `test_diag_connection_tolerates_unknown_shape` — call
    `VLClient._diag_connection` with a patched `httpx.Client` returning
    `{"data": [{"id": "x"}]}`, `{"models": [{"name": "x"}]}` and garbage; assert
    no exception.
@@ -161,38 +156,45 @@ value change (they don't assert on 11440).
    `VL_MODEL_API_KEY`, `VL_MAX_TOKENS`, `VL_TEMPERATURE`); update
    `settings_test.py`. Run full suite. Commit.
 2. **VLClient**: `api_key`, `max_tokens`, `temperature` parameters; robust
-   `_diag_connection` for both `/models` shapes; docstrings. Unit tests for
-   `_diag_connection` (test 4 above). Commit.
+   `_diag_connection` for both `/models` shapes; docstrings. Log a warning when
+   the response's `finish_reason` is `'length'`, so truncated output is visible
+   (reasoning tokens count toward `max_tokens` — see Live test results).
+   Unit tests for `_diag_connection` (test 2 above). Commit.
 3. **Call sites**: `parsers_monthly_vl.py`, `parsers_annual_vl.py`,
    `classify_pdf_vl.py` — plain `settings.VL_MODEL_NAME`, pass new kwargs,
-   de-llama.cpp docstrings. Add test 3 (constructor receives settings values).
+   de-llama.cpp docstrings. Add test 1 (constructor receives settings values).
    Commit.
 4. **Docs/config**: `.env.example`, `AGENTS.md` VL section, `docs/deployment.md`.
    Commit.
-5. **Verification (manual, tdw or Pi with Halogen running)**: with Halogen up on
-   11435, run one real monthly PDF through `parse_rbc_monthly_vl` (or
-   `manage_inbox_import` on a copy) and confirm: connection log OK, JSON parses,
+5. **Verification (manual, tdw only — Pi has no real PDFs)**: with Halogen up on
+   11435, tdw runs one real monthly PDF through `parse_rbc_monthly_vl` (or
+   `manage_inbox_import` on a copy) and confirms: connection log OK, JSON parses,
    transactions land. Adjust `VL_MAX_TOKENS`/`VL_TEMPERATURE` via `.env` if the
-   model truncates. Not a code step; record findings in the PR/commit summary.
+   model truncates (watch for the new `finish_reason='length'` warning).
+   Not a code step; tdw records findings in the PR/commit summary.
+
+## Live test results
+
+tdw ran a live test against Halogen on 11435 (made-up image, same call format as
+`VLClient`):
+
+- **No API key needed** — default `not-used` is fine; `VL_MODEL_API_KEY` stays optional.
+- **Model id confirmed**: `halogen-qwen3.8-flash-next`.
+- **`detail: "high"` accepted.**
+- **`finish_reason: stop` after ~7 s.**
+- **Thinking output is not a problem**: Halogen returns its reasoning in a
+  separate `reasoning` field and `message.content` is clean JSON — no new strip
+  rule needed in `_extract_json_from_text`.
+- **Reasoning tokens count toward `max_tokens`** (334 of 468 completion tokens
+  were reasoning in the test). Real pages with long JSON may need a higher
+  `VL_MAX_TOKENS`; step 2 adds a `finish_reason='length'` warning so truncation
+  is visible.
 
 ## Open questions
 
-1. **Does Halogen require an API key?** Plan assumes no (default `not-used`).
-   If it does, tdw puts `VL_MODEL_API_KEY` in `.env` — no code change needed,
-   but `.env.example` comment should stop saying it's optional.
-2. **Exact Halogen model id** — `halogen-qwen3.8-flash-next` per the task;
-   confirm against Halogen's `/v1/models` output during step 5 and fix the
-   default if the id differs.
-3. **Max tokens cap** — is 8192 within Halogen's limit for the annual-report
-   prompt (multi-page, long JSON)? If Halogen caps lower, lower the default.
-4. **Does Halogen honour `detail: "high"`?** Harmless if ignored; if it errors,
-   drop the `detail` key (small follow-up).
-5. **Thinking/reasoning output**: some Flash-class models emit chain-of-thought
-   or `<think>` blocks before the JSON. `_extract_json_from_text` survives
-   fences and stray prose, but if Halogen wraps output differently we may need
-   one more strip rule — check in step 5.
-6. **`VL_MAX_PAGES`** is defined but unused — delete it in this feature or leave
-   it? Plan currently leaves it alone.
-7. Should `docs/deployment.md`'s `ImproperlyConfigured` claim be fixed by adding
-   the validation (old review suggestion) or just by correcting the doc? Plan
-   corrects the doc only.
+1. **Max tokens cap** — is 8192 within Halogen's limit for the annual-report
+   prompt (multi-page, long JSON), and is it enough once reasoning tokens are
+   counted? Settle during tdw's step 5 real-PDF check; tune via `.env`.
+
+Resolved by tdw's review: `VL_MAX_PAGES` is left alone (item 8 above);
+`docs/deployment.md` is corrected by doc change only, no validation added.

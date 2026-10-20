@@ -167,8 +167,8 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 - Dates like `"JAN. 08"` (dot after the month) must become `datetime.date` via `_parse_date_from_string()` before saving.
 
 ### VL model (PDF reading)
-- **Not running at the moment.** `settings.py` still has `VL_MODEL_BASE_URL = http://127.0.0.1:11440/v1` and `VL_MODEL_NAME = qwen2.5-vl` (old llama.cpp model with `--mmproj`). Port 11440 is now Gufo on saturn Windows, so PDF VL imports will not work until this is changed.
-- Planned: Flash-Next on Halogen (port 11435, vision on) on saturn Ubuntu.
+- The VL model is env-driven via `.env` (like `RBC_ACCOUNTS`): `VL_MODEL_BASE_URL`, `VL_MODEL_NAME`, plus optional `VL_MODEL_API_KEY`, `VL_MAX_TOKENS`, `VL_TEMPERATURE`. Defaults: Halogen on port 11435 (`http://127.0.0.1:11435/v1`), model `halogen-qwen3.8-flash-next` (see `.env.example`; all lines optional).
+- If the VL client logs a `finish_reason='length'` warning, the output was truncated — raise `VL_MAX_TOKENS` in `.env` (reasoning tokens count toward the limit).
 - PDFs are used only for validation and where CSV data isn't available.
 
 ## Architecture notes

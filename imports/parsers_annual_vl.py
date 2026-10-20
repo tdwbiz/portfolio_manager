@@ -1,7 +1,8 @@
 """Vision-language parser for RBC Annual Investment Performance Reports.
 
-Uses Qwen2.5-VL-7B on port 11440 to extract structured data from PDF pages
-rendered as PNG images.  Hard error on failure — no regex fallback.
+Uses the configured OpenAI-compatible vision model (settings.VL_MODEL_NAME,
+default: Halogen) to extract structured data from PDF pages rendered as PNG
+images.  Hard error on failure — no regex fallback.
 
 Returned dict shape (backward-compatible with manage_annual_report_import):
 
@@ -146,7 +147,7 @@ Rules:
 # ---------------------------------------------------------------------------
 
 def parse_rbc_annual_report_vl(file_path: str) -> dict:
-    """Parse an RBC Annual Report PDF using the Qwen2.5-VL vision model.
+    """Parse an RBC Annual Report PDF using the configured VL vision model.
 
     Parameters
     ----------
@@ -166,7 +167,7 @@ def parse_rbc_annual_report_vl(file_path: str) -> dict:
         If required fields are missing or unparseable in the model response.
     """
     base_url = settings.VL_MODEL_BASE_URL
-    model = getattr(settings, 'VL_MODEL_NAME', 'qwen2.5-vl-7b-instruct-q8_0')
+    model = settings.VL_MODEL_NAME
     dpi = getattr(settings, 'VL_PAGE_DPI', 150)
     max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
     timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
@@ -177,7 +178,15 @@ def parse_rbc_annual_report_vl(file_path: str) -> dict:
     pages_b64 = _render_pdf_pages(file_path, dpi, max_pages=0)
     logger.info("parse_rbc_annual_report_vl: %d page(s) rendered, calling VL model", len(pages_b64))
 
-    client = VLClient(base_url=base_url, model=model, timeout=timeout, max_retries=max_retries)
+    client = VLClient(
+        base_url=base_url,
+        model=model,
+        api_key=settings.VL_MODEL_API_KEY,
+        timeout=timeout,
+        max_retries=max_retries,
+        max_tokens=settings.VL_MAX_TOKENS,
+        temperature=settings.VL_TEMPERATURE,
+    )
     raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
 
     return _coerce_response(raw)

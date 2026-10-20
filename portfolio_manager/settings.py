@@ -252,9 +252,10 @@ def _parse_rbc_accounts(raw: str) -> dict[str, str]:
 RBC_ACCOUNTS = _parse_rbc_accounts(os.getenv("RBC_ACCOUNTS", ""))
 RBC_DEFAULT_ACCOUNT = os.getenv("RBC_DEFAULT_ACCOUNT", "").strip()
 
-# Vision-language (VL) model settings — qwen2.5-vl-72b on port 11440 via llama.cpp
-VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11440/v1")
-VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "qwen2.5-vl")
+# Vision-language (VL) model settings (via .env, like RBC_ACCOUNTS)
+VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11435/v1").strip()
+VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "halogen-qwen3.8-flash-next").strip()
+VL_MODEL_API_KEY = os.getenv("VL_MODEL_API_KEY", "not-used").strip() or "not-used"
 VL_PAGE_DPI = int(os.getenv("VL_PAGE_DPI", "150"))
 VL_MAX_RETRIES = int(os.getenv("VL_MAX_RETRIES", "2"))
 VL_TIMEOUT_SECONDS = int(os.getenv("VL_TIMEOUT_SECONDS", "600"))  # 10 minutes for large PDFs
@@ -262,6 +263,8 @@ VL_MAX_PAGES = int(os.getenv("VL_MAX_PAGES", "3"))
 VL_MONTHLY_MAX_PAGES = int(
     os.getenv("VL_MONTHLY_MAX_PAGES", "0")
 )  # 0 = unlimited — render all pages so holdings on later pages are captured
+VL_MAX_TOKENS = int(os.getenv("VL_MAX_TOKENS", "8192"))
+VL_TEMPERATURE = float(os.getenv("VL_TEMPERATURE", "0.1"))
 
 # UI configuration via environment variables
 IMPORT_INBOX_POLL_INTERVAL = int(

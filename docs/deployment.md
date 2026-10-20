@@ -13,8 +13,9 @@
 # Database
 DATABASE_URL=sqlserver+pyodbc://user:pass@server/dbname
 
-# VL Model (required in production)
-VL_MODEL_BASE_URL=http://localhost:11440/v1
+# VL Model (optional — defaults to Halogen on port 11435 if unset)
+VL_MODEL_BASE_URL=http://127.0.0.1:11435/v1
+VL_MODEL_NAME=halogen-qwen3.8-flash-next
 
 # Amibroker Watch Folder (optional)
 AMIBROKER_WATCH_FOLDER=/path/to/amibroker_exports
@@ -119,7 +120,7 @@ WeasyPrint requires system dependencies. Follow [installation instructions](http
 
 ### VL Model Connection Error
 
-Ensure `VL_MODEL_BASE_URL` is set in production. The application will raise `ImproperlyConfigured` if not set.
+The app never requires `VL_MODEL_BASE_URL` to be set — if it is unset, the code falls back to the default (Halogen on `http://127.0.0.1:11435/v1`). A connection error means the model server is not running at the configured endpoint: check that Halogen is up on port 11435, or correct any `VL_MODEL_BASE_URL` / `VL_MODEL_NAME` overrides in `.env`.
 
 ### Database Connection Error
 

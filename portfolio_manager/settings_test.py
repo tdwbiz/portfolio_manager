@@ -28,8 +28,9 @@ RBC_DEFAULT_ACCOUNT = "90000001"
 # Amibroker export watch folder (temp dir for tests)
 AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix="amibroker_")
 
-# VL model settings for tests
-VL_MODEL_BASE_URL = "http://127.0.0.1:11440/v1"
+# VL model settings for tests (same defaults production uses — Halogen)
+VL_MODEL_BASE_URL = "http://127.0.0.1:11435/v1"
+VL_MODEL_NAME = "halogen-qwen3.8-flash-next"
 
 # yFinance fetch settings
 YFINANCE_DEFAULT_HISTORY_YEARS = 10

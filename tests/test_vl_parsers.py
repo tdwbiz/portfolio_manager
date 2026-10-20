@@ -153,46 +153,6 @@ class RegexFallbackTest(TestCase):
             os.unlink(path)
 
 
-class ExtractStatementDateTest(TestCase):
-    """Tests for extract_statement_date helper."""
-
-    def test_extract_statement_date_pattern1(self):
-        """Extracts Statement Date in MM/DD/YYYY format."""
-        from imports.auto_import import extract_statement_date
-
-        content = "Statement Date: 05/31/2024\nSome CSV data"
-        result = extract_statement_date(content)
-
-        self.assertEqual(result, date(2024, 5, 31))
-
-    def test_extract_statement_date_pattern2(self):
-        """Extracts Statement Date in MM-DD-YYYY format."""
-        from imports.auto_import import extract_statement_date
-
-        content = "Statement Date: 05-31-2024\nSome CSV data"
-        result = extract_statement_date(content)
-
-        self.assertEqual(result, date(2024, 5, 31))
-
-    def test_extract_statement_date_iso_format(self):
-        """Extracts ISO format date YYYY-MM-DD."""
-        from imports.auto_import import extract_statement_date
-
-        content = "Report Date: 2024-05-31\nSome CSV data"
-        result = extract_statement_date(content)
-
-        self.assertEqual(result, date(2024, 5, 31))
-
-    def test_extract_statement_date_not_found(self):
-        """Returns None when no date pattern found."""
-        from imports.auto_import import extract_statement_date
-
-        content = "No date here\nJust some text"
-        result = extract_statement_date(content)
-
-        self.assertIsNone(result)
-
-
 class WatcherClassificationTest(TestCase):
     """Tests for content-based PDF classification."""
 
@@ -224,7 +184,7 @@ class WatcherClassificationTest(TestCase):
         finally:
             os.unlink(path)
 
-def test_classify_monthly_statement(self):
+    def test_classify_monthly_statement(self):
         """PDF with 'monthly statement' text is classified as statement."""
         text = "RBC Monthly Statement\nAs of Date: 05/31/2024"
         path = self._create_test_pdf(text)

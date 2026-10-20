@@ -123,9 +123,9 @@ def classify_pdf(file_path: str) -> str:
 
     base_url = settings.VL_MODEL_BASE_URL
     model = settings.VL_MODEL_NAME
-    dpi = getattr(settings, 'VL_PAGE_DPI', 150)
-    max_retries = getattr(settings, 'VL_MAX_RETRIES', 2)
-    timeout = getattr(settings, 'VL_TIMEOUT_SECONDS', 120)
+    dpi = settings.VL_PAGE_DPI
+    max_retries = settings.VL_MAX_RETRIES
+    timeout = settings.VL_TIMEOUT_SECONDS
 
     logger.info("classify_pdf: rendering page 1 of %s at %d DPI", file_path, dpi)
     try:

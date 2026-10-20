@@ -65,7 +65,7 @@ The parser extracts:
 ## Testing Results
 
 ### Single PDF Test
-- **File**: `inbox/Statement-4711 2020-12-31_20260526_193117_20260722_113806_20260722_151028.pdf`
+- **File**: `inbox/Statement-0001 2020-12-31_20260526_193117_20260722_113806_20260722_151028.pdf`
 - **Result**: 3 holdings extracted correctly
 - **Holdings**: XDIV, VDY, VFV
 
@@ -114,7 +114,7 @@ The parser extracts:
 ```bash
 python -c "
 from imports.parsers_monthly_vl import parse_rbc_monthly
-result = parse_rbc_monthly('inbox/Statement-4711 2020-12-31.pdf')
+result = parse_rbc_monthly('inbox/Statement-0001 2020-12-31.pdf')
 for sec in result:
     print(f'Holdings: {len(sec[\"holdings\"])}')
     for h in sec['holdings']:

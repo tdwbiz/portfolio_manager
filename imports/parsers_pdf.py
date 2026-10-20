@@ -68,7 +68,7 @@ def _extract_date_from_filename(file_name: str) -> date | None:
     """Extract statement date from RBC PDF filename.
 
     Handles multiple filename formats:
-    - YYYY-MM-DD (e.g., 'Statement-5362 2025-09-30.pdf')
+    - YYYY-MM-DD (e.g., 'Statement-0003 2025-09-30.pdf')
     - YYYYMonDD (e.g., '90000004-2014Apr30-2014Apr30.pdf')
     """
     if not file_name:

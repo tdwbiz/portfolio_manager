@@ -246,7 +246,7 @@ class FilenameHeuristicTest(TestCase):
         """Filename containing 'annual report' is classified as annual."""
         from imports.classify_pdf_vl import classify_pdf
 
-        result = classify_pdf("/path/to/Annual Report-4711 2025-12-31.pdf")
+        result = classify_pdf("/path/to/Annual Report-0001 2025-12-31.pdf")
         self.assertEqual(result, "annual")
 
     def test_annual_investment_performance_filename(self):
@@ -282,7 +282,7 @@ class FilenameHeuristicTest(TestCase):
         """Filename matching is case-insensitive."""
         from imports.classify_pdf_vl import classify_pdf
 
-        result = classify_pdf("/path/to/ANNUAL REPORT-4711.pdf")
+        result = classify_pdf("/path/to/ANNUAL REPORT-0001.pdf")
         self.assertEqual(result, "annual")
 
         result = classify_pdf("/path/to/annual report 2025.pdf")

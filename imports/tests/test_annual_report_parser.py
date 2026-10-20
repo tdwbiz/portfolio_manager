@@ -188,7 +188,7 @@ class TestParseAnnualReport6Page(TestCase):
     def test_parse_2259_6page(self):
         """Test 1: Parse 6-page report and verify all fields."""
         tmpdir = tempfile.mkdtemp()
-        report_file = os.path.join(tmpdir, 'Annual Report-2259 2025-12-31.pdf')
+        report_file = os.path.join(tmpdir, 'Annual Report-0005 2025-12-31.pdf')
         with open(report_file, 'w') as f:
             f.write(SAMPLE_2259_6PAGE)
         try:
@@ -243,7 +243,7 @@ class TestParseAnnualReport4Page(TestCase):
     def test_parse_4033_4page(self):
         """Test 2: Parse 4-page report and verify CAD-only data."""
         tmpdir = tempfile.mkdtemp()
-        report_file = os.path.join(tmpdir, 'Annual Report-4033 2025-12-31.pdf')
+        report_file = os.path.join(tmpdir, 'Annual Report-0008 2025-12-31.pdf')
         with open(report_file, 'w') as f:
             f.write(SAMPLE_4033_4PAGE)
         try:
@@ -297,7 +297,7 @@ class TestDuplicateAnnualReportSkipped(TestCase):
         # Create a temp directory with an annual report file
         import tempfile
         tmpdir = tempfile.mkdtemp()
-        report_file = os.path.join(tmpdir, 'Annual Report-2259 2025-12-31.pdf')
+        report_file = os.path.join(tmpdir, 'Annual Report-0005 2025-12-31.pdf')
         with open(report_file, 'w') as f:
             f.write(SAMPLE_2259_6PAGE)
         try:
@@ -307,7 +307,7 @@ class TestDuplicateAnnualReportSkipped(TestCase):
 
             # Second import: the file was moved to processed/ by the first import,
             # so create a fresh copy to test duplicate detection
-            report_file2 = os.path.join(tmpdir, 'Annual Report-2259 2025-12-31.pdf')
+            report_file2 = os.path.join(tmpdir, 'Annual Report-0005 2025-12-31.pdf')
             with open(report_file2, 'w') as f:
                 f.write(SAMPLE_2259_6PAGE)
             # Second import - should be skipped (both CAD and USD already exist)
@@ -336,7 +336,7 @@ class TestAnnualReportView(TestCase):
 
         report = RbcAnnual.objects.create(
             account=account,
-            file_name='Annual Report-2259 2025-12-31.pdf',
+            file_name='Annual Report-0005 2025-12-31.pdf',
             report_year=2025,
             report_period_start=date(2025, 1, 1),
             report_period_end=date(2025, 12, 31),

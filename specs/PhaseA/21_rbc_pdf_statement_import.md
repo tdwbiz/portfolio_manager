@@ -10,7 +10,7 @@ Feature branch: feature/rbc-pdf-import
 
 The application currently imports RBC statements via CSV (parser in `imports/parsers.py::parse_rbc_csv`). The CSV format is a structured export from RBC's online portal with columns: Date, Activity, Symbol, Description, Quantity, Price, Value, Account ID, Currency, Notes.
 
-RBC also provides **PDF statements** (e.g. `Statement-5362 2025-09-30.pdf` in the specs folder). These are higher-quality, multi-page documents that contain richer data than the CSV:
+RBC also provides **PDF statements** (e.g. `Statement-0003 2025-09-30.pdf` in the specs folder). These are higher-quality, multi-page documents that contain richer data than the CSV:
 
 - **Asset Summary** — market values by asset class (Cash, Mutual Funds, Foreign Securities, etc.) with percentages
 - **Asset Review** — detailed security positions with quantity, market price, book cost, market value
@@ -326,7 +326,7 @@ Add a new view and template for PDF statement imports:
 
 Create `imports/tests/test_parsers_pdf.py`:
 
-- **Test 1: Parse sample PDF** — Use `Statement-5362 2025-09-30.pdf` as fixture. Verify:
+- **Test 1: Parse sample PDF** — Use `Statement-0003 2025-09-30.pdf` as fixture. Verify:
   - `statement_date` == date(2025, 9, 30)
   - `last_statement_date` == date(2025, 8, 29)
   - `account_number` == "900-00003-1-8"

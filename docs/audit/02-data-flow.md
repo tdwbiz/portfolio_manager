@@ -361,3 +361,32 @@ Steps 7 and 8 have never been run on PortfolioDEV; everything else has.
     writes one for every PDF. Which behaviour is the intended contract?
 12. PositionHistory: which is the truth going forward — sparse Holdings-CSV snapshots
     or transaction-replayed chains? The two rebuild commands disagree by construction.
+
+## Decisions (tdw, Oct 20 2026)
+
+- **Q1, Q2, Q10: one canonical path per source; the duplicates go.**
+  - The canonical paths stay: `import_csv` (Activity CSV), `import_csv --holdings` (Holdings CSV), `manage_inbox_import` (all PDFs), `fetch_historical_prices` (prices).
+  - The inbox watcher must call these canonical paths.
+  - **Deleted rather than repaired:**
+    - the `auto_import` command (`imports/management/commands/auto_import.py`, not the `imports/auto_import.py` module that `import_csv` uses);
+    - `import_statements`;
+    - `manage_pdf_import` and `manage_annual_report_import`;
+    - the dead parsers `imports/parsers_pdf.py` and `imports/parsers_annual.py` (with its test).
+
+    Deleting the two commands also removes the swapped-argument `compute_tx_hash` bug (F3). **Verify F3 in the code before acting on it**; it's a finding of this audit, not yet confirmed by a second look.
+- **Q3 (PDF duplicate check):** check like the CSV path, on the file's content (`content_hash`), plus (account, statement_date, currency) **without** the file name.
+- **Q4: the web upload pages are not used.** `/pdf-import/` and `/annual-report-import/` (`imports/views.py`) are deleted along with the other duplicates.
+- **Q5, Q6: the ledger and reconciliation are parked**, like the risk module.
+  - The ledger was an idea for getting the data accurate; an accounting system isn't needed.
+  - Covers `write_ledger`, `close_ledger_month`, the ledger tables and view, `reconcile` and `CoreReconciliation`.
+  - Leave them in place, don't run them, don't build on them.
+- **Q7 (FileImportLog):** don't back-fill the old imports.
+- **Q8 (date check):** add a sanity check to the PDF import: no transaction dates after the statement date or after today.
+- **Q9 (BrokerStatement period):** keep one statement per imported file, but fill `period_start` / `period_end` from the first and last transaction date in the file.
+- **Q11 (JSON logs):** correct `AGENTS.md` to match what `manage_inbox_import` does (a JSON log for every PDF).
+- **Q12 (which `PositionHistory` is the truth): deferred to the risk redesign.**
+  - How it works today:
+    - **the Holdings CSV** gives only two broker snapshots (the hand-made anchor of 2019-09-30 and the export of 2026-08-02, 64 rows);
+    - **replaying transactions** fills in the positions between them, but is only as good as the activity CSV, which has known missing and sign-flipped rows (25 of 38 positions reconcile exactly; see `docs/project-history.md`);
+    - **the monthly PDFs** also contain broker-reported holdings (`RbcMonthlyHolding`, 2,641 rows), a denser third source, but VL-parsed.
+  - `PositionHistory` is read by the parked risk module and by reconciliation scripts, so the choice has no effect on what's in use today. Decide it together with the risk redesign.

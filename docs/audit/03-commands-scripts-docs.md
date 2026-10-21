@@ -287,3 +287,35 @@ Searched all tracked files in scope for 8-digit numbers, e-mail patterns and nam
 - **`login_test.html`** — page snapshot only, no credentials.
 - **`.env`** — untouched, as always; real account numbers live there and in the mercury DB, not in this repo.
 - Test e-mails are all `*@test.com` / `test@example.com` — no PII.
+
+
+## Decisions (tdw, Oct 20 2026)
+
+- **Q1: Playwright browser tests: keep.** They'll be handy.
+  - Install playwright for **tdw** (not for Pi: the browser tests need a local web server port, which Pi's sandbox doesn't allow) and get the suite running on saturn Ubuntu. That's a batch of its own (see below).
+  - `tests/e2e/test_pdf_import.py` goes with the deleted web upload pages.
+- **Q2: no upcoming-dividends tracker.** Delete the `DividendSchedule` model (0 rows, nothing writes it), its reader in `core/utils/portfolio.py`, the dashboard widget if one is left, and `specs/PhaseD/07_upcoming_dividends_tracker.md`. That needs a migration that drops the empty table.
+- **Q3: `imports/parsers_pdf.py`: not deleted yet.** tdw doesn't remember why it exists.
+  - `docs/TEXT_PARSER_IMPLEMENTATION.md` (Oct 15) describes a text parser that replaces VL, and the mid-October commit `a0cb62a` changed both that doc and `parsers_pdf.py`, so `parsers_pdf.py` may be that text parser.
+  - RBC PDFs normally carry a text layer, so a deterministic text parser could be faster and more reliable than VL (87 s per statement).
+  - **Check what `parsers_pdf.py` does and how well, before deciding**: a question for the design session. Until then, batch 1 leaves `parsers_pdf.py` and `docs/TEXT_PARSER_IMPLEMENTATION.md` alone.
+- **Q4: mkdocs site: delete** (`docs/mkdocs.yml`, `docs/index.md`, `docs/api/`).
+- **Q5: the rebuild commands are parked** (`rebuild_position_history`, `rebuild_positions_from_transactions`), together with Q12 (`PositionHistory` truth, deferred to the risk redesign).
+- **Q6: `data_quality_audit.py`:** look at it during the clean-up, then keep or move to history.
+- **Q7: `CONVENTIONS.md`:** fold its two lines into `AGENTS.md` and delete it.
+- **Q8: `SECURITY.md`:** move to history.
+- **Q9: `USER_MANUAL.md`:** move to history; write a new one when needed.
+- **Q10: delete the debug files** `imports/debug_parser.py`, `imports/debug_test.py`, `imports/test_regex.py`.
+- **Personal data:**
+  - `docs/project-history.md` **stays** as it is;
+  - `events.jsonl` (old CrewAI log) **is deleted** (batch 2).
+
+### Changes to the proposed clean-up batches
+
+- **Batch 1** (`remove-deprecated-imports`): as proposed, **except** `imports/parsers_pdf.py` and `docs/TEXT_PARSER_IMPLEMENTATION.md`, which wait for the Q3 check. Also delete `tests/e2e/test_pdf_import.py`.
+- **Batch 2** (`remove-junk-artifacts`): as proposed, including `events.jsonl`, plus the three debug files from Q10.
+- **Batch 4** (`history-docs`): add `SECURITY.md` and `USER_MANUAL.md`.
+- **Batch 5** (`stale-docs`): also delete the mkdocs files (Q4) and fold `CONVENTIONS.md` into `AGENTS.md` (Q7).
+- **Batch 6** (`parked-labels`): also label the two rebuild commands as parked (Q5).
+- **New batch 8** (`remove-dividend-schedule`): Q2, model, reader, widget, spec and migration.
+- **New batch 9** (`e2e-on-saturn`): install playwright for tdw, make the browser tests run on saturn Ubuntu, and decide what to do with the committed `report.html` artifacts (batch 2 deletes them).

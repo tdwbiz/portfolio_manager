@@ -118,3 +118,31 @@ Deliberally **not** proposed: masking in the authenticated UI or admin (single-u
 6. Exports: transaction CSV/Excel keep `account_id` (needed for your own reconciliation) or add a masked variant for sharing?
 7. Confirm the real owner names never appear in any current tracked file (the tip scrub used pseudonyms; only history holds the originals — batch A covers that).
 8. `processed/json_logs` are the main VL-debugging artifact — is masking `account_number` there (batch D) acceptable for your debugging workflow?
+## Decisions (tdw, Oct 21 2026)
+
+- **Q1: git history: middle path.**
+  - Keep the history as it is (no rewrite, no force-push);
+  - the GitHub repo **stays private** (recreated private on Oct 14 2026);
+  - rely on the clean-up of the current files (`cb95e967`, `a0cb62a9`).
+
+  Batch A needs no code; this decision closes it.
+- **Q2: the two test fixtures are fake** (`imports/tests/test_parsers_pdf.py`, `tests/test_vl_parsers.py`), so they stay.
+  - Optional, in batch C: replace them with obviously fake `9000000x`-style numbers, so future audits don't flag them again.
+- **Q3: the UI keeps full numbers.** The authenticated UI, admin and exports show full account numbers (a private single-user app). Masking applies only to logs, file names and shared artifacts (batches C–F).
+- **Q4: mask with the label, not with digits.**
+  - Wherever an account number must not appear (logs, file names, JSON logs, anything shared), show the account's **label from `RBC_ACCOUNTS`** (e.g. `TOM_TFSA`) instead of the number, not even the last 4 digits.
+  - For a number that isn't in `RBC_ACCOUNTS`: `UNKNOWN_ACCOUNT`.
+  - `mask_account()` (batch B) does exactly this.
+- **Q5: auto-created accounts** get the label, or `"Auto-created from PDF: UNKNOWN_ACCOUNT"`, never the number in `Account.name`.
+- **Q6: exports keep the full number** (tdw's own use).
+- **Q7: real owner names:** none in the current files, as far as known; the pseudonyms (`TOM_*`, `SUSAN_*`, `TS_*`) are used. The originals exist only in git history, which Q1 accepts.
+- **Q8: `processed/json_logs`:** the label instead of the number, in the file name and in the payload. The parsed database rows keep the real value.
+
+### Batches that follow from this
+
+- **A:** closed by Q1.
+- **B:** `mask_account()` returns the `RBC_ACCOUNTS` label, or `UNKNOWN_ACCOUNT`.
+- **C:** the log filter replaces every `RBC_ACCOUNTS` number (all formats) with its label, then fixes the listed call sites. Optional: the Q2 fixture swap.
+- **D:** safe file names with the label instead of the number, e.g. `2026-07-31_monthly_TOM_TFSA_a1b2c3d4.pdf`. The original name is kept only in a new `original_filename` database column (mercury).
+- **E:** internal ids (`Account.pk`) in URLs instead of account numbers.
+- **F:** the "Sharing data with a cloud AI" rule in `AGENTS.md`.

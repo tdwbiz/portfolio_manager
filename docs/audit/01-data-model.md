@@ -243,3 +243,41 @@ All audit tables are also retention-managed by `audit_retention_check` and read 
 4. Do `core_historicalprice` and `rm_market_price_history` need to stay separate, or should risk prices feed portfolio charts?
 5. `LedgerMonthClosure` — is a month-close UI planned (the model is ready but nothing in the UI sets `is_closed`)?
 6. `rm_audit_*` retention: `audit_retention_check` flags records but ImmutableModel blocks deletes — what is the intended retention action?
+
+
+## Database reality check (row counts, Oct 20 2026)
+
+tdw ran `docs/audit/01-table-counts.sql` on `mercury` (database PortfolioDEV). Only counts and date ranges were looked at, no contents.
+
+### What holds data
+
+| Area | Tables with data | Notes |
+|---|---|---|
+| **CSV main line** | `core_account` 12, `core_accountcurrency` 21, `core_transaction` **2,844** (2019-10-01 → 2026-07-31), `core_position_history` 64 (2019-09-30 → 2026-08-02), `core_monthly_statement` 1,089 (2020-01 → 2026-04), `core_annual_report` 100 (2020 → 2026) | All 2,844 transactions belong to **one** `core_brokerstatement` (a single CSV import on 2026-08-17). The 64 holdings rows are the two anchor snapshots. |
+| **PDF side** | `core_rbcmonthly` 958 (2017-11 → 2026-07), `core_rbcmonthlybalance` 2,942, `core_rbcmonthlytransaction` 2,632, `core_rbcmonthlyholding` 2,641, `core_rbcannual` 105 (2017 → 2025) | The PDF transactions' latest date is **2026-12-31, in the future**, so at least one misparsed date. This confirms the "unreliable, validation only" status. |
+| **Prices** | `core_historicalprice` **99,086** (2012-01-02 → 2026-05-21) | In active use by the portfolio charts. |
+| **Config / lookup** | `core_transactiontype` 25, `core_brandingconfig` 1, `core_fixed_price_config` 2, `core_fileimportlog` 1 | Only one import was ever logged. |
+
+### What is empty
+
+- **The whole ledger:** `core_ledger_account`, `core_ledger_entry`, `core_monthly_ledger_balance`, `core_ledger_month_closure` all have **0 rows**. `write_ledger` has never been run on this database.
+- `core_reconciliation` 0: reconciliation results were never stored.
+- `core_dividendschedule` **0**, which answers question 1: no data, so it's a removal candidate.
+- **Risk module:** only seed and config data has rows:
+  - `rm_security_universe` 30, `rm_security_index_exposure` 30;
+  - `rm_strategy_template` 11, `rm_strategy_instrument_link` 12, `rm_instrument_type` 8;
+  - `rm_scoring_config` 9, `rm_owner_config` 2, `rm_historical_scenario` 4;
+  - test rows from June 2026: `rm_urgency_score` 4, `rm_backtest_run` 4 and `rm_backtest_result` 4.
+
+  **Everything else is empty, including `rm_market_price_history`**, so the risk engine has no price data to work with. Alerts (`rm_alert_config`, `rm_alert_history`) **0**, which answers question 2: never used. All `rm_audit_*` tables are 0.
+
+### Decisions (tdw, Oct 20 2026)
+
+- **The risk module stays, parked for now.** It can be useful: what the data is used for should make money or be entertaining, and importing historical transactions alone does neither. Development stopped because the imported data was of such low quality. It may get a redesign later. Until then, leave its code and tables in place, don't remove them, and don't build on them.
+- Later audits and clean-ups should treat the risk module as **parked**: not dead, not active.
+
+### Consequences for the next audits
+
+- **Audit 2 (data flow):** focus on the CSV main line and the PDF scaffolding, the parts that hold data. Note where the ledger and the reconciliation would fit in, since both exist in code but have never run.
+- **Price tables:** `core_historicalprice` is the one in use. `rm_market_price_history` is empty; whether risk should reuse `core_historicalprice` is a question for the risk redesign.
+- **Removal candidates so far:** `DividendSchedule` (0 rows, nothing writes it). The deprecated `Account` fields still hold values (`starting_balance_date` 2019-09-30 → 2020-07-31), so check what still reads them before removing them.

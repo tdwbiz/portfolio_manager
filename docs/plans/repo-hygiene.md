@@ -65,6 +65,7 @@ Each step is one commit on this branch (`chore/repo-hygiene`).
 
 1. **requirements.txt**: add `mssql-django==1.8.0` and remove `django-mssql-backend>=2.0`.
    - Verify the new pin against `/opt/pm-venv/bin/pip show mssql-django`.
+   - Rationale: `docs/architecture.md` §13 lists "`requirements.txt` names `django-mssql-backend`; the app actually needs `mssql-django` (step 1)" — so the stale line belongs to this step.
    - **Engine guard before removing the line:** grep the settings files (`portfolio_manager/settings*.py`) for the `DATABASES` `ENGINE` value. It must be the `mssql-django` engine (`mssql`), **not** `sql_server.pyodbc`. If **any** settings file uses `sql_server.pyodbc`, **stop and report** — do not remove the line and do not change any settings file in this branch.
    - Commit.
 2. **.gitignore**: replace the env-var block entries with `.env`, `.env.*` and `!.env.example`. Verify with `git check-ignore` as above, and run `git ls-files '.env*'` to confirm `.env.example` is the only tracked `.env*` file (report any other). Commit.

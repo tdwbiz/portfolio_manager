@@ -15,6 +15,8 @@ The app stores no account numbers — accounts are identified by name, and the o
 
 ## Environment
 
+- **Configuration comes from environment variables** — strictly avoid hardcoded strings for configuration (see the env-driven examples like `RBC_ACCOUNTS` and `VL_MODEL_*` below).
+
 ### saturn Ubuntu (primary; where Pi works)
 - **Python:** `/opt/pm-venv/bin/python` (and `/opt/pm-venv/bin/pytest`). Django 6.1.x. This is the **only** environment: do not create venvs, do not install packages. If a package is missing, stop and say which one.
 - **Shell:** bash.

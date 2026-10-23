@@ -2,7 +2,20 @@
 
 Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holdings, ledger, monthly/annual statements, reconciliation, performance and dividends. History of earlier phases and reconciliation findings: `docs/project-history.md` (reference only).
 
+## Sharing data with a cloud AI
+
+   Target design (`docs/architecture.md` §5): the app stores no account numbers; accounts are identified by name, and the only digits shown are the last 4 on the accounts page. Until phase 2 of the clean-up is done, the real numbers are still in `.env` (`RBC_ACCOUNTS`) and in the database on `mercury`. Rules for sharing anything about this repo with a cloud AI:
+
+- **Never paste into a cloud AI:** account numbers (not even last-4 digits), `.env` content, log lines, `docs/reconciliation/` content, statement files (CSV or PDF), or VL JSON output from `processed/json_logs/`.
+- **Never paste full names, surnames, addresses or SINs** — these never leave the machine.
+- Account names (`TOM_TFSA`, `SUSAN IB`, `TS_HUISGELD`) do contain real first names, but they are the identifiers the app itself uses, so they **may be shared** with a cloud AI when describing a problem.
+- When describing a problem, quote the **file and line** (and the account **name**), not data rows.
+- In examples, docs and prompts use the fake accounts `90000001`–`90000008` (`ACCOUNT_A`–`ACCOUNT_H`), or the real account names above.
+- Local models (ports 11435 / 11438, no internet path) are exempt.
+
 ## Environment
+
+- **Configuration comes from environment variables**: strictly avoid hardcoded strings for configuration (e.g. `VL_MODEL_*`).
 
 ### saturn Ubuntu (primary; where Pi works)
 - **Python:** `/opt/pm-venv/bin/python` (and `/opt/pm-venv/bin/pytest`). Django 6.1.x. This is the **only** environment: do not create venvs, do not install packages. If a package is missing, stop and say which one.
@@ -85,7 +98,7 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 
 - `import_csv` is idempotent: deduplicates by `tx_hash`, does not clear existing transactions, skips files already moved to `processed/`.
 - **Inbox watcher:** runs as a daemon thread when `runserver` starts; polls `inbox/` every `IMPORT_INBOX_POLL_INTERVAL` seconds (default 300) and routes PDFs to the annual or monthly import.
-- **JSON logs:** `processed/json_logs/` holds JSON only for **failed** imports; successful imports log to `FileImportLog`.
+- **JSON logs:** `manage_inbox_import` writes a JSON log to `processed/json_logs/` for **every** processed PDF (`*_ERROR.json` when the parse has errors); only the deprecated commands write on error alone. `FileImportLog` still records every import.
 
 ## Data sources
 - **CSV Activity is the master for transactions.** PDF VL extraction is unreliable (hallucinates and misses transactions).

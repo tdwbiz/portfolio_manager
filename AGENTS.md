@@ -4,7 +4,7 @@ Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holding
 
 ## Sharing data with a cloud AI
 
-The app stores no account numbers — accounts are identified by name, and the only digits shown anywhere are last-4 on the accounts page (`docs/architecture.md` §5). Rules for sharing anything about this repo with a cloud AI:
+   Target design (`docs/architecture.md` §5): the app stores no account numbers; accounts are identified by name, and the only digits shown are the last 4 on the accounts page. Until phase 2 of the clean-up is done, the real numbers are still in `.env` (`RBC_ACCOUNTS`) and in the database on `mercury`. Rules for sharing anything about this repo with a cloud AI:
 
 - **Never paste into a cloud AI:** account numbers (not even last-4 digits), `.env` content, log lines, `docs/reconciliation/` content, statement files (CSV or PDF), or VL JSON output from `processed/json_logs/`.
 - **Never paste full names, surnames, addresses or SINs** — these never leave the machine.
@@ -15,7 +15,7 @@ The app stores no account numbers — accounts are identified by name, and the o
 
 ## Environment
 
-- **Configuration comes from environment variables** — strictly avoid hardcoded strings for configuration (see the env-driven examples like `RBC_ACCOUNTS` and `VL_MODEL_*` below).
+- **Configuration comes from environment variables**: strictly avoid hardcoded strings for configuration (e.g. `VL_MODEL_*`).
 
 ### saturn Ubuntu (primary; where Pi works)
 - **Python:** `/opt/pm-venv/bin/python` (and `/opt/pm-venv/bin/pytest`). Django 6.1.x. This is the **only** environment: do not create venvs, do not install packages. If a package is missing, stop and say which one.

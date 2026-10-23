@@ -96,7 +96,7 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 
 - `import_csv` is idempotent: deduplicates by `tx_hash`, does not clear existing transactions, skips files already moved to `processed/`.
 - **Inbox watcher:** runs as a daemon thread when `runserver` starts; polls `inbox/` every `IMPORT_INBOX_POLL_INTERVAL` seconds (default 300) and routes PDFs to the annual or monthly import.
-- **JSON logs:** `processed/json_logs/` holds JSON only for **failed** imports; successful imports log to `FileImportLog`.
+- **JSON logs:** `manage_inbox_import` writes a JSON log to `processed/json_logs/` for **every** processed PDF (`*_ERROR.json` when the parse has errors); only the deprecated commands write on error alone. `FileImportLog` still records every import.
 
 ## Data sources
 - **CSV Activity is the master for transactions.** PDF VL extraction is unreliable (hallucinates and misses transactions).

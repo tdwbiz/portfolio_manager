@@ -2,6 +2,17 @@
 
 Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holdings, ledger, monthly/annual statements, reconciliation, performance and dividends. History of earlier phases and reconciliation findings: `docs/project-history.md` (reference only).
 
+## Sharing data with a cloud AI
+
+The app stores no account numbers — accounts are identified by name, and the only digits shown anywhere are last-4 on the accounts page (`docs/architecture.md` §5). Rules for sharing anything about this repo with a cloud AI:
+
+- **Never paste into a cloud AI:** account numbers (not even last-4 digits), `.env` content, log lines, `docs/reconciliation/` content, statement files (CSV or PDF), or VL JSON output from `processed/json_logs/`.
+- **Never paste full names, surnames, addresses or SINs** — these never leave the machine.
+- Account names (`TOM_TFSA`, `SUSAN IB`, `TS_HUISGELD`) do contain real first names, but they are the identifiers the app itself uses, so they **may be shared** with a cloud AI when describing a problem.
+- When describing a problem, quote the **file and line** (and the account **name**), not data rows.
+- In examples, docs and prompts use the fake accounts `90000001`–`90000008` (`ACCOUNT_A`–`ACCOUNT_H`), or the real account names above.
+- Local models (ports 11435 / 11438, no internet path) are exempt.
+
 ## Environment
 
 ### saturn Ubuntu (primary; where Pi works)

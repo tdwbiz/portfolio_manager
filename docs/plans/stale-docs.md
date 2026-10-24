@@ -26,7 +26,7 @@ Finish the two last audit-3 doc batches:
 
 ## Out of scope
 
-- No rewrite of `DEVELOPMENT_GUIDE.md` for saturn/Linux (only the stale line 123; see open questions).
+- No rewrite of `DEVELOPMENT_GUIDE.md` for saturn/Linux (only the stale line 123; confirmed in Decisions below).
 - No moving `COMPREHENSIVE_CODE_REVIEW.md` / `IMPLEMENTATION_PLAN.md` to `docs/history/`.
 - Nothing deleted that is merely parked (batch 6 = labels only); no code or table moves.
 - Don't touch `docs/history/`, `docs/audit/`, other plan files, `docs/reconciliation/`, `.env`.
@@ -57,6 +57,8 @@ Finish the two last audit-3 doc batches:
 
 ## Open questions
 
+All resolved by tdw on Oct 24 — see Decisions below. The steps above already implement the accepted answers; no step changes were needed.
+
 1. `DEVELOPMENT_GUIDE.md` is Windows/PowerShell-era (audit 3 also flagged Windows paths; port 11440 is no longer mentioned there). Fix only the stale line 123 now, or rewrite the guide for saturn?
    **Recommended:** minimal fix now (as the task scopes it); a saturn rewrite is tdw's call, separate branch.
 2. Keep `COMPREHENSIVE_CODE_REVIEW.md` and `IMPLEMENTATION_PLAN.md` in `docs/` with fixed references, or move them to `docs/history/`?
@@ -65,3 +67,12 @@ Finish the two last audit-3 doc batches:
    **Recommended:** move (audit 3's first option) and update the `docs/README.md` link in step 7.
 4. `pm-logs/` is not referenced anywhere in the repo — presumably a runtime log dir on saturn.
    **Recommended:** add it to `.gitignore` anyway (harmless, explicitly requested).
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts the recommended answers in the plan for all four open questions:
+
+1. `DEVELOPMENT_GUIDE.md`: minimal fix now — only the stale line 123 (step 6). A saturn/Linux rewrite is a separate branch, tdw's call.
+2. `COMPREHENSIVE_CODE_REVIEW.md` and `IMPLEMENTATION_PLAN.md`: keep in `docs/` with fixed references (step 8); do not move to `docs/history/`.
+3. `specs/PhaseB`: move to `specs/parked/PhaseB/` via `git mv` (step 5) and update the `docs/README.md` link (step 7).
+4. `pm-logs/`: add to `.gitignore` anyway (step 1).

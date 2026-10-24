@@ -5,7 +5,6 @@ This directory contains end-to-end (E2E) tests that simulate real user interacti
 ## Setup
 
 The required packages are already installed in the `ai-env` environment:
-- **PyTorch** (2.11.0+cpu) - For any ML-based testing
 - **Playwright** (1.61.0) - For browser automation
 - **Chromium browser** - Installed and ready
 

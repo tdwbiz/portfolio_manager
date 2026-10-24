@@ -16,13 +16,13 @@ class TestLoginFlow:
             or "portfolio" in page.title().lower()
         )
 
-    def test_login_with_valid_credentials(self, page):
+    def test_login_with_valid_credentials(self, page, test_user):
         """Test successful login with valid credentials."""
         page.goto("/login/")
 
         # Fill in credentials
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
 
         # Submit form
         page.click('button[type="submit"]')

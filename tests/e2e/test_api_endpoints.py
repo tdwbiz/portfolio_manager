@@ -12,6 +12,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
+from pw_session import PlaywrightLiveServerMixin
+
 # Setup Django
 project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
@@ -19,30 +21,22 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestAPIEndpoints(LiveServerTestCase):
+class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test API endpoints through browser interactions."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="api_user", password="api_pass_123", email="api@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         # API responses captured here
         self.api_responses = []
 
@@ -59,7 +53,6 @@ class TestAPIEndpoints(LiveServerTestCase):
         )
 
     def tearDown(self):
-        self.page.close()
         self.api_responses.clear()
 
     def _login(self, username="api_user", password="api_pass_123"):
@@ -95,33 +88,20 @@ class TestAPIEndpoints(LiveServerTestCase):
         _account_apis = [r for r in self.api_responses if "account" in r["url"].lower()]
 
 
-class TestChartRendering(LiveServerTestCase):
+class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test that charts and visualizations render correctly."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="chart_user", password="chart_pass_456", email="chart@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
-
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def _login(self, username="chart_user", password="chart_pass_456"):
         """Helper method to log in."""
@@ -165,17 +145,12 @@ class TestChartRendering(LiveServerTestCase):
         """)
 
 
-class TestRealTimeFeatures(LiveServerTestCase):
+class TestRealTimeFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test real-time features like live updates."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="realtime_user",
             password="realtime_pass_789",
@@ -184,16 +159,8 @@ class TestRealTimeFeatures(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
-
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def _login(self, username="realtime_user", password="realtime_pass_789"):
         """Helper method to log in."""

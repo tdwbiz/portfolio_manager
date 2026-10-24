@@ -28,14 +28,15 @@ Only files under `tests/e2e/`:
 - `tests/e2e/test_login.py` — dashboard wait → root URL; invalid-login assertion → wait for `.alert-danger` and assert `"Invalid username or password"` in its text; fix the contradictory asserts in `test_login_form_validation` (lines 58–59: `assert "/login/" in page.url` then `assert "/login/" not in page.url` — the second can never pass; keep only `assert "/login/" in page.url`, the empty submit is blocked by the HTML `required` attribute so the URL stays at /login/).
 - `tests/e2e/test_portfolio.py` — after login wait for `/` then `page.goto("/portfolio/")` / `page.goto("/transactions/")`; `page.url()` → `page.url`; **delete `test_portfolio_detail_page`** (see Deletions).
 - `tests/e2e/test_reports.py` — replace `page.click('a:has-text("Report")')` with `page.goto("/annual-reports/")`; after login wait for `/`; `page.url()` → `page.url`.
-- `tests/e2e/test_smoke.py` — favicon: `resp = page.goto("/favicon.ico"); assert resp.status in [200, 404]`; health check: `resp = page.goto("/health/"); assert resp.status == 200` (still inside the try/except).
-- `tests/e2e/test_complete_app.py` — :133 and :177 use `resp = page.goto(...)` + `resp.status`; :177 also drops the hardcoded `http://localhost:8000/` (live server uses a random port) and uses the relative `"/"`.
+- `tests/e2e/test_smoke.py` — favicon: `resp = page.goto("/favicon.ico"); assert resp.status in [200, 404]`; health check is a **real check** (`/health/` exists, core/urls.py:106): `resp = page.goto("/health/"); assert resp.status == 200`, with the try/except removed.
+- `tests/e2e/test_complete_app.py` — :133 uses `resp = page.goto(...)` + `resp.status`; **delete `test_https_redirect`** (see Deletions).
 
 `tests/e2e/conftest.py`, `pw_session.py`, `run_all_tests.py` — no changes (already fixed by the e2e-fix plan; `run_all_tests.py` is not collected by pytest).
 
 ## Deletions (with reasons)
 
 - `test_portfolio.py::test_portfolio_detail_page` — it clicks a nav link to reach a "specific portfolio" detail page; no portfolio detail page exists in the current URLconf (only `/portfolio/` summary and `/portfolio/chart/`, core/urls.py:67–69). The chart page is already covered by `test_api_endpoints.py::TestPortfolioCharts`.
+- `test_complete_app.py::test_https_redirect` — it hardcodes `http://localhost:8000/`, but the pytest live server runs on a random port and plain HTTP, so it can never test an HTTPS redirect.
 
 No other deletions: every other failing test targets a page that still exists.
 
@@ -59,7 +60,7 @@ No other deletions: every other failing test targets a page that still exists.
    Check: `rg -n 'text_content\("div"\)|\*\*/dashboard|not in page\.url' tests/e2e/test_login.py` → no output; collect-only. Commit.
 5. **test_portfolio.py + test_reports.py**: apply the fixes listed above, delete `test_portfolio_detail_page`.
    Check: `rg -n 'page\.url\(\)|\*\*/|has-text\("Report"\)' tests/e2e/test_portfolio.py tests/e2e/test_reports.py` → no output; `rg -c 'def test_' tests/e2e/test_portfolio.py` → 2; collect-only. Commit.
-6. **test_smoke.py + test_complete_app.py**: replace `page.status_code` / `page.response_status()` with the `page.goto()` response's `.status`; drop the hardcoded `:8000` URL.
+6. **test_smoke.py + test_complete_app.py**: replace `page.status_code` / `page.response_status()` with the `page.goto()` response's `.status`; make `test_health_check` a real check (`resp = page.goto("/health/"); assert resp.status == 200`, no try/except); delete `test_https_redirect` (drops the hardcoded `:8000` URL).
    Check: `rg -n 'status_code|response_status|localhost:8000' tests/e2e/test_smoke.py tests/e2e/test_complete_app.py` → no output; collect-only. Commit.
 7. **Full sweep + gate**:
    `rg -n 'page\.get\(|page\.url\(\)|status_code|\*\*/dashboard|response_status' tests/e2e/` → no output.
@@ -87,3 +88,10 @@ No other deletions: every other failing test targets a page that still exists.
 2. **`test_portfolio_detail_page`: rewrite against `/portfolio/chart/` or delete?** Recommended: delete (chart is already covered in `test_api_endpoints.py`); listed under Deletions.
 3. **`test_smoke.py::test_health_check` hits `/health/`, which does not exist (guarded by try/except).** Recommended: keep the test, just fix `response_status()` → `resp.status`; it stays a no-op until a health endpoint exists.
 4. **`test_complete_app.py::test_https_redirect` hardcodes `http://localhost:8000/` and can never test anything on the live server.** Recommended: minimal rewrite to the relative `"/"` with `resp.status` (kept in try/except); delete only if tdw prefers.
+
+## Decisions (tdw, Oct 24)
+
+1. **Q1** — Yes: replace every occurrence of `wait_for_url("**/dashboard/**")`, as planned.
+2. **Q2** — Delete `test_portfolio_detail_page` (as listed under Deletions).
+3. **Q3** — `/health/` does exist (`core/urls.py` has `path("health/", health_check, name="health_check")`). Make `test_health_check` a real check: `goto "/health/"` and assert status 200, without try/except.
+4. **Q4** — Delete `test_https_redirect`: the test server is plain HTTP, so it can never test a redirect. Listed under Deletions with that reason.

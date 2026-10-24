@@ -21,20 +21,24 @@ References were found with `git grep -l <name>` over tracked files, excluding `d
 | `imports/debug_parser.py` | yes | none | stray debug file (Q10 decision: delete) |
 | `imports/debug_test.py` | yes | none | stray debug file (Q10); it imports `imports.parsers_monthly_vl`, but nothing imports it; name does not match pytest's `test_*.py` collection pattern |
 | `imports/test_regex.py` | yes | none | stray debug file (Q10). The `test_regex` hits in `tests/test_vl_parsers.py` are test-method names (`test_regex_extract_…`), not references to this file; file has no `def test…` functions |
-| `db_test.sqlite3` | **no** (already in `.gitignore`) | `.gitignore`, `portfolio_manager/settings_test.py` | **not deletable via git** — see open questions; settings still uses it as the test DB name |
+| `db_test.sqlite3` | **no** (already in `.gitignore`) | `.gitignore`, `portfolio_manager/settings_test.py` | **kept** — it is the test database named by `settings_test.py` and is recreated by every test run (see Decisions) |
 
-`tests/e2e/PRODUCTION_READINESS_REPORT.md` mentions the report files in prose only; it moves to `docs/history/` in batch 4, so no doc edit here.
+`tests/e2e/PRODUCTION_READINESS_REPORT.md` mentions the report files in prose only; the mentions stay as they are (see Decisions).
 
 ## `.gitignore` additions (in the plan)
 
+Exact file entries only — no general `report.html` pattern, it could hide a real template:
+
 - `events.jsonl` — nothing writes it today, but guard against it ever coming back as a run-time log.
+- `e2e/report.html`
 - `tests/e2e/report.html` — written by `tests/e2e/run_all_tests.py` on every e2e run.
-- `tests/e2e/tests/` — ignores the nested-folder artifact if a run from the wrong cwd recreates it.
+- `tests/e2e/tests/e2e/report.html`
+- `tests/test_report.html` — written by `run_e2e_tests.py` / the pytest-html commands in `tests/README.md`.
 
 ## Steps
 
-1. **`.gitignore`**: add `events.jsonl`, `tests/e2e/report.html` and `tests/e2e/tests/` under the run-outputs block.
-   Check: `git check-ignore -v events.jsonl tests/e2e/report.html tests/e2e/tests/e2e/report.html` prints all three. Commit.
+1. **`.gitignore`**: add `events.jsonl`, `e2e/report.html`, `tests/e2e/report.html`, `tests/e2e/tests/e2e/report.html` and `tests/test_report.html` under the run-outputs block.
+   Check: `git check-ignore -v events.jsonl e2e/report.html tests/e2e/report.html tests/e2e/tests/e2e/report.html tests/test_report.html` prints all five. Commit.
 2. **Delete the report.html artifacts**: `git rm e2e/report.html tests/e2e/report.html tests/e2e/tests/e2e/report.html` and remove the now-empty local dirs `e2e/` and `tests/e2e/tests/`.
    Check: `git ls-files | grep -c report.html` → 0; `ls e2e tests/e2e/tests` → no such directory. Commit.
 3. **Delete root junk**: `git rm events.jsonl login_test.html calc_march.py`.
@@ -48,6 +52,10 @@ References were found with `git grep -l <name>` over tracked files, excluding `d
 
 ## Open questions
 
-1. **`db_test.sqlite3`**: the audit says "delete untracked `db_test.sqlite3`", but `portfolio_manager/settings_test.py` still names it as the test database (it is recreated by every test run) and it is already gitignored. Nothing to delete from git; deleting the local file is pointless because the tests recreate it. Suggestion: leave it; or, if tdw wants a clean tree, change `settings_test.py` to an in-memory / temp name in a later batch.
-2. **`tests/e2e/PRODUCTION_READINESS_REPORT.md`** still mentions the deleted `report.html` files in prose. Batch 4 moves this doc to `docs/history/`, so the stale mention goes away on its own — confirm tdw is fine with no edit here.
-3. **`tests/test_report.html`**: `run_e2e_tests.py` and `tests/README.md` generate a pytest HTML report at `tests/test_report.html` (not committed, not currently ignored). Out of batch 2's list — add it to `.gitignore` too, or leave for batch 9 (e2e-on-saturn)?
+None — all three were answered by tdw (see Decisions).
+
+## Decisions (tdw, Oct 23)
+
+1. **`.gitignore` entries**: use exactly these file entries — `e2e/report.html`, `tests/e2e/report.html`, `tests/e2e/tests/e2e/report.html`, `tests/test_report.html` (plus `events.jsonl`). No general `report.html` pattern and no folder entry for `tests/e2e/tests/`: a bare pattern could hide a real template.
+2. **`db_test.sqlite3`: leave it.** It is the test database named by `settings_test.py`; nothing to delete from git.
+3. **`tests/e2e/PRODUCTION_READINESS_REPORT.md`**: the prose mentions of the deleted `report.html` files stay as they are; the doc moves to `docs/history/` in batch 4.

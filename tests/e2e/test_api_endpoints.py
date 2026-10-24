@@ -57,11 +57,11 @@ class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def _login(self, username="api_user", password="api_pass_123"):
         """Helper method to log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', username)
         self.page.fill('input[name="password"]', password)
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_dashboard_api_loads(self):
         """Test that dashboard API endpoints return successful responses."""
@@ -81,7 +81,7 @@ class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.api_responses.clear()
 
         # Navigate to accounts
-        self.page.get(f"{self.live_server_url}/accounts/")
+        self.page.goto(f"{self.live_server_url}/accounts/")
         self.page.wait_for_timeout(1000)
 
         # Check for account-related API calls (logged but not asserted)
@@ -105,11 +105,11 @@ class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def _login(self, username="chart_user", password="chart_pass_456"):
         """Helper method to log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', username)
         self.page.fill('input[name="password"]', password)
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_portfolio_chart_loads(self):
         """Test that portfolio chart renders."""
@@ -117,7 +117,7 @@ class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
         self._login()
 
         # Navigate to portfolio chart
-        self.page.get(f"{self.live_server_url}/portfolio/chart/")
+        self.page.goto(f"{self.live_server_url}/portfolio/chart/")
         self.page.wait_for_timeout(1000)
 
         # Look for canvas or SVG elements (Chart.js uses canvas)
@@ -133,7 +133,7 @@ class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
         self._login()
 
         # Navigate to portfolio
-        self.page.get(f"{self.live_server_url}/portfolio/summary/")
+        self.page.goto(f"{self.live_server_url}/portfolio/summary/")
         self.page.wait_for_timeout(1000)
 
         # Check for chart-related JavaScript (logged but not asserted)
@@ -164,11 +164,11 @@ class TestRealTimeFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def _login(self, username="realtime_user", password="realtime_pass_789"):
         """Helper method to log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', username)
         self.page.fill('input[name="password"]', password)
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_page_does_not_crash(self):
         """Test that page doesn't crash with JavaScript errors."""
@@ -190,7 +190,7 @@ class TestRealTimeFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
         ]
 
         for page_url in pages_to_test:
-            self.page.get(f"{self.live_server_url}{page_url}")
+            self.page.goto(f"{self.live_server_url}{page_url}")
             self.page.wait_for_timeout(500)
 
         # Should have minimal JS errors

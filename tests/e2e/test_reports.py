@@ -15,7 +15,8 @@ class TestReports:
         page.click('button[type="submit"]')
 
         # Navigate to reports
-        page.click('a:has-text("Report")')
+        page.wait_for_url("/")
+        page.goto("/annual-reports/")
         page.wait_for_load_state("networkidle")
 
         # Verify reports page loads
@@ -29,7 +30,8 @@ class TestReports:
         page.click('button[type="submit"]')
 
         # Navigate to reports
-        page.click('a:has-text("Report")')
+        page.wait_for_url("/")
+        page.goto("/annual-reports/")
 
         # Click generate button if present
         generate_buttons = page.query_selector_all('button:has-text("Generate")')
@@ -38,7 +40,7 @@ class TestReports:
             page.wait_for_load_state("networkidle")
 
         # Verify page responds
-        assert page.url() != ""
+        assert page.url != ""
 
     def test_report_filters(self, page, test_user):
         """Test applying filters to reports."""
@@ -48,7 +50,8 @@ class TestReports:
         page.click('button[type="submit"]')
 
         # Navigate to reports
-        page.click('a:has-text("Report")')
+        page.wait_for_url("/")
+        page.goto("/annual-reports/")
 
         # Try to select a date range if present
         date_inputs = page.query_selector_all('input[type="date"]')
@@ -64,4 +67,4 @@ class TestReports:
             page.wait_for_load_state("networkidle")
 
         # Verify page responds
-        assert page.url() != ""
+        assert page.url != ""

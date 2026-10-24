@@ -129,8 +129,8 @@ class TestAccounts:
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 
         # Navigate to accounts
-        page.goto("/accounts/")
-        assert "account" in page.url.lower() or page.status_code in [200, 302]
+        resp = page.goto("/accounts/")
+        assert "account" in page.url.lower() or resp.status in [200, 302]
 
 
 class TestPortfolio:
@@ -168,16 +168,6 @@ class TestReports:
 
 class TestSecurity:
     """Security-related tests."""
-
-    def test_https_redirect(self, page):
-        """Test that HTTP redirects to HTTPS in production (if configured)."""
-        try:
-            page.goto("http://localhost:8000/")
-            # If we get here without error, either HTTPS is not enforced or redirect worked
-            assert page.status_code in [200, 301, 302, 404]
-        except Exception:
-            # Connection errors are acceptable in test environment
-            pass
 
     def test_security_headers(self, page):
         """Test that security headers are present."""

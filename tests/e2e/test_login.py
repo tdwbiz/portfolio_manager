@@ -26,7 +26,7 @@ class TestLoginFlow:
 
         # Submit form
         page.click('button[type="submit"]')
-        page.wait_for_url("**/dashboard/**")
+        page.wait_for_url("/")
 
         # Verify successful login
         assert "dashboard" in page.url.lower() or "welcome" in page.title().lower()
@@ -44,10 +44,10 @@ class TestLoginFlow:
         page.wait_for_url("/login/")
 
         # Verify error message
-        assert (
-            "invalid" in page.text_content("div").lower()
-            or "error" in page.text_content("div").lower()
-        )
+        page.wait_for_selector(".alert-danger")
+        assert "invalid username or password" in page.text_content(
+            ".alert-danger"
+        ).lower()
 
     def test_login_form_validation(self, page):
         """Test that login form validates empty fields."""

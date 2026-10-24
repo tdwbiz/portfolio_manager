@@ -16,12 +16,8 @@ class TestSmoke:
 
     def test_health_check(self, page):
         """Test health check endpoint if available."""
-        try:
-            page.goto("/health/")
-            assert page.response_status() == 200
-        except Exception:
-            # Health endpoint may not exist
-            pass
+        resp = page.goto("/health/")
+        assert resp.status == 200
 
     def test_static_assets_load(self, page):
         """Test that static assets are accessible."""
@@ -42,9 +38,9 @@ class TestSmoke:
 
     def test_favicon(self, page):
         """Test that favicon is accessible."""
-        page.goto("/favicon.ico")
+        resp = page.goto("/favicon.ico")
         # Favicon should either load (200) or not exist (404), but not error
-        assert page.status_code in [200, 404]
+        assert resp.status in [200, 404]
 
     def test_no_console_errors(self, page):
         """Test that there are no JavaScript console errors on homepage."""

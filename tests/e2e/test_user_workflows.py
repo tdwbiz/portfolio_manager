@@ -49,7 +49,7 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_new_user_first_login(self):
         """Test a new user's first login experience."""
         # Step 1: User arrives at login page
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.wait_for_selector('input[name="username"]')
 
         # Step 2: User enters credentials
@@ -58,7 +58,7 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
 
         # Step 3: User clicks login
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Step 4: Verify dashboard loads
         assert "dashboard" in self.page.url.lower()
@@ -72,7 +72,7 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
         self._login()
 
         # Navigate to accounts page
-        self.page.get(f"{self.live_server_url}/accounts/")
+        self.page.goto(f"{self.live_server_url}/accounts/")
         self.page.wait_for_timeout(500)
 
         # Click "Add Account" or similar button
@@ -89,11 +89,11 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def _login(self):
         """Helper method to log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "onboarding_user")
         self.page.fill('input[name="password"]', "onboard_pass_123")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
 
 class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
@@ -110,11 +110,7 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
 
         # Create a test account
         cls.account = Account.objects.create(
-            user=cls.user,
-            name="Test Brokerage",
-            account_number="12345678",
-            institution="RBC",
-            currency="CAD",
+            account_id="90000001", name="ACCOUNT_A", broker="RBC", currency="CAD"
         )
 
     @classmethod
@@ -127,14 +123,14 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_user_views_transactions(self):
         """Test user viewing transaction list."""
         # Login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "transaction_user")
         self.page.fill('input[name="password"]', "trans_pass_456")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Navigate to transactions
-        self.page.get(f"{self.live_server_url}/transactions/")
+        self.page.goto(f"{self.live_server_url}/transactions/")
         self.page.wait_for_timeout(500)
 
         # Verify page loads
@@ -146,7 +142,7 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
         self._login()
 
         # Navigate to transactions
-        self.page.get(f"{self.live_server_url}/transactions/")
+        self.page.goto(f"{self.live_server_url}/transactions/")
         self.page.wait_for_timeout(500)
 
         # Look for filter elements
@@ -174,18 +170,25 @@ class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
         cls.user.delete()
         super().tearDownClass()
 
+    def _login(self):
+        """Helper method to log in."""
+        self.page.goto(f"{self.live_server_url}/login/")
+        self.page.fill('input[name="username"]', "report_user")
+        self.page.fill('input[name="password"]', "report_pass_789")
+        self.page.click('button[type="submit"]')
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_user_accesses_reports(self):
         """Test user accessing reports section."""
         # Login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "report_user")
         self.page.fill('input[name="password"]', "report_pass_789")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Navigate to reports
-        self.page.get(f"{self.live_server_url}/core/reports/")
+        self.page.goto(f"{self.live_server_url}/annual-reports/")
         self.page.wait_for_timeout(500)
 
         # Verify reports page loads
@@ -197,7 +200,7 @@ class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
         self._login()
 
         # Navigate to annual reports
-        self.page.get(f"{self.live_server_url}/annual-reports/")
+        self.page.goto(f"{self.live_server_url}/annual-reports/")
         self.page.wait_for_timeout(500)
 
         # Check for annual reports content
@@ -225,11 +228,11 @@ class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_csrf_protection(self):
         """Test that CSRF protection is active."""
         # Login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "security_user")
         self.page.fill('input[name="password"]', "security_pass_321")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Get CSRF token from cookie
         cookies = self.page.context.cookies()
@@ -243,17 +246,17 @@ class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_session_timeout_behavior(self):
         """Test that sessions expire properly."""
         # Login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "security_user")
         self.page.fill('input[name="password"]', "security_pass_321")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Clear cookies to simulate session end
         self.page.context.clear_cookies()
 
         # Try to access protected page
-        self.page.get(f"{self.live_server_url}/dashboard/")
+        self.page.goto(f"{self.live_server_url}/dashboard/")
         self.page.wait_for_timeout(500)
 
         # Should redirect to login
@@ -262,7 +265,7 @@ class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_unauthorized_access_redirect(self):
         """Test that unauthorized access redirects to login."""
         # Don't login - try to access protected page directly
-        self.page.get(f"{self.live_server_url}/accounts/")
+        self.page.goto(f"{self.live_server_url}/accounts/")
         self.page.wait_for_timeout(500)
 
         # Should redirect to login
@@ -288,14 +291,14 @@ class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
     def test_dashboard_load_time(self):
         """Test that dashboard loads within acceptable time."""
         # Login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "perf_user")
         self.page.fill('input[name="password"]', "perf_pass_654")
         self.page.click('button[type="submit"]')
 
         # Measure dashboard load time
         start = datetime.now()
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
         load_time = (datetime.now() - start).total_seconds()
 
         print(f"Dashboard loaded in {load_time:.2f} seconds")
@@ -308,7 +311,7 @@ class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
 
         # Measure account list load time
         start = datetime.now()
-        self.page.get(f"{self.live_server_url}/accounts/")
+        self.page.goto(f"{self.live_server_url}/accounts/")
         self.page.wait_for_timeout(1000)  # Wait for content to render
         load_time = (datetime.now() - start).total_seconds()
 
@@ -317,11 +320,11 @@ class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def _login(self):
         """Helper method to log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "perf_user")
         self.page.fill('input[name="password"]', "perf_pass_654")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
 
 # Run with: python -m pytest tests/e2e/test_user_workflows.py -v --tb=short -s

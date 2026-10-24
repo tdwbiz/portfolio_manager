@@ -109,22 +109,26 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_navigation_menu(self):
         """Test that navigation menu items are clickable."""
-        # Check for common navigation links
+        # Top-level navbar links with real hrefs, matching core/templates/core/base.html.
+        # Dropdown toggles (Risk / Reports / Data Tools) use href="#" and are not asserted
+        # here — see docs/plans/e2e-last.md.
         nav_links = [
-            ("Dashboard", "dashboard"),
-            ("Accounts", "accounts"),
-            ("Portfolio", "portfolio"),
-            ("Transactions", "transactions"),
-            ("Reports", "reports"),
+            ("Dashboard", "/dashboard/"),
+            ("Portfolio", "/portfolio/"),
+            ("Transactions", "/transactions/"),
+            ("Accounts", "/accounts/"),
+            ("Annual Reports", "/annual-reports/"),
         ]
 
-        for link_text, expected_in_url in nav_links:
-            # Try to click the link
-            links = self.page.query_selector_all(f'a:has-text("{link_text}")')
-            if links:
-                links[0].click()
-                self.page.wait_for_timeout(500)  # Wait for navigation
-                self.assertIn(expected_in_url, self.page.url.lower())
+        for link_text, expected_path in nav_links:
+            # Start from a known page so a failed click cannot cascade into the next iteration.
+            self.page.goto(f"{self.live_server_url}/dashboard/")
+            link = self.page.locator("nav").get_by_role(
+                "link", name=link_text, exact=True
+            )
+            link.click()
+            self.page.wait_for_url(f"{self.live_server_url}{expected_path}")
+            self.assertTrue(self.page.url.endswith(expected_path))
 
     def test_account_list_page(self):
         """Test navigating to accounts page."""

@@ -27,20 +27,14 @@ django.setup()
 class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test that the testing infrastructure is working."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # Create test user
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="smoke_test_user",
             password="smoke_pass_123",
             email="smoke@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
 
     @pytest.mark.smoke
     def test_playwright_works(self):
@@ -77,9 +71,10 @@ class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
         # Submit
         self.page.click('button[type="submit"]')
 
-        # Should redirect to dashboard
+        # Should redirect to the live-server root, away from /login/
         self.page.wait_for_url(f"{self.live_server_url}/")
-        assert "dashboard" in self.page.url.lower()
+        assert self.page.url.startswith(self.live_server_url)
+        assert "/login" not in self.page.url
         print("✓ User authentication works")
 
 

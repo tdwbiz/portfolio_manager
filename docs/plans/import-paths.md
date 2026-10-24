@@ -40,6 +40,7 @@ Edited:
 - `imports/tests/test_auto_import.py` — port the RBC cases to `import_csv`, drop the IB / `--broker` cases
 - `imports/__init__.py` — `__all__` drops `views`, `parsers_annual`
 - comment/docstring mentions in `imports/parsers_monthly_vl.py`, `imports/parsers_annual_vl.py`
+- `tests/test_vl_parsers.py` — delete the `WatcherClassificationTest` class (it tests the removed `_classify_pdf`; the canonical path uses `classify_pdf`, already tested by `FilenameHeuristicTest`)
 - `tests/e2e/test_e2e_user_journey.py` — remove the two `pdf-import/` tests
 - `docs/IMPORT_COMMANDS.md`, `docs/README.md`, `AGENTS.md` — remove the deprecated commands and the upload pages
 
@@ -144,3 +145,12 @@ tdw accepts all four recommended answers from the open questions above:
    both runs are incremental, so no double-import.
 4. **Q4 — `docs/README.md`:** make only the minimal command-list/tree corrections in this plan; leave
    the rest of batch 5 (stale docs) to its own step.
+
+Recorded after step 2:
+
+5. **`tests/test_vl_parsers.py`:** delete the `WatcherClassificationTest` class. It tests the removed
+   `_classify_pdf`; the canonical path uses `classify_pdf`, which is already tested by
+   `FilenameHeuristicTest` in the same file.
+6. **Deleted templates:** the two templates actually deleted in step 1 —
+   `core/templates/core/pdf_import.html` and `imports/templates/core/annual_report_import.html` — are
+   accepted as part of the web upload pages (the plan's Deleted list named only one of them).

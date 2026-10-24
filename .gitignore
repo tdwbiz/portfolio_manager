@@ -50,6 +50,7 @@ processed/
 
 # Logs
 logs/
+pm-logs/
 
 # IDE
 .idea/

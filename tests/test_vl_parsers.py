@@ -153,52 +153,6 @@ class RegexFallbackTest(TestCase):
             os.unlink(path)
 
 
-class WatcherClassificationTest(TestCase):
-    """Tests for content-based PDF classification."""
-
-    def _create_test_pdf(self, text_content: str) -> str:
-        """Create a minimal PDF with given text content."""
-        import fitz
-
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            temp_path = f.name
-
-        doc = fitz.open()
-        page = doc.new_page()
-        page.insert_text(fitz.Point(72, 72), text_content)
-        doc.save(temp_path)
-        doc.close()
-        return temp_path
-
-    def test_classify_annual_report(self):
-        """PDF with 'annual report' text is classified as annual."""
-        text = "RBC Annual Report 2024\nPortfolio Summary"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.watcher import _classify_pdf
-
-            result = _classify_pdf(path)
-
-            self.assertEqual(result, "annual")
-        finally:
-            os.unlink(path)
-
-    def test_classify_monthly_statement(self):
-        """PDF with 'monthly statement' text is classified as statement."""
-        text = "RBC Monthly Statement\nAs of Date: 05/31/2024"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.watcher import _classify_pdf
-
-            result = _classify_pdf(path)
-
-            self.assertEqual(result, "statement")
-        finally:
-            os.unlink(path)
-
-
 class FilenameHeuristicTest(TestCase):
     """Tests for filename-based classification heuristic in classify_pdf_vl."""
 

@@ -78,7 +78,10 @@ No migrations. No parser, command, or app-code changes.
    53 items with no errors; `git diff --stat` shows only `pytest.ini`; commit
    ("pytest: collect imports/tests with settings_test").
 2. **Fix the fixture helpers** in `imports/tests/test_csv_parsers.py`
-   (`csv.writer` in `_write_csv`; `_write_text` for the IB tests).
+   (`csv.writer` in `_write_csv`; `_write_text` for the IB tests). Also add the
+   missing Description cell to both data rows in
+   `IbCsvParserTests::test_multiple_transactions_imported` so they have the real IB
+   column layout (13 cells; test-only, no parser change — see Decisions).
    Check: `DJANGO_SETTINGS_MODULE=portfolio_manager.settings_test /opt/pm-venv/bin/python -m pytest imports/tests/test_csv_parsers.py -q --tb=line --maxfail=100`
    leaves exactly the 4 stale failures from the table (and nothing else); commit
    ("test_csv_parsers: quote CSV cells and write IB fixtures as text").
@@ -142,3 +145,9 @@ tdw accepts the recommended answer for every open question above:
    (step 3). A BUY/SELL-specific skip would be added only if placeholder rows are
    actually seen.
 5. **`-x` in addopts** — left untouched on this branch; tdw decides later.
+6. **`test_multiple_transactions_imported` data rows missing the Description cell**
+   (found when running step 2's check: with the `_write_text` helper the two 12-cell
+   rows are skipped by the parser's `len(row) < 13` guard, so the test fails with
+   0 trades — a 5th failure beyond the 4 stale ones). **Decision:** add the missing
+   Description cell to both data rows so they have the real IB column layout
+   (test-only; no parser change). Done in step 2.

@@ -7,11 +7,11 @@ Simulates real user report generation and viewing.
 class TestReports:
     """Test report generation and viewing flows."""
 
-    def test_reports_page_loads(self, page):
+    def test_reports_page_loads(self, page, test_user):
         """Test that reports page loads."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
 
         # Navigate to reports
@@ -21,11 +21,11 @@ class TestReports:
         # Verify reports page loads
         assert "report" in page.url.lower() or "report" in page.title().lower()
 
-    def test_report_generation(self, page):
+    def test_report_generation(self, page, test_user):
         """Test generating a report."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
 
         # Navigate to reports
@@ -40,11 +40,11 @@ class TestReports:
         # Verify page responds
         assert page.url() != ""
 
-    def test_report_filters(self, page):
+    def test_report_filters(self, page, test_user):
         """Test applying filters to reports."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
 
         # Navigate to reports

@@ -58,11 +58,11 @@ class TestAuthentication:
         assert username is not None, "Username field missing"
         assert password is not None, "Password field missing"
 
-    def test_login_with_valid_credentials(self, page):
+    def test_login_with_valid_credentials(self, page, test_user):
         """Test successful login."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         # Wait for navigation to complete
         page.wait_for_load_state("networkidle", timeout=10000)
@@ -88,23 +88,23 @@ class TestAuthentication:
 class TestDashboard:
     """Dashboard and main navigation tests."""
 
-    def test_dashboard_loads_after_login(self, page):
+    def test_dashboard_loads_after_login(self, page, test_user):
         """Test that dashboard loads after login."""
         # Login first
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 
         # Verify we're no longer on login page
         assert "/login/" not in page.url
 
-    def test_navigation_menu_exists(self, page):
+    def test_navigation_menu_exists(self, page, test_user):
         """Test that navigation menu is present."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 
@@ -120,11 +120,11 @@ class TestDashboard:
 class TestAccounts:
     """Account management tests."""
 
-    def test_accounts_page_accessible(self, page):
+    def test_accounts_page_accessible(self, page, test_user):
         """Test that accounts page is accessible after login."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 
@@ -136,11 +136,11 @@ class TestAccounts:
 class TestPortfolio:
     """Portfolio view tests."""
 
-    def test_portfolio_page_accessible(self, page):
+    def test_portfolio_page_accessible(self, page, test_user):
         """Test that portfolio page is accessible."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 
@@ -152,11 +152,11 @@ class TestPortfolio:
 class TestReports:
     """Reports and analytics tests."""
 
-    def test_reports_page_accessible(self, page):
+    def test_reports_page_accessible(self, page, test_user):
         """Test that reports page is accessible."""
         page.goto("/login/")
-        page.fill('input[name="username"]', "admin")
-        page.fill('input[name="password"]', "admin123")
+        page.fill('input[name="username"]', test_user.username)
+        page.fill('input[name="password"]', "e2e-pass-123")
         page.click('button[type="submit"]')
         page.wait_for_load_state("domcontentloaded", timeout=10000)
 

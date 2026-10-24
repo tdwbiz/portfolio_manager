@@ -14,7 +14,7 @@ All specs for delivering outstanding items from Phase A and NEXT_FEATURES.
 | `04_total_return.md` | D4 | Total return calculation on portfolio page | 🟡 Medium | — |
 | `05_branding_ui_consistency.md` | D5 | CSS variables, page headers, footer, login styling | 🟡 Medium | — |
 | `06_top_movers_widget.md` | D6 | Top 5 gainers/losers widget on dashboard | 🟢 Lower | — |
-| `07_upcoming_dividends_tracker.md` | D7 | Upcoming dividend payments widget on dashboard | 🟢 Lower | — |
+| ~~`07_upcoming_dividends_tracker.md`~~ | D7 | Upcoming dividend payments widget on dashboard — **removed** (spec deleted; `DividendSchedule` model dropped, see `docs/plans/dividend-schedule.md`) | 🟢 Lower | — |
 
 ## Execution Order
 

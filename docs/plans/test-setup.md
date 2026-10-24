@@ -120,3 +120,13 @@ None.
   with `RUN_E2E=1` after playwright is installed there.
 - Should the moved files also get a `@pytest.mark.e2e` marker for `-m` selection? The
   directory gate already covers the requirement; marker only if tdw wants finer selection.
+
+## Decisions (tdw, Oct 23)
+
+- Branch name `chore/test-setup` is fine.
+- No refactor onto the shared browser fixtures now.
+- Leave `-x` in `pytest.ini`.
+- `pytest-html` is out of scope.
+- No e2e marker; the `RUN_E2E=1` switch is enough.
+- In step 3, `run_e2e_tests.py` and `tests/e2e/run_all_tests.py` must set `RUN_E2E=1` in
+  the environment of the pytest run they start, otherwise they would collect nothing.

@@ -391,11 +391,11 @@ For portfolios with thousands of transactions, consider:
 
 - **README.md**: Comprehensive project overview with features, tech stack, quick start
 - **DEPLOYMENT.md**: Clear deployment instructions
-- **SECURITY.md**: Security practices documented
+- **history/SECURITY.md**: Security practices documented
 - **LOGGING_GUIDE.md**: Logging conventions documented
-- **CODE_REVIEW.md**: Review process documented
-- **NEXT_FEATURES.md**: Roadmap documented
-- **specs/**: 20+ specification documents (M0–M2 series)
+- **history/CODE_REVIEW.md**: Review process documented
+- **history/NEXT_FEATURES.md**: Roadmap documented
+- **specs/**: now holds only the parked Phase B specifications (earlier sets archived in docs/history/specs/)
 
 ### 9.2 Areas for Improvement
 

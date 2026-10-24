@@ -5,6 +5,8 @@
 **Last Updated**: 2026-06-11  
 **Status**: Phase 1-4 Complete (Phase 4.3 reverted)
 
+**Note**: Historical record of the 2026-06 sprint; for the current architecture and active work see `docs/architecture.md` and `docs/plans/`.
+
 ---
 
 ## Phase Completion Summary
@@ -307,7 +309,7 @@ Update `settings_test.py` similarly.
 
 | Task | Status | Notes |
 |------|--------|-------|
-| 3.1: Add API Documentation | ✅ Done | MkDocs site with Material theme, 4 pages created |
+| 3.1: Add API Documentation | ✅ Done | MkDocs site with Material theme, 4 pages created (site files since removed) |
 | 3.2: Add Architecture Documentation | ✅ Done | System architecture, data flow diagrams, Mermaid charts |
 | 3.3: Add `help_text` to Management Commands | ✅ Done | All 33 commands already had help_text |
 | 3.4: Validate PDF File Content on Upload | ✅ Done | Added magic byte validation to `save_uploaded_pdf()` |
@@ -316,6 +318,8 @@ Update `settings_test.py` similarly.
 **Test Results**: All 511 tests pass (4 skipped) (Next Sprint)
 
 ### Task 3.1: Add API Documentation
+
+> The MkDocs site created for this task (`docs/mkdocs.yml`, `docs/index.md`, `docs/api/`) has since been removed.
 
 **Priority**: 🟢 Medium  
 **Impact**: Easier onboarding, maintainability  

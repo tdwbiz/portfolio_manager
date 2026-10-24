@@ -93,15 +93,25 @@ No app code, templates or settings are changed. No migrations.
   two fixes.
 - Pi cannot run the browser tests; do not claim they pass — tdw verifies with RUN_E2E=1 before merge.
 
-## Open questions
+## Open questions (resolved — see Decisions below)
 
 1. Which element exactly matched `a:has-text("Portfolio")` at runtime cannot be confirmed without a
    browser run (static reading of base.html shows a real "Portfolio" → `/portfolio/` link; the
    page-wide `links[0]` pattern plus the `href="#"` dropdown toggles is the failure class the task
-   describes). **Recommended:** the rewrite removes all loose page-wide matching and clicks only
+   describes). **Decided:** the rewrite removes all loose page-wide matching and clicks only
    navbar `a.nav-link` elements with real hrefs, so the test is correct either way; tdw's RUN_E2E run
    confirms.
-2. Should the dropdown menus (Risk, Reports, Data Tools) be covered too? **Recommended:** no — out of
+2. Should the dropdown menus (Risk, Reports, Data Tools) be covered too? **Decided:** no — out of
    scope here; they need Bootstrap JS interaction and can get their own test later.
 3. Should the `live_server` override live in `tests/e2e/conftest.py` or a root conftest?
-   **Recommended:** `tests/e2e/conftest.py` only — that is the only suite using `live_server`.
+   **Decided:** `tests/e2e/conftest.py` only — that is the only suite using `live_server`.
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts the recommended answers to all three open questions above:
+
+1. Rewrite `test_navigation_menu` to click only navbar `a.nav-link` elements with real hrefs (no
+   loose page-wide `has-text` matching); tdw's RUN_E2E run before merge is the confirmation.
+2. Dropdown menus (Risk / Reports / Data Tools) are out of scope — no Bootstrap JS interaction in
+   this change; a dedicated test can come later.
+3. The `live_server` fixture override goes in `tests/e2e/conftest.py` only, not a root conftest.

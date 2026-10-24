@@ -44,7 +44,7 @@ collect (no Django settings), and 20 of 33 tests in `test_csv_parsers.py` fail.
    | `IbCsvParserTests::test_dividend_imported` | type `'DIVIDEND'` → `DIV` | `DIVIDEND` (fallback; map key is `'Dividend'`, parsers.py:26) | **Stale.** Real IB type value is `Dividend`. |
 
    No test was found that exposes a genuine parser bug against the real CSV formats;
-   the map-fallback questions go to Open questions.
+   the map-fallback questions go to Open questions (decided — see Decisions).
 
 ## What changes
 
@@ -67,7 +67,8 @@ No migrations. No parser, command, or app-code changes.
 
 - Any change to `imports/parsers.py` (parser bugs found → Open questions only).
 - The other `imports/tests/*` files (already green once settings are configured).
-- `-x` in `pytest.ini` addopts (stops the suite at the first failure; see Open questions).
+- `-x` in `pytest.ini` addopts (stops the suite at the first failure; decided untouched —
+  see Decisions).
 - `tests/e2e` gating (already handled by docs/plans/test-setup.md).
 
 ## Steps
@@ -125,3 +126,19 @@ Both must pass.
 5. **`-x` in `pytest.ini` addopts** aborts the whole gate on the first failure, which
    makes triage need `--maxfail` overrides. *Recommended:* tdw decides later whether to
    drop it; left untouched here.
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts the recommended answer for every open question above:
+
+1. **Case-insensitive type maps** — deferred to a follow-up branch (one-line change in
+   `_normalize_type`); no parser changes on this branch.
+2. **`'Div Reinvest'` → `DIV REIN`** — not added to `_RBC_TYPE_MAP`. Real reinvestment
+   rows are `DIV`/`DIST` with qty > 0 and negative amount (AGENTS.md). Revisit only if
+   the label is actually seen in a real Activity CSV.
+3. **`'Deposit'` → `DEP`** — not added; the test uses the real label
+   `'Deposits & Contributions'`. Revisit only if the short label appears in real exports.
+4. **qty-0 BUY/SELL skip** — parser left as is; `test_zero_quantity_skipped` is deleted
+   (step 3). A BUY/SELL-specific skip would be added only if placeholder rows are
+   actually seen.
+5. **`-x` in addopts** — left untouched on this branch; tdw decides later.

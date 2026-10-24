@@ -16,7 +16,7 @@ class TestLoginFlow:
             or "portfolio" in page.title().lower()
         )
 
-    def test_login_with_valid_credentials(self, page, test_user):
+    def test_login_with_valid_credentials(self, page, test_user, live_server):
         """Test successful login with valid credentials."""
         page.goto("/login/")
 
@@ -28,8 +28,8 @@ class TestLoginFlow:
         page.click('button[type="submit"]')
         page.wait_for_url("/")
 
-        # Verify successful login
-        assert "dashboard" in page.url.lower() or "welcome" in page.title().lower()
+        # Verify successful login: redirected to the live-server root, away from /login/
+        assert page.url.rstrip("/") == live_server.url
 
     def test_login_with_invalid_credentials(self, page):
         """Test login failure with invalid credentials."""

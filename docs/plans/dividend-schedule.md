@@ -66,7 +66,14 @@ Not touched (verified by `git grep -l -i dividendschedule`): no admin, no forms,
 - A reference to `DividendSchedule` / `get_upcoming_dividends` turns up in code not listed above → stop and re-scope rather than improvising.
 - Any test fails in step 5 for a reason unrelated to this removal → stop and report.
 
-## Open questions
+## Open questions (both answered — see Decisions below)
 
-1. **Historical spec prose:** Decisions Q2 explicitly deletes `PhaseD/07_upcoming_dividends_tracker.md`, but `PhaseE/01_symbol_resolution_and_fixed_prices.md` mentions `DividendSchedule` in a rationale paragraph. Edit it or leave it? **Recommended: leave it** — it is a dated spec record, like the other PhaseE text; only the tracker spec itself is named for deletion.
-2. **Mark step 6 done in `docs/architecture.md`?** **Recommended: no** — the architecture doc lists the clean-up order, not per-step status; a later docs pass can tick them off. Keeps this branch to one concern.
+1. **Historical spec prose:** Decisions Q2 explicitly deletes `PhaseD/07_upcoming_dividends_tracker.md`, but `PhaseE/01_symbol_resolution_and_fixed_prices.md` mentions `DividendSchedule` in a rationale paragraph. Edit it or leave it? **Answered: leave it** (see Decisions, Oct 24). It stays out of scope.
+2. **Mark step 6 done in `docs/architecture.md`?** **Answered: no** (see Decisions, Oct 24). The architecture doc is not touched by this branch.
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts the recommended answers to both open questions:
+
+1. **Leave `PhaseE/01_symbol_resolution_and_fixed_prices.md` as written** — it is a dated spec record; only the tracker spec itself (`PhaseD/07_upcoming_dividends_tracker.md`) is deleted.
+2. **Do not mark step 6 done in `docs/architecture.md`** — the architecture doc lists the clean-up order, not per-step status; a later docs pass can tick them off. Keeps this branch to one concern.

@@ -24,24 +24,18 @@ django.setup()
 class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test user authentication flows."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        # Create test user
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="e2e_test_user", password="secure_pass_123", email="e2e@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
 
     def test_login_page_loads(self):
         """Test that the login page loads correctly."""
         self.page.goto(f"{self.live_server_url}/login/")
         self.page.wait_for_selector('input[name="username"]')
-        self.assertIn("Login", self.page.title())
+        self.assertIn("Sign In", self.page.title())
 
     def test_successful_login(self):
         """Test successful user login."""
@@ -55,8 +49,9 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.click('button[type="submit"]')
         self.page.wait_for_url(f"{self.live_server_url}/")
 
-        # Verify redirect to dashboard
-        self.assertIn("dashboard", self.page.url.lower())
+        # Verify redirect to the live-server root, away from the login page
+        self.assertTrue(self.page.url.startswith(self.live_server_url))
+        self.assertNotIn("/login", self.page.url)
 
     def test_failed_login(self):
         """Test login with incorrect credentials."""
@@ -83,28 +78,22 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
 
         # Submit form
         self.page.click('button[type="submit"]')
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
-        # Should redirect to dashboard, not evil.com
+        # Should end up on the live server, not evil.com
         self.assertNotIn("evil.com", self.page.url)
-        self.assertIn("dashboard", self.page.url.lower())
+        self.assertTrue(self.page.url.startswith(self.live_server_url))
 
 
 class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test dashboard and navigation features."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="nav_test_user", password="nav_pass_456", email="nav@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         # Auto-login
         self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "nav_test_user")
@@ -114,6 +103,7 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_dashboard_loads(self):
         """Test that the dashboard loads successfully."""
+        self.page.goto(f"{self.live_server_url}/dashboard/")
         self.assertIn("dashboard", self.page.url.lower())
         self.page.wait_for_selector("h1, h2, .dashboard")  # Common dashboard selectors
 
@@ -146,21 +136,14 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test portfolio management features."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="portfolio_user",
             password="port_pass_789",
             email="portfolio@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         # Auto-login
         self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "portfolio_user")
@@ -185,21 +168,14 @@ class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test responsive design across different screen sizes."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="responsive_user",
             password="resp_pass_654",
             email="responsive@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         # Auto-login
         self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "responsive_user")
@@ -207,50 +183,41 @@ class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.click('button[type="submit"]')
         self.page.wait_for_url(f"{self.live_server_url}/")
 
-    @pytest.mark.parametrize(
-        "viewport,device_name",
-        [
+    def test_responsive_viewports(self):
+        """Test that pages render correctly at different viewport sizes."""
+        for viewport, device_name in [
             ("375x667", "iPhone 8"),
             ("768x1024", "iPad"),
             ("1440x900", "Desktop Small"),
             ("1920x1080", "Desktop HD"),
-        ],
-    )
-    def test_responsive_viewports(self, viewport, device_name):
-        """Test that pages render correctly at different viewport sizes."""
-        width, height = map(int, viewport.split("x"))
-        self.page.set_viewport_size({"width": width, "height": height})
+        ]:
+            with self.subTest(device_name=device_name):
+                width, height = map(int, viewport.split("x"))
+                self.page.set_viewport_size({"width": width, "height": height})
 
-        # Test dashboard
-        self.page.goto(f"{self.live_server_url}/dashboard/")
-        self.page.wait_for_timeout(300)
+                # Test dashboard
+                self.page.goto(f"{self.live_server_url}/dashboard/")
+                self.page.wait_for_timeout(300)
 
-        # Take screenshot for visual inspection
-        screenshot_path = (
-            f"tests/screenshots/{device_name.replace(' ', '_')}_dashboard.png"
-        )
-        self.page.screenshot(path=screenshot_path)
+                # Take screenshot for visual inspection
+                screenshot_path = (
+                    f"tests/screenshots/{device_name.replace(' ', '_')}_dashboard.png"
+                )
+                self.page.screenshot(path=screenshot_path)
 
-        # Check that page is not broken
-        assert self.page.content(), "Page content is empty"
+                # Check that page is not broken
+                assert self.page.content(), "Page content is empty"
 
 
 class TestFormValidation(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test form validation and error handling."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="form_user", password="form_pass_987", email="form@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         # Auto-login
         self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "form_user")

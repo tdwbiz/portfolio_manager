@@ -27,23 +27,16 @@ django.setup()
 class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test the complete user onboarding journey."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
+    def setUp(self):
+        super().setUp()
         # Clean up any existing test users
         get_user_model().objects.filter(username="onboarding_user").delete()
-        cls.user = get_user_model().objects.create_user(
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="onboarding_user",
             password="onboard_pass_123",
             email="onboard@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         self.page.set_viewport_size({"width": 1440, "height": 900})
 
     def test_new_user_first_login(self):
@@ -60,8 +53,9 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.click('button[type="submit"]')
         self.page.wait_for_url(f"{self.live_server_url}/")
 
-        # Step 4: Verify dashboard loads
-        assert "dashboard" in self.page.url.lower()
+        # Step 4: Verify redirect to the live-server root, away from /login/
+        assert self.page.url.startswith(self.live_server_url)
+        assert "/login" not in self.page.url
 
         # Step 5: Verify user sees welcome message or dashboard content
         self.page.wait_for_selector("h1, h2, .dashboard, .welcome", timeout=5000)
@@ -99,26 +93,27 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test transaction creation and management workflows."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="transaction_user",
             password="trans_pass_456",
             email="transaction@test.com",
         )
 
         # Create a test account
-        cls.account = Account.objects.create(
+        self.account = Account.objects.create(
             account_id="90000001", name="ACCOUNT_A", broker="RBC", currency="CAD"
         )
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.account.delete()
-        cls.user.delete()
-        super().tearDownClass()
-
+    def _login(self):
+        """Helper method to log in."""
+        self.page.goto(f"{self.live_server_url}/login/")
+        self.page.fill('input[name="username"]', "transaction_user")
+        self.page.fill('input[name="password"]', "trans_pass_456")
+        self.page.click('button[type="submit"]')
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_user_views_transactions(self):
         """Test user viewing transaction list."""
@@ -158,17 +153,12 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test report generation and viewing."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="report_user", password="report_pass_789", email="report@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
 
     def _login(self):
         """Helper method to log in."""
@@ -210,20 +200,14 @@ class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test security features of the application."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="security_user",
             password="security_pass_321",
             email="security@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
 
     def test_csrf_protection(self):
         """Test that CSRF protection is active."""
@@ -275,18 +259,12 @@ class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test page load performance and responsiveness."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="perf_user", password="perf_pass_654", email="perf@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
 
     def test_dashboard_load_time(self):
         """Test that dashboard loads within acceptable time."""

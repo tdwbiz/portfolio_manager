@@ -24,19 +24,13 @@ django.setup()
 class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test API endpoints through browser interactions."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="api_user", password="api_pass_123", email="api@test.com"
         )
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
         # API responses captured here
         self.api_responses = []
 
@@ -91,17 +85,12 @@ class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test that charts and visualizations render correctly."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="chart_user", password="chart_pass_456", email="chart@test.com"
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
 
     def _login(self, username="chart_user", password="chart_pass_456"):
         """Helper method to log in."""
@@ -148,19 +137,14 @@ class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
 class TestRealTimeFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test real-time features like live updates."""
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.user = get_user_model().objects.create_user(
+    def setUp(self):
+        super().setUp()
+        # Create test user (per-test: the DB is flushed after every test)
+        self.user = get_user_model().objects.create_user(
             username="realtime_user",
             password="realtime_pass_789",
             email="realtime@test.com",
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.user.delete()
-        super().tearDownClass()
 
     def _login(self, username="realtime_user", password="realtime_pass_789"):
         """Helper method to log in."""

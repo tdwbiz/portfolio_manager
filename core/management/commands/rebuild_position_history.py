@@ -1,4 +1,6 @@
-"""Rebuild PositionHistory date ranges.
+"""PARKED (see docs/architecture.md §11)
+
+Rebuild PositionHistory date ranges.
 
 After importing Holdings CSV snapshots, this command:
 1. Sorts all PositionHistory records per (account, symbol, currency) by date_from

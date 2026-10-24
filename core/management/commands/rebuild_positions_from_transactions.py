@@ -1,4 +1,6 @@
-"""Rebuild PositionHistory from Transaction activity.
+"""PARKED (see docs/architecture.md §11)
+
+Rebuild PositionHistory from Transaction activity.
 
 Uses holdings snapshots to establish initial cost basis at the anchor date,
 then replays ALL BUY/SELL transactions chronologically to build accurate

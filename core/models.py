@@ -832,42 +832,6 @@ class HistoricalPrice(models.Model):
         return f"{self.symbol} {self.date}: {self.close}"
 
 
-class DividendSchedule(models.Model):
-    """Manually tracked expected dividend/income payments.
-
-    Used for cash flow planning — shows upcoming dividend, distribution,
-    and interest payments for portfolio symbols.
-    """
-
-    symbol = models.CharField(max_length=50)
-    pay_date = models.DateField()
-    amount_per_share = models.DecimalField(max_digits=10, decimal_places=6)
-    currency = models.CharField(max_length=3, default="USD")
-    exchange_rate_cad = models.DecimalField(
-        max_digits=10, decimal_places=6, default=Decimal("1.0")
-    )
-    type = models.CharField(
-        max_length=10,
-        choices=[("DIV", "Dividend"), ("DIST", "Distribution"), ("INT", "Interest")],
-        default="DIV",
-    )
-    notes = models.TextField(blank=True, default="")
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        ordering = ["pay_date", "symbol"]
-        unique_together = [("symbol", "pay_date", "type")]
-
-    def __str__(self):
-        type_map = dict(self._meta.get_field("type").choices)
-        type_label = type_map.get(self.type, self.type)
-        return f"{self.symbol} - {self.pay_date.strftime('%Y-%m-%d')} ({type_label})"
-
-    def amount_cad_per_share(self) -> Decimal:
-        """Return amount per share in CAD."""
-        return self.amount_per_share * self.exchange_rate_cad
-
-
 class FixedPriceConfig(models.Model):
     """Configurable fixed prices for securities that don't have market prices.
 

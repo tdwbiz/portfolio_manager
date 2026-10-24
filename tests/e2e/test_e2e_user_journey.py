@@ -109,9 +109,15 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, StaticLiveServerTestCas
 
     def test_navigation_menu(self):
         """Test that navigation menu items are clickable."""
-        # Top-level navbar links with real hrefs, matching core/templates/core/base.html.
-        # Dropdown toggles (Risk / Reports / Data Tools) use href="#" and are not asserted
-        # here — see docs/plans/e2e-last.md.
+        # Top-level navbar links with real hrefs, matching the exact markup in
+        # core/templates/core/base.html (ul.navbar-nav, line 69): each entry is
+        #   <a class="nav-link …" href="{% url '…' %}"> — Dashboard lines 71–76,
+        #   Portfolio 79–84, Transactions 111–116, Accounts 119–124,
+        #   Annual Reports 135–141 (label wraps two source lines).
+        # Dropdown toggles are a.nav-link.dropdown-toggle with href="#" and
+        # dropdown items are a.dropdown-item (the Risk dropdown contains a second
+        # "Dashboard" link, lines 159–163), so a.nav-link[href="…"] matches exactly
+        # one element per entry — see docs/plans/e2e-last.md, Decisions.
         nav_links = [
             ("Dashboard", "/dashboard/"),
             ("Portfolio", "/portfolio/"),
@@ -123,9 +129,13 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, StaticLiveServerTestCas
         for link_text, expected_path in nav_links:
             # Start from a known page so a failed click cannot cascade into the next iteration.
             self.page.goto(f"{self.live_server_url}/dashboard/")
-            link = self.page.locator("nav").get_by_role(
-                "link", name=link_text, exact=True
+            link = self.page.locator(
+                f'nav ul.navbar-nav a.nav-link[href="{expected_path}"]'
             )
+            self.assertEqual(1, link.count())
+            # The label is the icon <i> (no text) plus the menu text; normalise
+            # whitespace to cover the two-line "Annual Reports" markup.
+            self.assertEqual(" ".join(link.text_content().split()), link_text)
             link.click()
             self.page.wait_for_url(f"{self.live_server_url}{expected_path}")
             self.assertTrue(self.page.url.endswith(expected_path))

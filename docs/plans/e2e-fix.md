@@ -109,9 +109,17 @@ Why this is the simplest safe option:
 - Tests fail for reasons unrelated to self-containment (wrong URLs, missing views) → do **not** fix in this branch; list them in the summary for a follow-up.
 - Never read, print or commit `.env`; never run against production settings.
 
-## Open questions
+## Open questions (all resolved — see Decisions below)
 
 1. **Function-scoped `live_server` starts a server per test — slow.** Recommended: accept it; it is correct and simple. If the suite gets too slow, switch to a class-scoped `live_server` (pytest-django documents overriding the fixture scope) in a follow-up.
 2. **Some legacy conftest tests will still fail on nonexistent URLs (`/portfolio/`, `/health/`).** Recommended: out of scope here; tdw's pre-merge run produces the failure list and a follow-up branch fixes or deletes those tests.
 3. **`api_page` fixture appears unused.** Recommended: keep it (the task names it) and wire it to `live_server` like `page`; delete later if it stays unused.
 4. **`test_smoke_pytest.py` vs `test_smoke.py` overlap.** Recommended: leave both; dedupe is a follow-up.
+
+## Decisions (tdw, Oct 24)
+tdw accepts the recommended answers in all four open questions:
+
+1. **Function-scoped `live_server`:** accepted — keep it function-scoped for now (correct and simple). If the suite gets too slow, switch to a class-scoped `live_server` in a follow-up.
+2. **Legacy URL failures (`/portfolio/`, `/health/`):** out of scope for this branch. tdw's pre-merge `RUN_E2E=1` run produces the failure list; a follow-up branch fixes or deletes those tests.
+3. **`api_page`:** keep it and wire it to `live_server` like `page` (done in step 2); delete later if it stays unused.
+4. **`test_smoke_pytest.py` vs `test_smoke.py`:** leave both; dedupe is a follow-up.

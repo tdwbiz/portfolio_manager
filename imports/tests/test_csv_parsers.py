@@ -1,5 +1,6 @@
 """Tests for RBC and IB CSV parsers."""
 
+import csv
 import os
 import tempfile
 from datetime import date, datetime
@@ -16,11 +17,22 @@ from imports.parsers import parse_rbc_csv, parse_ib_csv
 # ---------------------------------------------------------------------------
 
 def _write_csv(rows: list[list[str]]) -> str:
-    """Write CSV rows to a temp file and return the path."""
+    """Write CSV rows to a temp file and return the path.
+
+    Uses csv.writer so fields containing commas (dates, amounts) are quoted,
+    matching the real RBC/IB exports.
+    """
     fd, path = tempfile.mkstemp(suffix='.csv')
     with os.fdopen(fd, 'w', newline='', encoding='utf-8-sig') as f:
-        for row in rows:
-            f.write(','.join(row) + '\n')
+        csv.writer(f).writerows(rows)
+    return path
+
+
+def _write_text(text: str) -> str:
+    """Write raw CSV text to a temp file and return the path."""
+    fd, path = tempfile.mkstemp(suffix='.csv')
+    with os.fdopen(fd, 'w', newline='', encoding='utf-8-sig') as f:
+        f.write(text)
     return path
 
 
@@ -431,7 +443,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,AAPL stock,Buy,AAPL,"
             "10,150.25,USD,1502.50,1.00,1503.50\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -448,7 +460,7 @@ class IbCsvParserTests(TestCase):
             "Date/Time,Symbol,Buy/Sell,Quantity,T. Price,Currency,Net Amount,Account\n"
             "2024-01-15 10:30:00,AAPL,Buy,10,150.25,USD,1502.50,U1234567\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -463,7 +475,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,Dividend paid,DIVIDEND,MSFT,"
             "10,3.00,USD,30.00,0,30.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -477,7 +489,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,Commission fee,FEE,AAPL,"
             "10,1.00,USD,10.00,0,10.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -491,7 +503,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,Wire transfer,TRANSFER,,,"
             "0,0,0,USD,1000.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -505,17 +517,17 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,PRACEF8C2DAE,Test,Buy,AAPL,"
             "10,100.00,USD,1000.00,0,1000.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_empty_file_returns_no_trades(self):
         """Empty file should return no trades."""
-        path = _write_csv([
+        path = _write_text(
             "Transaction History,Header,Date,Account,Description,Type,Symbol,"
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
-        ])
+        )
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
@@ -527,7 +539,7 @@ class IbCsvParserTests(TestCase):
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
             "Transaction History,Data,2024-01-15,U1234567,Test\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
@@ -537,12 +549,12 @@ class IbCsvParserTests(TestCase):
         content = (
             "Transaction History,Header,Date,Account,Description,Type,Symbol,"
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
-            "Transaction History,Data,2024-01-15,U1234567,Buy,AAPL,"
+            "Transaction History,Data,2024-01-15,U1234567,AAPL stock,Buy,AAPL,"
             "10,150.25,USD,1502.50,1.00,1503.50\n"
-            "Transaction History,Data,2024-01-16,U1234567,Sell,MSFT,"
+            "Transaction History,Data,2024-01-16,U1234567,MSFT stock,Sell,MSFT,"
             "5,300.00,USD,1500.00,0.50,1499.50\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 2)

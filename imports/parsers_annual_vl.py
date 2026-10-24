@@ -4,7 +4,7 @@ Uses the configured OpenAI-compatible vision model (settings.VL_MODEL_NAME,
 default: Halogen) to extract structured data from PDF pages rendered as PNG
 images.  Hard error on failure — no regex fallback.
 
-Returned dict shape (backward-compatible with manage_annual_report_import):
+Returned dict shape:
 
 {
     'account_number': str,

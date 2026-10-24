@@ -5,8 +5,7 @@ default: Halogen) to extract structured data from PDF pages rendered as PNG
 images.  Hard error on failure — no regex fallback.
 
 Returned value is a **list** of section dicts (one per currency found in the
-statement), matching the shape that manage_inbox_import / manage_pdf_import
-already expect:
+statement), matching the shape that manage_inbox_import already expects:
 
 [
     {

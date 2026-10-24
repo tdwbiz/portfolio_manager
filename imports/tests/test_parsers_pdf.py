@@ -298,44 +298,10 @@ class TestParseRbcPdf(TestCase):
         finally:
             os.unlink(path)
 
-    def _write_pdf_text(self, text: str) -> str:
-        """Write synthetic text as a fake PDF file and return its path."""
-        fd, path = tempfile.mkstemp(suffix='.pdf')
-        with os.fdopen(fd, 'w') as f:
-            f.write(text)
-        return path
-
-    def test_management_command_dry_run(self):
-        """Test 5: Run the management command with --dry-run.
-        Verify no DB writes occur."""
-        account = Account.objects.create(
-            account_id="DUMMY-12345",
-            name="Test Account",
-            broker="RBC",
-        )
-
-        pdf_path = self._write_pdf_text(SAMPLE_RBC_PDF_TEXT)
-        try:
-            call_command('manage_pdf_import', pdf_path, '--dry-run')
-
-            # No RbcMonthly should have been created
-            self.assertEqual(RbcMonthly.objects.count(), 0)
-        finally:
-            os.unlink(pdf_path)
-            account.delete()
-
-    @patch('imports.parsers_monthly_vl.parse_rbc_monthly_vl')
-    def test_duplicate_detection(self, mock_vl):
-        """Test 6: Import the same PDF twice.
-        Verify the second import is skipped with a warning."""
-        account = Account.objects.create(
-            account_id="900-00003-1-8",
-            name="Test Duplicate Account",
-            broker="RBC",
-        )
-
-        # Mock the VL parser to return valid parsed data
-        mock_vl.return_value = [{
+    @staticmethod
+    def _mock_vl_section():
+        """One valid monthly VL parse section (CAD)."""
+        return {
             'statement_date': date(2025, 9, 30),
             'last_statement_date': date(2025, 8, 29),
             'account_number': '900-00003-1-8',
@@ -353,17 +319,79 @@ class TestParseRbcPdf(TestCase):
                     'percentage': Decimal('1.97'),
                 },
             ],
-        }]
+        }
 
-        pdf_path = self._write_pdf_text(SAMPLE_RBC_PDF_TEXT)
-        try:
-            # First import
-            call_command('manage_pdf_import', pdf_path)
-            self.assertEqual(RbcMonthly.objects.count(), 1)
+    def test_management_command_dry_run(self):
+        """Test 5: Run manage_inbox_import with --dry-run.
+        Verify no DB writes occur."""
+        account = Account.objects.create(
+            account_id="DUMMY-12345",
+            name="Test Account",
+            broker="RBC",
+        )
 
-            # Second import - should be skipped
-            call_command('manage_pdf_import', pdf_path)
-            self.assertEqual(RbcMonthly.objects.count(), 1)
-        finally:
-            os.unlink(pdf_path)
-            account.delete()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir = os.path.join(tmpdir, 'processed')
+            os.makedirs(inbox_dir)
+            # Filename matches the monthly heuristic so no VL call is needed.
+            pdf_path = os.path.join(inbox_dir, 'Monthly Statement 2025-09.pdf')
+            with open(pdf_path, 'w') as f:
+                f.write(SAMPLE_RBC_PDF_TEXT)
+
+            with patch(
+                'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl'
+            ) as mock_vl:
+                mock_vl.return_value = [self._mock_vl_section()]
+                with override_settings(
+                    IMPORT_PROCESSED_DIR=processed_dir,
+                    IMPORT_JSON_DIR=os.path.join(processed_dir, 'json_logs'),
+                ):
+                    call_command(
+                        'manage_inbox_import', '--inbox-dir', inbox_dir, '--dry-run'
+                    )
+
+            # No RbcMonthly should have been created
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+
+        account.delete()
+
+    def test_duplicate_detection(self):
+        """Test 6: Import the same PDF twice via manage_inbox_import.
+        Verify the second import is skipped with a warning."""
+        account = Account.objects.create(
+            account_id="900-00003-1-8",
+            name="Test Duplicate Account",
+            broker="RBC",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir = os.path.join(tmpdir, 'processed')
+            os.makedirs(inbox_dir)
+            pdf_name = 'Monthly Statement 2025-09.pdf'
+
+            def _drop_pdf():
+                with open(os.path.join(inbox_dir, pdf_name), 'w') as f:
+                    f.write(SAMPLE_RBC_PDF_TEXT)
+
+            with patch(
+                'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl'
+            ) as mock_vl:
+                # Mock the VL parser to return valid parsed data
+                mock_vl.return_value = [self._mock_vl_section()]
+                with override_settings(
+                    IMPORT_PROCESSED_DIR=processed_dir,
+                    IMPORT_JSON_DIR=os.path.join(processed_dir, 'json_logs'),
+                ):
+                    # First import
+                    _drop_pdf()
+                    call_command('manage_inbox_import', '--inbox-dir', inbox_dir)
+                    self.assertEqual(RbcMonthly.objects.count(), 1)
+
+                    # Second import of the same PDF - should be skipped
+                    _drop_pdf()
+                    call_command('manage_inbox_import', '--inbox-dir', inbox_dir)
+                    self.assertEqual(RbcMonthly.objects.count(), 1)
+
+        account.delete()

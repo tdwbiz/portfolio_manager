@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
 # Setup Django
-project_root = str(Path(__file__).parent.parent)
+project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test")
 django.setup()

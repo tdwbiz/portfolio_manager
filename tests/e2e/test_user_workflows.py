@@ -16,7 +16,7 @@ from django.test import LiveServerTestCase
 from core.models import Account
 
 # Setup Django
-project_root = str(Path(__file__).parent.parent)
+project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test")
 django.setup()

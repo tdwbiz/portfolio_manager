@@ -12,6 +12,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
+from pw_session import PlaywrightLiveServerMixin
+
 # Setup Django
 project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
@@ -22,17 +24,12 @@ django.setup()
 # It requires a live Django server. Run with: pytest tests/e2e/test_smoke_pytest.py -v -s
 
 
-class TestInfrastructure(LiveServerTestCase):
+class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test that the testing infrastructure is working."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         # Create test user
         cls.user = get_user_model().objects.create_user(
             username="smoke_test_user",
@@ -42,16 +39,8 @@ class TestInfrastructure(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
-
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     @pytest.mark.smoke
     def test_playwright_works(self):

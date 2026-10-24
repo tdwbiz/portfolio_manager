@@ -12,6 +12,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
+from pw_session import PlaywrightLiveServerMixin
+
 # Setup Django
 project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
@@ -19,17 +21,12 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestUserAuthentication(LiveServerTestCase):
+class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test user authentication flows."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         # Create test user
         cls.user = get_user_model().objects.create_user(
             username="e2e_test_user", password="secure_pass_123", email="e2e@test.com"
@@ -37,16 +34,8 @@ class TestUserAuthentication(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
-
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def test_login_page_loads(self):
         """Test that the login page loads correctly."""
@@ -100,39 +89,28 @@ class TestUserAuthentication(LiveServerTestCase):
         self.assertIn("dashboard", self.page.url.lower())
 
 
-class TestDashboardNavigation(LiveServerTestCase):
+class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test dashboard and navigation features."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="nav_test_user", password="nav_pass_456", email="nav@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         # Auto-login
         self.page.get(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "nav_test_user")
         self.page.fill('input[name="password"]', "nav_pass_456")
         self.page.click('button[type="submit"]')
         self.page.wait_for_url("**/dashboard/**")
-
-    def tearDown(self):
-        self.page.close()
 
     def test_dashboard_loads(self):
         """Test that the dashboard loads successfully."""
@@ -165,17 +143,12 @@ class TestDashboardNavigation(LiveServerTestCase):
         self.assertIn("accounts", self.page.url.lower())
 
 
-class TestPortfolioFeatures(LiveServerTestCase):
+class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test portfolio management features."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="portfolio_user",
             password="port_pass_789",
@@ -184,22 +157,16 @@ class TestPortfolioFeatures(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         # Auto-login
         self.page.get(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "portfolio_user")
         self.page.fill('input[name="password"]', "port_pass_789")
         self.page.click('button[type="submit"]')
         self.page.wait_for_url("**/dashboard/**")
-
-    def tearDown(self):
-        self.page.close()
 
     def test_portfolio_page_loads(self):
         """Test that portfolio page loads."""
@@ -215,17 +182,12 @@ class TestPortfolioFeatures(LiveServerTestCase):
         self.page.wait_for_selector("table, .summary, .portfolio-summary, h1, h2")
 
 
-class TestResponsiveDesign(LiveServerTestCase):
+class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test responsive design across different screen sizes."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="responsive_user",
             password="resp_pass_654",
@@ -234,22 +196,16 @@ class TestResponsiveDesign(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         # Auto-login
         self.page.get(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "responsive_user")
         self.page.fill('input[name="password"]', "resp_pass_654")
         self.page.click('button[type="submit"]')
         self.page.wait_for_url("**/dashboard/**")
-
-    def tearDown(self):
-        self.page.close()
 
     @pytest.mark.parametrize(
         "viewport,device_name",
@@ -279,39 +235,28 @@ class TestResponsiveDesign(LiveServerTestCase):
         assert self.page.content(), "Page content is empty"
 
 
-class TestFormValidation(LiveServerTestCase):
+class TestFormValidation(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test form validation and error handling."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="form_user", password="form_pass_987", email="form@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         # Auto-login
         self.page.get(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "form_user")
         self.page.fill('input[name="password"]', "form_pass_987")
         self.page.click('button[type="submit"]')
         self.page.wait_for_url("**/dashboard/**")
-
-    def tearDown(self):
-        self.page.close()
 
     def test_empty_form_submission(self):
         """Test that empty forms show validation errors."""

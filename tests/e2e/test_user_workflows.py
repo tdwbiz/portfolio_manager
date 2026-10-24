@@ -13,6 +13,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
+from pw_session import PlaywrightLiveServerMixin
+
 from core.models import Account
 
 # Setup Django
@@ -22,17 +24,12 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestCompleteUserOnboarding(LiveServerTestCase):
+class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test the complete user onboarding journey."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         # Clean up any existing test users
         get_user_model().objects.filter(username="onboarding_user").delete()
         cls.user = get_user_model().objects.create_user(
@@ -43,17 +40,11 @@ class TestCompleteUserOnboarding(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
     def setUp(self):
-        self.page = self.browser.new_page()
         self.page.set_viewport_size({"width": 1440, "height": 900})
-
-    def tearDown(self):
-        self.page.close()
 
     def test_new_user_first_login(self):
         """Test a new user's first login experience."""
@@ -105,17 +96,12 @@ class TestCompleteUserOnboarding(LiveServerTestCase):
         self.page.wait_for_url("**/dashboard/**")
 
 
-class TestTransactionManagement(LiveServerTestCase):
+class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test transaction creation and management workflows."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="transaction_user",
             password="trans_pass_456",
@@ -133,17 +119,10 @@ class TestTransactionManagement(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.account.delete()
         cls.user.delete()
         super().tearDownClass()
 
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def test_user_views_transactions(self):
         """Test user viewing transaction list."""
@@ -180,33 +159,21 @@ class TestTransactionManagement(LiveServerTestCase):
         self.page.query_selector(filter_selectors[0])
 
 
-class TestReportGeneration(LiveServerTestCase):
+class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test report generation and viewing."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="report_user", password="report_pass_789", email="report@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def test_user_accesses_reports(self):
         """Test user accessing reports section."""
@@ -237,17 +204,12 @@ class TestReportGeneration(LiveServerTestCase):
         self.page.wait_for_selector("table, .reports, h1, h2", timeout=3000)
 
 
-class TestSecurityFeatures(LiveServerTestCase):
+class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test security features of the application."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="security_user",
             password="security_pass_321",
@@ -256,16 +218,9 @@ class TestSecurityFeatures(LiveServerTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def test_csrf_protection(self):
         """Test that CSRF protection is active."""
@@ -314,33 +269,21 @@ class TestSecurityFeatures(LiveServerTestCase):
         assert "login" in self.page.url.lower()
 
 
-class TestPerformanceMetrics(LiveServerTestCase):
+class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
     """Test page load performance and responsiveness."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
         cls.user = get_user_model().objects.create_user(
             username="perf_user", password="perf_pass_654", email="perf@test.com"
         )
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
         cls.user.delete()
         super().tearDownClass()
 
-    def setUp(self):
-        self.page = self.browser.new_page()
-
-    def tearDown(self):
-        self.page.close()
 
     def test_dashboard_load_time(self):
         """Test that dashboard loads within acceptable time."""

@@ -146,14 +146,12 @@ portfolio_manager/
 ├── imports/                 # Statement import functionality
 │   ├── parsers.py           # CSV/Excel parsers
 │   ├── parsers_pdf.py       # RBC PDF monthly parser
-│   ├── parsers_annual.py    # RBC annual report parser
 │   ├── parsers_annual_vl.py # Annual report parser with Vision Language model
 │   ├── parsers_monthly_vl.py # Monthly parser with Vision Language model
-│   ├── auto_import.py       # Background file watcher
+│   ├── auto_import.py       # CSV import (used by import_csv)
 │   ├── watcher.py           # File system watcher
 │   ├── rejection_log.py     # Import rejection tracking
-│   ├── management/commands/ # Import commands (4)
-│   └── templates/           # Import templates
+│   └── management/commands/ # Import commands (2)
 ├── risk/                    # Risk analytics module
 │   ├── models.py            # SecurityUniverse, MarketPriceHistory, VolatilitySummary, etc.
 │   ├── views/               # Risk module views
@@ -187,25 +185,21 @@ portfolio_manager/
 
 ## Management Commands
 
-The application includes **68 management commands** organized by module:
+The application includes **64 management commands** organized by module:
 
-### Core Commands (7)
+### Core Commands (5)
 | Command | Description |
 |---------|-------------|
 | `fetch_historical_prices` | Fetch OHLCV price data from yfinance |
-| `manage_annual_report_import` | Import RBC annual reports |
 | `manage_inbox_import` | Process inbox files |
-| `manage_pdf_import` | Process PDF files |
 | `merge_duplicate_accounts` | Merge duplicate account records |
 | `rebuild_position_history` | Rebuild position history from transactions |
 | `seed_rm_universe` | Seed security universe with symbols |
 
-### Import Commands (4)
+### Import Commands (2)
 | Command | Description |
 |---------|-------------|
 | `audit_fx` | Audit FX rate data quality |
-| `auto_import` | Run background auto-import |
-| `import_statements` | Import broker statements |
 | `watch_inbox` | Start inbox file watcher |
 
 ### Data Audit Commands (1)

@@ -1,6 +1,6 @@
-"""Tests for dashboard dollar summary (D3), top movers widget (D6), and upcoming dividends (D7)."""
+"""Tests for dashboard dollar summary (D3) and top movers widget (D6)."""
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from core.models import Account, BrokerStatement, DividendSchedule, Transaction
+from core.models import Account, BrokerStatement, Transaction
 
 
 class DashboardDollarSummaryTests(TestCase):
@@ -197,116 +197,3 @@ class DashboardTopMoversTests(TestCase):
         result = get_top_movers([])
         self.assertEqual(result, {"gainers": [], "losers": []})
 
-
-class UpcomingDividendsTests(TestCase):
-    """D7: Upcoming dividends tracker widget."""
-
-    def setUp(self):
-        self.statement = BrokerStatement.objects.create(
-            source="IB",
-            file_date="2023-01-01",
-            raw_filename="test.csv",
-        )
-        self.account = Account.objects.create(
-            account_id="DIV-TEST",
-            name="Dividend Test",
-            broker="IB",
-            currency="USD",
-        )
-        self.user = User.objects.create_user(
-            username="testuser", password="testpass123"
-        )
-        self.client.login(username="testuser", password="testpass123")
-
-        # Create holdings of 100 shares AAPL
-        Transaction.objects.create(
-            statement=self.statement,
-            account=self.account,
-            date="2024-01-15",
-            type="BUY",
-            symbol="AAPL",
-            quantity=Decimal("100"),
-            price=Decimal("150.00"),
-            commission=Decimal("0"),
-            amount=Decimal("15000.00"),
-            currency="USD",
-            exchange_rate_cad=Decimal("1.333"),
-            amount_cad=Decimal("20000.00"),
-            tx_hash="d7_aapl_buy",
-        )
-
-    @patch("core.views_portfolio.fetch_last_prices")
-    def test_upcoming_dividends_shows_in_dashboard(self, mock_fetch):
-        """Dashboard shows upcoming dividends when schedules exist."""
-        mock_fetch.return_value = {
-            "AAPL": Decimal("180.00"),
-            "USDCAD=X": Decimal("1.35"),
-        }
-        # Create a dividend schedule 10 days from now
-        DividendSchedule.objects.create(
-            symbol="AAPL",
-            pay_date=date.today() + timedelta(days=10),
-            amount_per_share=Decimal("0.96"),
-            currency="USD",
-            exchange_rate_cad=Decimal("1.35"),
-            type="DIV",
-        )
-        response = self.client.get(reverse("dashboard"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Upcoming Dividends")
-        self.assertContains(response, "AAPL")
-
-    def test_upcoming_dividends_excludes_past_schedules(self):
-        """Past dividend schedules are not shown."""
-        # Create a past schedule
-        DividendSchedule.objects.create(
-            symbol="MSFT",
-            pay_date=date.today() - timedelta(days=5),
-            amount_per_share=Decimal("0.75"),
-            type="DIV",
-        )
-        # Create a future schedule
-        future_sched = DividendSchedule.objects.create(
-            symbol="AAPL",
-            pay_date=date.today() + timedelta(days=10),
-            amount_per_share=Decimal("0.96"),
-            type="DIV",
-        )
-
-        with patch(
-            "core.views_portfolio.fetch_last_prices",
-            return_value={
-                "AAPL": Decimal("180.00"),
-                "USDCAD=X": Decimal("1.35"),
-            },
-        ):
-            response = self.client.get(reverse("dashboard"))
-
-        self.assertContains(response, "AAPL")
-        # Past MSFT schedule should not appear
-        self.assertNotContains(response, "MSFT")
-        future_sched.delete()
-
-    def test_dividend_schedule_model_creation(self):
-        """DividendSchedule model can be created and queried."""
-        sched = DividendSchedule.objects.create(
-            symbol="TEST",
-            pay_date=date.today() + timedelta(days=5),
-            amount_per_share=Decimal("1.00"),
-            currency="USD",
-            exchange_rate_cad=Decimal("1.35"),
-            type="DIV",
-        )
-        self.assertEqual(sched.symbol, "TEST")
-        self.assertEqual(sched.amount_cad_per_share(), Decimal("1.35"))
-        s = str(sched)
-        self.assertIn("TEST", s)
-        self.assertIn("Dividend", s)
-        sched.delete()
-
-    def test_get_upcoming_dividends_returns_empty_when_no_schedules(self):
-        """get_upcoming_dividends returns empty list when no schedules exist."""
-        from core.utils import get_upcoming_dividends
-
-        result = get_upcoming_dividends()
-        self.assertEqual(result, [])

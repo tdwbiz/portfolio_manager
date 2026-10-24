@@ -10,7 +10,7 @@ Moved out of `AGENTS.md` on 2026-10-20 so the agent instructions stay short. Ref
 - D4: Total Return — realised + income + return cards (`portfolio_summary.html`, row 2)
 - D5: Brand & UI — `tsmoney.css`, favicon, site banner, footer, `.page-header` on all templates, `:root` CSS variables
 - D6: Top Movers — gainers/losers widget on dashboard (`get_top_movers` in `core/utils/portfolio.py`)
-- D7: Dividends Tracker — `DividendSchedule` model, `get_upcoming_dividends`, upcoming dividends widget on dashboard
+- D7: Dividends Tracker — `DividendSchedule` model, `get_upcoming_dividends`, upcoming dividends widget on dashboard (removed — `DividendSchedule` deleted, see `docs/plans/dividend-schedule.md`)
 
 Branch: `feature_misc_outstanding_items` (merged to `dev`).
 

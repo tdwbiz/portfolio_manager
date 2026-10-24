@@ -23,7 +23,6 @@ from core.utils import (
     enrich_positions_with_prices,
     fetch_last_prices,
     get_top_movers,
-    get_upcoming_dividends,
     group_positions_by_account,
     group_positions_by_category,
 )
@@ -89,22 +88,12 @@ def dashboard(request):
 
         # --- D6: Top movers ---
         top_movers = get_top_movers(positions, lookback_days=30)
-
-        # --- D7: Upcoming dividends ---
-        upcoming_dividends = get_upcoming_dividends(days_ahead=30)
-        total_upcoming_cad = (
-            sum(d["total_cad"] for d in upcoming_dividends)
-            if upcoming_dividends
-            else Decimal("0")
-        )
     except Exception as exc:
         logger.warning(f"Dashboard dollar summary error: {exc}")
         total_market_value_cad = Decimal("0")
         total_unrealised_pnl_cad = Decimal("0")
         ytd_income_cad = Decimal("0")
         top_movers = {"gainers": [], "losers": []}
-        upcoming_dividends = []
-        total_upcoming_cad = Decimal("0")
 
     return render(
         request,
@@ -120,8 +109,6 @@ def dashboard(request):
             "total_unrealised_pnl_cad": total_unrealised_pnl_cad,
             "ytd_income_cad": ytd_income_cad,
             "top_movers": top_movers,
-            "upcoming_dividends": upcoming_dividends,
-            "total_upcoming_cad": total_upcoming_cad,
         },
     )
 

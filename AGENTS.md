@@ -91,17 +91,14 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 | Import Activity CSVs from `inbox/` | `import_csv` |
 | Import Holdings CSVs into `PositionHistory` | `import_csv --holdings` |
 | Parse without writing | `import_csv --dry-run` |
-| Import a specific CSV (legacy) | `auto_import` |
 | Watch inbox continuously | `watch_inbox` |
 | One-shot inbox import (both PDF types) | `import_inbox` |
 | Ledger entries for all open months | `write_ledger --all-open [--account <ID>]` |
 | Ledger for one account and month | `write_ledger --account <ID> --month YYYY-MM` |
 
-**DEPRECATED (do not use):** `manage_pdf_import`, `manage_annual_report_import` — use `manage_inbox_import`.
-
 - `import_csv` is idempotent: deduplicates by `tx_hash`, does not clear existing transactions, skips files already moved to `processed/`.
 - **Inbox watcher:** runs as a daemon thread when `runserver` starts; polls `inbox/` every `IMPORT_INBOX_POLL_INTERVAL` seconds (default 300) and routes PDFs to the annual or monthly import.
-- **JSON logs:** `manage_inbox_import` writes a JSON log to `processed/json_logs/` for **every** processed PDF (`*_ERROR.json` when the parse has errors); only the deprecated commands write on error alone. `FileImportLog` still records every import.
+- **JSON logs:** `manage_inbox_import` writes a JSON log to `processed/json_logs/` for **every** processed PDF (`*_ERROR.json` when the parse has errors). `FileImportLog` still records every import.
 
 ## Data sources
 - **CSV Activity is the master for transactions.** PDF VL extraction is unreliable (hallucinates and misses transactions).

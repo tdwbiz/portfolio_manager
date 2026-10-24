@@ -215,57 +215,6 @@ class TestPortfolioFeatures(LiveServerTestCase):
         self.page.wait_for_selector("table, .summary, .portfolio-summary, h1, h2")
 
 
-class TestPDFImportFlow(LiveServerTestCase):
-    """Test PDF import functionality."""
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        from playwright.sync_api import sync_playwright
-
-        cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(headless=True)
-
-        cls.user = get_user_model().objects.create_user(
-            username="import_user", password="import_pass_321", email="import@test.com"
-        )
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
-        cls.user.delete()
-        super().tearDownClass()
-
-    def setUp(self):
-        self.page = self.browser.new_page()
-        # Auto-login
-        self.page.get(f"{self.live_server_url}/login/")
-        self.page.fill('input[name="username"]', "import_user")
-        self.page.fill('input[name="password"]', "import_pass_321")
-        self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
-
-    def tearDown(self):
-        self.page.close()
-
-    def test_pdf_import_page_loads(self):
-        """Test that PDF import page loads."""
-        self.page.get(f"{self.live_server_url}/pdf-import/")
-        self.page.wait_for_timeout(500)
-        # Check for file upload element
-        self.page.wait_for_selector(
-            'input[type="file"], .import, form[action*="import"]'
-        )
-
-    def test_file_upload_form_exists(self):
-        """Test that file upload form is present."""
-        self.page.get(f"{self.live_server_url}/pdf-import/")
-        # Look for file input
-        file_inputs = self.page.query_selector_all('input[type="file"]')
-        assert len(file_inputs) > 0, "File upload input not found"
-
-
 class TestResponsiveDesign(LiveServerTestCase):
     """Test responsive design across different screen sizes."""
 

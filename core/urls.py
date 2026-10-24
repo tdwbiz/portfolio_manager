@@ -1,7 +1,5 @@
 from django.urls import path
 
-from imports import views as import_views
-
 from .views_ledger import ledger_month_view
 
 from .views import (
@@ -104,12 +102,6 @@ urlpatterns = [
     path("accounts/<str:account_id>/", account_detail, name="account_detail"),
     path("accounts/<str:account_id>/edit/", account_edit, name="account_edit"),
     path("accounts/<str:account_id>/delete/", account_delete, name="account_delete"),
-    path("pdf-import/", import_views.pdf_import_view, name="pdf_import"),
-    path(
-        "annual-report-import/",
-        import_views.annual_report_import_view,
-        name="annual_report_import",
-    ),
     path("annual-reports/", annual_reports_view, name="annual_reports"),
     path("health/", health_check, name="health_check"),
     path("ledger/<str:account_id>/<int:year>/<int:month>/", ledger_month_view, name="ledger_month"),

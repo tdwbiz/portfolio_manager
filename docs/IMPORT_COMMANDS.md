@@ -5,8 +5,8 @@
 | What you want | Command |
 |---|---|
 | **Import all PDFs from inbox** (annual + monthly) | `manage_inbox_import` |
-| **Import CSV transactions from inbox** | `auto_import` |
-| **Import a specific CSV** | `import_statements --broker RBC` |
+| **Import Activity CSVs from inbox** | `import_csv` |
+| **Import Holdings CSVs into PositionHistory** | `import_csv --holdings` |
 | **Watch inbox continuously** | `watch_inbox` |
 
 ## PDF Import
@@ -29,33 +29,19 @@ Options:
 2. Falls back to VL model classification if filename doesn't match
 3. Routes to the correct parser automatically
 
-### DEPRECATED PDF Commands
-
-The following commands exist for backward compatibility but are **redundant**. Use `manage_inbox_import` instead.
-
-- ~~`manage_pdf_import`~~ — imports all PDFs as monthly statements only. Risk of misclassifying annual reports.
-- ~~`manage_annual_report_import`~~ — imports all PDFs as annual reports only.
-
 ## CSV Import
 
-### `auto_import`
+### `import_csv`
 
-Scans inbox for CSV files and auto-imports broker transactions.
+Scans inbox for Activity CSVs (RBC) and imports transactions. Idempotent: deduplicates by `tx_hash` and only parses files still in `inbox/`.
 
 ```powershell
-python manage.py auto_import
+python manage.py import_csv
 ```
 
 Options:
-- `--broker IB|RBC` — override auto-detection
-
-### `import_statements`
-
-Import specific CSV files with explicit broker type.
-
-```powershell
-python manage.py import_statements --broker RBC path/to/file.csv
-```
+- `--holdings` — import Holdings CSVs into `PositionHistory` instead of Activity CSVs
+- `--dry-run` — parse files without writing to the database
 
 ## Watcher
 

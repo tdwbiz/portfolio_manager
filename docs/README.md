@@ -115,13 +115,13 @@ Visit:
 | Document | Description |
 |----------|-------------|
 | [Admin & Branding Guide](ADMIN_BRANDING_GUIDE.md) | Complete guide to customization, admin features, and branding configuration |
-| [Deployment Guide](DEPLOYMENT.md) | Production deployment instructions (Linux, Nginx, Gunicorn, SSL) |
+| [Deployment Guide](deployment.md) | Production deployment instructions (Linux, Nginx, Gunicorn, SSL) |
 | [Security Guide](history/SECURITY.md) | Security hardening, rate limiting, authentication, authorization |
 | [Logging Guide](LOGGING_GUIDE.md) | Log locations, troubleshooting, yfinance diagnostics |
 | [Implementation Plan](IMPLEMENTATION_PLAN.md) | Development phases and completion status |
 | [Next Features](history/NEXT_FEATURES.md) | Prioritized enhancement roadmap |
 | [User Manual](history/USER_MANUAL.md) | Complete user guide with audit documentation |
-| [Specs Directory](specs/) | Feature specifications (M0–M8, Phase A/B) |
+| [Specs Directory](../specs/parked/PhaseB/) | Feature specifications (Phase B, parked) |
 
 ## Project Structure
 
@@ -175,7 +175,7 @@ portfolio_manager/
 │   ├── urls.py              # Project URL routing
 │   └── wsgi.py              # WSGI config
 ├── scripts/                 # Database scripts
-├── specs/                   # Feature specifications (M0–M8)
+├── specs/parked/            # Feature specifications (Phase B, parked)
 ├── inbox/                   # Auto-import inbox directory
 ├── processed/               # Processed statements directory
 ├── logs/                    # Application logs

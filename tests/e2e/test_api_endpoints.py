@@ -10,7 +10,7 @@ from pathlib import Path
 import django
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
 from pw_session import PlaywrightLiveServerMixin
 
@@ -21,7 +21,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestAPIEndpoints(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test API endpoints through browser interactions."""
 
     def setUp(self):
@@ -82,7 +82,7 @@ class TestAPIEndpoints(PlaywrightLiveServerMixin, LiveServerTestCase):
         _account_apis = [r for r in self.api_responses if "account" in r["url"].lower()]
 
 
-class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestChartRendering(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test that charts and visualizations render correctly."""
 
     def setUp(self):
@@ -134,7 +134,7 @@ class TestChartRendering(PlaywrightLiveServerMixin, LiveServerTestCase):
         """)
 
 
-class TestRealTimeFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestRealTimeFeatures(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test real-time features like live updates."""
 
     def setUp(self):

@@ -11,7 +11,7 @@ from pathlib import Path
 import django
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
 from pw_session import PlaywrightLiveServerMixin
 
@@ -24,7 +24,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test the complete user onboarding journey."""
 
     def setUp(self):
@@ -90,7 +90,7 @@ class TestCompleteUserOnboarding(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.wait_for_url(f"{self.live_server_url}/")
 
 
-class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestTransactionManagement(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test transaction creation and management workflows."""
 
     def setUp(self):
@@ -150,7 +150,7 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.query_selector(filter_selectors[0])
 
 
-class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestReportGeneration(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test report generation and viewing."""
 
     def setUp(self):
@@ -197,7 +197,7 @@ class TestReportGeneration(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.wait_for_selector("table, .reports, h1, h2", timeout=3000)
 
 
-class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestSecurityFeatures(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test security features of the application."""
 
     def setUp(self):
@@ -256,7 +256,7 @@ class TestSecurityFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
         assert "login" in self.page.url.lower()
 
 
-class TestPerformanceMetrics(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestPerformanceMetrics(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test page load performance and responsiveness."""
 
     def setUp(self):

@@ -10,7 +10,7 @@ from pathlib import Path
 import django
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
 from pw_session import PlaywrightLiveServerMixin
 
@@ -20,11 +20,11 @@ sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test")
 django.setup()
 
-# Note: This test file uses LiveServerTestCase with Playwright.
+# Note: This test file uses StaticLiveServerTestCase with Playwright.
 # It requires a live Django server. Run with: pytest tests/e2e/test_smoke_pytest.py -v -s
 
 
-class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestInfrastructure(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test that the testing infrastructure is working."""
 
     def setUp(self):

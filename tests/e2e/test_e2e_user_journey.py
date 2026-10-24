@@ -10,7 +10,7 @@ from pathlib import Path
 import django
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
 from pw_session import PlaywrightLiveServerMixin
 
@@ -21,7 +21,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestUserAuthentication(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test user authentication flows."""
 
     def setUp(self):
@@ -85,7 +85,7 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.assertTrue(self.page.url.startswith(self.live_server_url))
 
 
-class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestDashboardNavigation(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test dashboard and navigation features."""
 
     def setUp(self):
@@ -137,7 +137,7 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.assertIn("accounts", self.page.url.lower())
 
 
-class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestPortfolioFeatures(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test portfolio management features."""
 
     def setUp(self):
@@ -169,7 +169,7 @@ class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.wait_for_selector("table, .summary, .portfolio-summary, h1, h2")
 
 
-class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestResponsiveDesign(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test responsive design across different screen sizes."""
 
     def setUp(self):
@@ -213,7 +213,7 @@ class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
                 assert self.page.content(), "Page content is empty"
 
 
-class TestFormValidation(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestFormValidation(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test form validation and error handling."""
 
     def setUp(self):

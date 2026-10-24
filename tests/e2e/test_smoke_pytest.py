@@ -19,7 +19,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 # Note: This test file uses LiveServerTestCase with Playwright.
-# It requires a live Django server. Run with: pytest tests/test_smoke_pytest.py -v -s
+# It requires a live Django server. Run with: pytest tests/e2e/test_smoke_pytest.py -v -s
 
 
 class TestInfrastructure(LiveServerTestCase):
@@ -94,6 +94,6 @@ class TestInfrastructure(LiveServerTestCase):
         print("✓ User authentication works")
 
 
-# Run with: python -m pytest tests/test_smoke_pytest.py -v -s
+# Run with: python -m pytest tests/e2e/test_smoke_pytest.py -v -s
 if __name__ == "__main__":
-    pytest.main(["tests/test_smoke_pytest.py", "-v", "-s"])
+    pytest.main(["tests/e2e/test_smoke_pytest.py", "-v", "-s"])

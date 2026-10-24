@@ -385,6 +385,6 @@ class TestFormValidation(LiveServerTestCase):
             # Note: This might not always be true depending on implementation
 
 
-# Run with: python -m pytest tests/test_e2e_user_journey.py -v --tb=short
+# Run with: python -m pytest tests/e2e/test_e2e_user_journey.py -v --tb=short
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -39,7 +39,9 @@ def run_tests():
     ]
     
     start_time = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Browser tests are only collected when RUN_E2E=1 (see tests/conftest.py).
+    env = {**os.environ, "RUN_E2E": "1"}
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     elapsed_time = time.time() - start_time
     
     # Print test output

@@ -230,6 +230,6 @@ class TestRealTimeFeatures(LiveServerTestCase):
         print(f"JavaScript errors encountered: {len(js_errors)}")
 
 
-# Run with: python -m pytest tests/test_api_endpoints.py -v --tb=short
+# Run with: python -m pytest tests/e2e/test_api_endpoints.py -v --tb=short
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

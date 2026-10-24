@@ -381,6 +381,6 @@ class TestPerformanceMetrics(LiveServerTestCase):
         self.page.wait_for_url("**/dashboard/**")
 
 
-# Run with: python -m pytest tests/test_user_workflows.py -v --tb=short -s
+# Run with: python -m pytest tests/e2e/test_user_workflows.py -v --tb=short -s
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short", "-s"])

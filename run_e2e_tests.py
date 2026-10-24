@@ -8,7 +8,7 @@ real user interactions with the application.
 Usage:
     python run_e2e_tests.py              # Run all E2E tests
     python run_e2e_tests.py --headed     # Run with visible browser
-    python run_e2e_tests.py --file tests/test_e2e_user_journey.py  # Run specific test file
+    python run_e2e_tests.py --file tests/e2e/test_e2e_user_journey.py  # Run specific test file
     python run_e2e_tests.py --suite auth  # Run specific test suite
     python run_e2e_tests.py --report      # Generate HTML report
 """
@@ -93,7 +93,9 @@ def run_tests(test_path=None, headed=False, report=False, suite=None):
     
     # Run tests
     try:
-        result = subprocess.run(cmd, cwd=project_root, check=False)
+        # Browser tests are only collected when RUN_E2E=1 (see tests/conftest.py).
+        env = {**os.environ, 'RUN_E2E': '1'}
+        result = subprocess.run(cmd, cwd=project_root, check=False, env=env)
         return result.returncode
     except KeyboardInterrupt:
         print("\n\nTests interrupted by user.")
@@ -126,9 +128,9 @@ def show_test_summary():
     
     print("\nTest Files:")
     test_files = [
-        'tests/test_e2e_user_journey.py',
-        'tests/test_user_workflows.py',
-        'tests/test_api_endpoints.py',
+        'tests/e2e/test_e2e_user_journey.py',
+        'tests/e2e/test_user_workflows.py',
+        'tests/e2e/test_api_endpoints.py',
     ]
     
     for tf in test_files:
@@ -144,7 +146,7 @@ def show_test_summary():
     print("  Run all tests:          python run_e2e_tests.py")
     print("  Run with browser:       python run_e2e_tests.py --headed")
     print("  Run auth tests:         python run_e2e_tests.py --suite auth")
-    print("  Run specific file:      python run_e2e_tests.py --file tests/test_e2e_user_journey.py")
+    print("  Run specific file:      python run_e2e_tests.py --file tests/e2e/test_e2e_user_journey.py")
     print("  Generate HTML report:   python run_e2e_tests.py --report")
     print("=" * 70 + "\n")
 
@@ -159,7 +161,7 @@ Examples:
   python run_e2e_tests.py                    Run all E2E tests
   python run_e2e_tests.py --headed           Run with visible browser
   python run_e2e_tests.py --suite auth       Run authentication tests only
-  python run_e2e_tests.py --file tests/test_e2e_user_journey.py
+  python run_e2e_tests.py --file tests/e2e/test_e2e_user_journey.py
   python run_e2e_tests.py --report           Generate HTML report
         """
     )

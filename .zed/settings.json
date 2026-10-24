@@ -12,7 +12,7 @@
           "autoImportCompletions": true,
           "autoSearchPaths": true,
           "extraPaths": [
-            "C:/AI-DevTeam/ai-env/Lib/site-packages"
+            "/opt/pm-venv/lib/python3.14/site-packages"
           ],
           "typeCheckingMode": "basic",
           "stubPath": "typings"

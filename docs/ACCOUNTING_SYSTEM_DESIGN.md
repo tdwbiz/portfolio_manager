@@ -1,5 +1,7 @@
 # Accounting Ledger System Design
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 ## Current State Analysis
 
 ### What We Have:

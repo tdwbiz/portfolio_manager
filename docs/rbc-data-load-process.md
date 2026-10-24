@@ -1,5 +1,7 @@
 # RBC Data Load Process
 
+> **SUPERSEDED** — superseded by docs/IMPORT_COMMANDS.md
+
 This document describes the complete data loading workflow for RBC (Royal Bank of Canada) brokerage statements, covering both CSV and PDF import paths.
 
 ---

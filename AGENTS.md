@@ -155,7 +155,7 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 | Batch statements (anchored on RBC) | `batch_generate_statements [--account ID] [--dry-run]` (all accounts by default); views take `?regenerate=1` / `?batch=1` |
 | Reconciliation (CSV vs RBC, $1 threshold) | `reconcile`, `/accounts/reconcile/` |
 | Account edit with currency sub-accounts | `/accounts/<id>/edit/` |
-| Reconciliation scripts | `scripts/verify_pdf_integrity.py`, `scripts/ledger_high_change.py`, `scripts/quantity_reconciliation*.py`, `scripts/dump_chains.py` (usage in `docs/project-history.md`) |
+| Reconciliation scripts (parked — see docs/architecture.md §11) | `scripts/verify_pdf_integrity.py`, `scripts/ledger_high_change.py`, `scripts/quantity_reconciliation*.py`, `scripts/dump_chains.py` (usage in `docs/project-history.md`) |
 
 ## RBC PDF statements
 **PDF columns:** `DATE | ACTIVITY | DESCRIPTION | QUANTITY | RATE | DEBIT | CREDIT`. Four sections are parsed: Account Info (`RbcMonthly`), Balances (`RbcMonthlyBalance`), Holdings (`RbcMonthlyHolding`), Account Activity (`RbcMonthlyTransaction`, unreliable).

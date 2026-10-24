@@ -1,5 +1,7 @@
 # Accounting Ledger System - Implementation Status
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 ## Phase 1: Models Created ✓
 
 ### New Models Added to `core/models.py`:

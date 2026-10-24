@@ -92,3 +92,16 @@ Browser tests themselves: tdw only, before merge: `RUN_E2E=1 /opt/pm-venv/bin/py
 2. *`tearDownClass` user deletes:* keep or drop? **Recommended:** drop them — the rows are flushed after every test anyway, and `cls.user` no longer exists per-test.
 3. *`test_dashboard_loads` intent:* assert root URL, or actually visit `/dashboard/`? **Recommended:** `goto /dashboard/` then keep the dashboard-in-URL assert — the test is about the dashboard page, and the route exists.
 4. *`test_login.py::test_login_page_loads`* already accepts `"Sign In"` / `"portfolio"` in the title, so the title fix is only needed in `test_e2e_user_journey.py`. **Recommended:** leave `test_login.py`'s title assert as is.
+
+All four questions are resolved — see Decisions below.
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts the recommended answers to all open questions:
+
+1. Fix **all five** dashboard-URL-after-login occurrences with the same pattern (`test_login.py::test_login_with_valid_credentials`, `test_e2e_user_journey.py::test_successful_login` and `::test_dashboard_loads`, `test_user_workflows.py::test_new_user_first_login`, `test_smoke_pytest.py::test_user_can_login`).
+2. **Drop** the `tearDownClass` user deletes — rows are flushed after every test anyway, and `cls.user` no longer exists per-test.
+3. `test_dashboard_loads`: `goto /dashboard/` first, then keep the dashboard-in-URL assert (the route exists; the test is about the dashboard page).
+4. Leave `test_login.py::test_login_page_loads`'s title assert as is (it already accepts `"Sign In"`).
+
+The steps above already reflect these answers.

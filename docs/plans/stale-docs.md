@@ -16,7 +16,7 @@ Finish the two last audit-3 doc batches:
 - `docs/ACCOUNTING_IMPLEMENTATION_STATUS.md`, `ACCOUNTING_OPTION_C_UPDATE.md`, `ACCOUNTING_QUICK_START.md`, `ACCOUNTING_SYSTEM_DESIGN.md`, `ACCOUNTING_SYSTEM_SUMMARY.md`, `ACCOUNTING_SYSTEM_VIEWS_DESIGN.md` — one-line `> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)` banner under the title.
 - `docs/rbc_balance_reconciliation.sql`, `docs/rbc_csv_vs_pdf_comparison.sql` — `-- PARKED (reconciliation — see docs/architecture.md §11)` first line; `docs/rbc-data-load-process.md` — banner "superseded by docs/IMPORT_COMMANDS.md".
 - `AGENTS.md` — mark the "Reconciliation scripts" row (line ~158) as parked.
-- `specs/PhaseB/` → `specs/parked/PhaseB/` (`git mv`, 12 files) + new `specs/README.md` (one paragraph: only Phase B remains, parked; archived specs in `docs/history/specs/`).
+- `specs/PhaseB/` → `specs/parked/PhaseB/` (`git mv`, 17 files) + new `specs/README.md` (one paragraph: only Phase B remains, parked; archived specs in `docs/history/specs/`).
 - `core/management/commands/rebuild_position_history.py`, `rebuild_positions_from_transactions.py` — one-line "PARKED (see docs/architecture.md §11)" at the top of each docstring (docstring only, no logic change).
 - `docs/DEVELOPMENT_GUIDE.md` line 123 — stop calling `docs/history/specs/PhaseD/PHASED_IMPLEMENTATION_PLAN.md` "the current implementation plan"; point at `docs/architecture.md` + `docs/plans/` instead.
 - `docs/README.md` — Specs Directory row (line 124): link `../specs/parked/PhaseB/` (specs/ is at repo root, not under docs/), drop "Phase A" (only Phase B remains, parked); fix the tree line (~178) the same way; fix `[Deployment Guide](DEPLOYMENT.md)` → `deployment.md` (file is lowercase).
@@ -38,7 +38,7 @@ Finish the two last audit-3 doc batches:
 2. **Deletions**: `git rm "docs/DEPLOYMENT (2).md" docs/mkdocs.yml docs/index.md docs/api`. Check: `ls docs/api docs/mkdocs.yml` fails; `git status` shows 5 deletions staged.
 3. **Parked banners — docs**: add the one-line banner to the 6 `docs/ACCOUNTING_*.md`, the 2 `docs/*.sql`, and the superseded note to `docs/rbc-data-load-process.md`. Check: `rg -l "PARKED" docs/ACCOUNTING_* | wc -l` = 6; `head -1 docs/rbc_balance_reconciliation.sql` shows the banner.
 4. **Parked labels — AGENTS.md + rebuild commands**: mark the AGENTS.md "Reconciliation scripts" row parked; add the PARKED line to the two rebuild-command docstrings. Check: `rg -n "PARKED" core/management/commands/rebuild_position*.py` = 2 hits; `rg -n "Reconciliation scripts" AGENTS.md` shows "parked".
-5. **specs/PhaseB → specs/parked/PhaseB**: `git mv specs/PhaseB specs/parked/PhaseB`, add `specs/README.md`. Check: `ls specs/parked/PhaseB | wc -l` = 12; `git status` shows renames only.
+5. **specs/PhaseB → specs/parked/PhaseB**: `git mv specs/PhaseB specs/parked/PhaseB`, add `specs/README.md`. Check: `ls specs/parked/PhaseB | wc -l` = 17; `git status` shows renames only.
 6. **DEVELOPMENT_GUIDE.md**: fix line 123. Check: `rg -n "current implementation plan" docs/DEVELOPMENT_GUIDE.md` = no hits.
 7. **docs/README.md**: fix Specs row, tree line and `deployment.md` case. Check: `rg -n "Specs Directory" docs/README.md` shows `../specs/parked/PhaseB/`; `rg -n "\(DEPLOYMENT.md\)" docs/README.md` = no hits.
 8. **COMPREHENSIVE_CODE_REVIEW.md + IMPLEMENTATION_PLAN.md**: apply the prose fixes listed above (re-run the moved-file rg first to catch anything missed). Check: `rg -n "SECURITY.md|CODE_REVIEW.md|NEXT_FEATURES.md" docs/COMPREHENSIVE_CODE_REVIEW.md` shows only `history/` paths.

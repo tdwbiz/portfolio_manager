@@ -45,14 +45,14 @@ class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
     @pytest.mark.smoke
     def test_playwright_works(self):
         """Verify Playwright is installed and working."""
-        self.page.get(self.live_server_url)
+        self.page.goto(self.live_server_url)
         assert self.page.title() is not None
         print("✓ Playwright is working correctly")
 
     @pytest.mark.smoke
     def test_django_server_running(self):
         """Verify Django live server is running."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         # Should not raise an exception
         assert self.page.content() is not None
         print("✓ Django live server is responding")
@@ -60,7 +60,7 @@ class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
     @pytest.mark.smoke
     def test_login_page_accessible(self):
         """Verify login page is accessible."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.wait_for_selector('input[name="username"]', timeout=5000)
         assert "Login" in self.page.title() or "login" in self.page.url.lower()
         print("✓ Login page is accessible")
@@ -68,7 +68,7 @@ class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
     @pytest.mark.smoke
     def test_user_can_login(self):
         """Verify user can successfully log in."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
 
         # Fill credentials
         self.page.fill('input[name="username"]', "smoke_test_user")
@@ -78,7 +78,7 @@ class TestInfrastructure(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.click('button[type="submit"]')
 
         # Should redirect to dashboard
-        self.page.wait_for_url("**/dashboard/**", timeout=10000)
+        self.page.wait_for_url(f"{self.live_server_url}/")
         assert "dashboard" in self.page.url.lower()
         print("✓ User authentication works")
 

@@ -39,13 +39,13 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_login_page_loads(self):
         """Test that the login page loads correctly."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.wait_for_selector('input[name="username"]')
         self.assertIn("Login", self.page.title())
 
     def test_successful_login(self):
         """Test successful user login."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
 
         # Fill in credentials
         self.page.fill('input[name="username"]', "e2e_test_user")
@@ -53,14 +53,14 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
 
         # Submit form
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
         # Verify redirect to dashboard
         self.assertIn("dashboard", self.page.url.lower())
 
     def test_failed_login(self):
         """Test login with incorrect credentials."""
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
 
         # Fill in wrong credentials
         self.page.fill('input[name="username"]', "e2e_test_user")
@@ -75,7 +75,7 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_open_redirect_protection(self):
         """Test that open redirect attempts are blocked."""
-        self.page.get(f"{self.live_server_url}/login/?next=https://evil.com")
+        self.page.goto(f"{self.live_server_url}/login/?next=https://evil.com")
 
         # Fill in correct credentials
         self.page.fill('input[name="username"]', "e2e_test_user")
@@ -106,11 +106,11 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def setUp(self):
         # Auto-login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "nav_test_user")
         self.page.fill('input[name="password"]', "nav_pass_456")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_dashboard_loads(self):
         """Test that the dashboard loads successfully."""
@@ -138,7 +138,7 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_account_list_page(self):
         """Test navigating to accounts page."""
-        self.page.get(f"{self.live_server_url}/accounts/")
+        self.page.goto(f"{self.live_server_url}/accounts/")
         self.page.wait_for_timeout(500)
         self.assertIn("accounts", self.page.url.lower())
 
@@ -162,21 +162,21 @@ class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def setUp(self):
         # Auto-login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "portfolio_user")
         self.page.fill('input[name="password"]', "port_pass_789")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_portfolio_page_loads(self):
         """Test that portfolio page loads."""
-        self.page.get(f"{self.live_server_url}/portfolio/")
+        self.page.goto(f"{self.live_server_url}/portfolio/")
         self.page.wait_for_timeout(500)
         self.assertIn("portfolio", self.page.url.lower())
 
     def test_portfolio_summary_visible(self):
         """Test that portfolio summary is displayed."""
-        self.page.get(f"{self.live_server_url}/portfolio/summary/")
+        self.page.goto(f"{self.live_server_url}/portfolio/summary/")
         self.page.wait_for_timeout(500)
         # Check for common summary elements
         self.page.wait_for_selector("table, .summary, .portfolio-summary, h1, h2")
@@ -201,11 +201,11 @@ class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def setUp(self):
         # Auto-login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "responsive_user")
         self.page.fill('input[name="password"]', "resp_pass_654")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     @pytest.mark.parametrize(
         "viewport,device_name",
@@ -222,7 +222,7 @@ class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.set_viewport_size({"width": width, "height": height})
 
         # Test dashboard
-        self.page.get(f"{self.live_server_url}/dashboard/")
+        self.page.goto(f"{self.live_server_url}/dashboard/")
         self.page.wait_for_timeout(300)
 
         # Take screenshot for visual inspection
@@ -252,15 +252,15 @@ class TestFormValidation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def setUp(self):
         # Auto-login
-        self.page.get(f"{self.live_server_url}/login/")
+        self.page.goto(f"{self.live_server_url}/login/")
         self.page.fill('input[name="username"]', "form_user")
         self.page.fill('input[name="password"]', "form_pass_987")
         self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard/**")
+        self.page.wait_for_url(f"{self.live_server_url}/")
 
     def test_empty_form_submission(self):
         """Test that empty forms show validation errors."""
-        self.page.get(f"{self.live_server_url}/accounts/new/")
+        self.page.goto(f"{self.live_server_url}/accounts/new/")
         self.page.wait_for_timeout(500)
 
         # Try to submit empty form

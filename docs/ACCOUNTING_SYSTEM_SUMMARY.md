@@ -1,5 +1,7 @@
 # Accounting System Design — Executive Summary
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 ## Overview
 
 Build a double-entry accounting system where:

@@ -1,5 +1,7 @@
 # Accounting System Update - Option C Implementation
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 ## Changes Made
 
 ### 1. Added INCOME Account Type

@@ -1,5 +1,7 @@
 # Accounting System Views — Design Document
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 **Date:** 2026-08-08  
 **Status:** Design Phase (Not Implemented)  
 **Scope:** Financial reporting views built on top of the existing Ledger system

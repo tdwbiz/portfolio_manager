@@ -1,5 +1,7 @@
 # Accounting Ledger System - Quick Start Guide
 
+> **PARKED** (ledger/accounting layer — see docs/architecture.md §11)
+
 ## What's Been Built
 
 ✅ **4 New Database Models** - Ready to create tables  

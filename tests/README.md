@@ -57,6 +57,10 @@ pip install pytest-html
 
 ## ▶️ Running Tests
 
+> **Note:** the browser (Playwright) tests in `tests/e2e/` are only collected when
+> `RUN_E2E=1` is set — they are tdw-only and never run on Pi's sandbox.
+> Plain pytest runs (`python -m pytest tests/`) therefore skip them automatically.
+
 ### Quick Start
 
 ```bash
@@ -95,7 +99,7 @@ python run_e2e_tests.py --suite workflows
 ### Run Specific Test File
 
 ```bash
-python run_e2e_tests.py --file tests/test_e2e_user_journey.py
+python run_e2e_tests.py --file tests/e2e/test_e2e_user_journey.py
 ```
 
 ### Generate HTML Report
@@ -144,7 +148,7 @@ python -m pytest tests/ -v --tb=long
 
 ## 📁 Test Files
 
-### `test_e2e_user_journey.py`
+### `tests/e2e/test_e2e_user_journey.py`
 Core user journey tests:
 - `TestUserAuthentication` - Login/logout flows
 - `TestDashboardNavigation` - Navigation and routing
@@ -153,7 +157,7 @@ Core user journey tests:
 - `TestResponsiveDesign` - Responsive design across viewports
 - `TestFormValidation` - Form validation and error handling
 
-### `test_user_workflows.py`
+### `tests/e2e/test_user_workflows.py`
 Comprehensive user workflow tests:
 - `TestCompleteUserOnboarding` - First-time user experience
 - `TestTransactionManagement` - Transaction creation and viewing
@@ -161,7 +165,7 @@ Comprehensive user workflow tests:
 - `TestSecurityFeatures` - Security feature validation
 - `TestPerformanceMetrics` - Page load performance
 
-### `test_api_endpoints.py`
+### `tests/e2e/test_api_endpoints.py`
 API and JavaScript interaction tests:
 - `TestAPIEndpoints` - AJAX endpoint testing
 - `TestChartRendering` - Chart visualization testing
@@ -371,9 +375,9 @@ Opens `tests/test_report.html` in your browser with:
 ### Console Output
 
 ```
-tests/test_e2e_user_journey.py::TestUserAuthentication::test_login_page_loads PASSED
-tests/test_e2e_user_journey.py::TestUserAuthentication::test_successful_login PASSED
-tests/test_e2e_user_journey.py::TestUserAuthentication::test_failed_login PASSED
+tests/e2e/test_e2e_user_journey.py::TestUserAuthentication::test_login_page_loads PASSED
+tests/e2e/test_e2e_user_journey.py::TestUserAuthentication::test_successful_login PASSED
+tests/e2e/test_e2e_user_journey.py::TestUserAuthentication::test_failed_login PASSED
 ...
 ```
 

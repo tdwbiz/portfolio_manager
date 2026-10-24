@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.test import LiveServerTestCase
 
 # Setup Django
-project_root = str(Path(__file__).parent.parent)
+project_root = str(Path(__file__).parent.parent.parent)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test")
 django.setup()
@@ -385,6 +385,6 @@ class TestFormValidation(LiveServerTestCase):
             # Note: This might not always be true depending on implementation
 
 
-# Run with: python -m pytest tests/test_e2e_user_journey.py -v --tb=short
+# Run with: python -m pytest tests/e2e/test_e2e_user_journey.py -v --tb=short
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

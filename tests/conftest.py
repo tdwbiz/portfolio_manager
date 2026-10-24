@@ -6,6 +6,9 @@ import os
 import sys
 from pathlib import Path
 
+# Browser tests need Playwright; only collected when RUN_E2E=1 (tdw only, never Pi).
+collect_ignore = [] if os.environ.get("RUN_E2E") == "1" else ["e2e"]
+
 import django
 import pytest
 from django.contrib.auth import get_user_model

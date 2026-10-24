@@ -120,7 +120,7 @@ function global:prompt {
 
 ## Phase Status
 
-See `specs/PhaseD/PHASED_IMPLEMENTATION_PLAN.md` for the current implementation plan.
+See `docs/history/specs/PhaseD/PHASED_IMPLEMENTATION_PLAN.md` for the current implementation plan.
 
 ## Memory & Skills
 

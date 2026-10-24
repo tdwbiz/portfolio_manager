@@ -1,7 +1,7 @@
 # Import paths — phase 1 step 5 (audit 3 batch 1)
 
 Branch: `refactor/import-paths`. Source: `docs/architecture.md` §6 + §12 phase 1 step 5, and
-`docs/audit/03-commands-scripts-docs.md` batch 1 as amended by the "Decisions" section
+`docs/audit/03-commands-scripts-docs.md` batch 1 as amended by the "Decisions" section below
 (Q3: `imports/parsers_pdf.py` and `docs/TEXT_PARSER_IMPLEMENTATION.md` stay).
 
 ## Goal
@@ -74,8 +74,9 @@ Not touched: `imports/parsers_pdf.py`, `docs/TEXT_PARSER_IMPLEMENTATION.md`, `im
    `git grep -ln "manage_pdf_import" -- '*.py'` → no hits.
 4. **Delete the deprecated CSV commands.** Remove `imports/management/commands/auto_import.py` and
    `imports/management/commands/import_statements.py` and `imports/tests/test_import_statements.py`;
-   port `imports/tests/test_auto_import.py` to `import_csv` (drop IB / `--broker` cases) and rename it
-   `imports/tests/test_import_csv_command.py` if that avoids a clash with `core/tests/test_csv_import.py`.
+   port `imports/tests/test_auto_import.py` to `import_csv` (drop the IB / `--broker` cases — Q1) and
+   rename it `imports/tests/test_import_csv_command.py` to avoid a clash with
+   `core/tests/test_csv_import.py`.
    Check: `git grep -ln "import_statements" -- '*.py'` → no hits, and
    `/opt/pm-venv/bin/python -m pytest imports/tests --collect-only -q`.
 5. **Delete the dead annual text parser.** Remove `imports/parsers_annual.py` and
@@ -128,3 +129,18 @@ test module still imports a deleted module, and
    `inbox/` are parsed, activity import skips `holdings*` files), so no double-import.
 4. `docs/README.md` is also in audit 3 batch 5 (stale docs).
    **Recommended:** make only the minimal command-list/tree corrections here; leave the rest to batch 5.
+
+## Decisions (tdw, Oct 24)
+
+tdw accepts all four recommended answers from the open questions above:
+
+1. **Q1 — `test_auto_import.py`:** port the RBC/inbox/FileImportLog/duplicate-hash cases to
+   `import_csv`; delete the IB and `--broker` cases (IB import is a separate future track,
+   architecture §6).
+2. **Q2 — `test_parsers_pdf.py` tests 5/6:** port them to `manage_inbox_import` with a temp inbox dir
+   and the existing VL mock; if that proves awkward, delete the two command-level tests and keep the
+   direct `parse_rbc_pdf` tests (the parser is re-checked in step 12).
+3. **Q3 — watcher:** yes, run `import_csv --holdings` on every poll, right after the activity run;
+   both runs are incremental, so no double-import.
+4. **Q4 — `docs/README.md`:** make only the minimal command-list/tree corrections in this plan; leave
+   the rest of batch 5 (stale docs) to its own step.

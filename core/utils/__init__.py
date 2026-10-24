@@ -35,7 +35,6 @@ from .portfolio import (
     compute_realised_pnl,
     compute_series_by_account,
     get_top_movers,
-    get_upcoming_dividends,
     group_positions_by_account,
     group_positions_by_category,
 )
@@ -79,5 +78,4 @@ __all__ = [
     "group_positions_by_account",
     "group_positions_by_category",
     "get_top_movers",
-    "get_upcoming_dividends",
 ]

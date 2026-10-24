@@ -78,6 +78,11 @@ htmlcov/
 .aider*
 docs/rbc_*.csv
 # private data and run outputs: keep local, never commit
+events.jsonl
+e2e/report.html
+tests/e2e/report.html
+tests/e2e/tests/e2e/report.html
+tests/test_report.html
 docs/reconciliation/
 RECONCILIATION_REPORT.md
 recon_output.txt

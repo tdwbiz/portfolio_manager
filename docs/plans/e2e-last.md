@@ -115,3 +115,41 @@ tdw accepts the recommended answers to all three open questions above:
 2. Dropdown menus (Risk / Reports / Data Tools) are out of scope — no Bootstrap JS interaction in
    this change; a dedicated test can come later.
 3. The `live_server` fixture override goes in `tests/e2e/conftest.py` only, not a root conftest.
+
+## Decisions (tdw, Oct 24 — after first browser run)
+
+The StaticLiveServerTestCase switch works (no more static NoneType errors), but the two remaining
+defects are fixed as follows:
+
+1. **Remove the `live_server` fixture override in `tests/e2e/conftest.py` completely** (supersedes
+   step 3). The `_StaticLiveServer` shim broke all 35 pytest-style tests at setup with
+   `AttributeError: '_StaticLiveServer' object has no attribute '_live_server_modified_settings'`
+   (pytest-django, `fixtures.py` line 663, `_live_server_helper`). pytest-django's own
+   `live_server` fixture already serves static files when `django.contrib.staticfiles` is in
+   INSTALLED_APPS — `pytest_django/live_server_helper.py` lines 30–33 wrap the server in
+   `StaticFilesHandler` in exactly that case. It **is** installed for the test settings:
+   `portfolio_manager/settings_test.py` line 5 (`from .settings import *`) inherits
+   `INSTALLED_APPS` from `portfolio_manager/settings.py`, where line 56 is
+   `"django.contrib.staticfiles",`. So the override is deleted and the existing `page` /
+   `api_page` fixtures keep depending on pytest-django's `live_server` unchanged.
+2. **`test_navigation_menu`: every selector must match the base-template markup exactly.** The run
+   timed out waiting for `locator("nav").get_by_role("link", name="Dashboard", exact=True)`. Exact
+   top-level link markup in `core/templates/core/base.html` (all inside `<ul class="navbar-nav">`,
+   line 69; each is `<a class="nav-link …" href="{% url '…' %}">`):
+   - Dashboard — `<a>` lines 71–76, `href` line 73 (`{% url 'dashboard' %}` → `/dashboard/`),
+     label line 75: `<i class="bi bi-speedometer2"></i> Dashboard`
+   - Portfolio — `<a>` lines 79–84, `href` line 81 (`portfolio_summary` → `/portfolio/`), label
+     line 83
+   - Transactions — `<a>` lines 111–116, `href` line 113 (`transaction_list` → `/transactions/`),
+     label line 115
+   - Accounts — `<a>` lines 119–124, `href` line 121 (`accounts_list` → `/accounts/`), label
+     line 123
+   - Annual Reports — `<a>` lines 135–141, `href` line 137 (`annual_reports` → `/annual-reports/`);
+     the label wraps across two source lines ("Annual" line 139 / "Reports" line 140)
+
+   A role/name query inside `<nav>` cannot disambiguate "Dashboard": the Risk dropdown contains a
+   second link with that name (`a.dropdown-item`, lines 159–163). Each top-level link is therefore
+   selected uniquely by `nav ul.navbar-nav a.nav-link[href="<path>"]` — dropdown toggles are
+   `a.nav-link.dropdown-toggle` with `href="#"` and dropdown items are `a.dropdown-item`, so the
+   selector matches exactly one element per entry. The test also asserts the whitespace-normalised
+   label text before clicking (guards the two-line "Annual Reports" case).

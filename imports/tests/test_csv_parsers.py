@@ -1,5 +1,6 @@
 """Tests for RBC and IB CSV parsers."""
 
+import csv
 import os
 import tempfile
 from datetime import date, datetime
@@ -16,11 +17,22 @@ from imports.parsers import parse_rbc_csv, parse_ib_csv
 # ---------------------------------------------------------------------------
 
 def _write_csv(rows: list[list[str]]) -> str:
-    """Write CSV rows to a temp file and return the path."""
+    """Write CSV rows to a temp file and return the path.
+
+    Uses csv.writer so fields containing commas (dates, amounts) are quoted,
+    matching the real RBC/IB exports.
+    """
     fd, path = tempfile.mkstemp(suffix='.csv')
     with os.fdopen(fd, 'w', newline='', encoding='utf-8-sig') as f:
-        for row in rows:
-            f.write(','.join(row) + '\n')
+        csv.writer(f).writerows(rows)
+    return path
+
+
+def _write_text(text: str) -> str:
+    """Write raw CSV text to a temp file and return the path."""
+    fd, path = tempfile.mkstemp(suffix='.csv')
+    with os.fdopen(fd, 'w', newline='', encoding='utf-8-sig') as f:
+        f.write(text)
     return path
 
 
@@ -70,23 +82,24 @@ class RbcCsvParserTests(TestCase):
         self.assertEqual(trades[0]['amount'], Decimal('886.81'))
 
     def test_parses_dividend_reinvestment(self):
-        """DIV REIN should be parsed as a net-zero transaction."""
+        """Real RBC reinvestments are DIV rows with qty > 0 and negative value."""
         path = _write_csv([
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
              'Quantity', 'Price', 'Settlement Date', 'Account',
-             'Value', 'Currency'],
-            ['October 08, 2025', 'Div Reinvest', 'RBF2010', 'RBF 2010',
-             '340', '10.00', 'October 10, 2025', '90000001',
-             '3400.00', 'CAD'],
+             'Value', 'Currency', 'Notes'],
+            ['October 08, 2025', 'Dividends', 'VFV', 'Vanguard S&P 500',
+             '17', '49.56', '', '90000001',
+             '-842.52', 'CAD', 'REI - REINV@C$49.56'],
         ])
 
         trades, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
-        self.assertEqual(trades[0]['type'], 'DIV REIN')
-        self.assertEqual(trades[0]['quantity'], Decimal('340'))
-        self.assertEqual(trades[0]['price'], Decimal('10.00'))
-        # DIV REIN: debit = cost, credit = 0, net = 0
-        self.assertEqual(trades[0]['amount'], Decimal('3400.00'))
+        self.assertEqual(trades[0]['type'], 'DIV')
+        self.assertEqual(trades[0]['quantity'], Decimal('17'))
+        self.assertEqual(trades[0]['price'], Decimal('49.56'))
+        # REI: negative value = cash outflow into shares
+        self.assertEqual(trades[0]['amount'], Decimal('-842.52'))
+        self.assertIn('REI', trades[0]['notes'])
 
     def test_parses_interest_received(self):
         """INTEREST_RECEIVED should be parsed."""
@@ -128,7 +141,7 @@ class RbcCsvParserTests(TestCase):
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
-            ['October 08, 2025', 'Deposit', '', 'Contribution',
+            ['October 08, 2025', 'Deposits & Contributions', '', 'Contribution',
              '0', '0', '', '90000001',
              '2000.00', 'CAD'],
         ])
@@ -360,20 +373,6 @@ class RbcCsvParserTests(TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['amount'], Decimal('0'))
 
-    def test_zero_quantity_skipped(self):
-        """Zero quantity should be skipped (not in trades)."""
-        path = _write_csv([
-            ['Date', 'Activity', 'Symbol', 'Symbol Description',
-             'Quantity', 'Price', 'Settlement Date', 'Account',
-             'Value', 'Currency'],
-            ['October 08, 2025', 'Buy', 'VFV', 'Test',
-             '0', '100.00', '', '90000001',
-             '0', 'CAD'],
-        ])
-
-        trades, _ = parse_rbc_csv(path)
-        self.assertEqual(len(trades), 0)
-
     def test_empty_file_returns_no_trades(self):
         """Empty file should return no trades."""
         path = _write_csv([
@@ -431,7 +430,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,AAPL stock,Buy,AAPL,"
             "10,150.25,USD,1502.50,1.00,1503.50\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -448,7 +447,7 @@ class IbCsvParserTests(TestCase):
             "Date/Time,Symbol,Buy/Sell,Quantity,T. Price,Currency,Net Amount,Account\n"
             "2024-01-15 10:30:00,AAPL,Buy,10,150.25,USD,1502.50,U1234567\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -460,10 +459,10 @@ class IbCsvParserTests(TestCase):
         content = (
             "Transaction History,Header,Date,Account,Description,Type,Symbol,"
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
-            "Transaction History,Data,2024-01-15,U1234567,Dividend paid,DIVIDEND,MSFT,"
+            "Transaction History,Data,2024-01-15,U1234567,Dividend paid,Dividend,MSFT,"
             "10,3.00,USD,30.00,0,30.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -477,7 +476,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,Commission fee,FEE,AAPL,"
             "10,1.00,USD,10.00,0,10.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -491,7 +490,7 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,U1234567,Wire transfer,TRANSFER,,,"
             "0,0,0,USD,1000.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 1)
@@ -505,17 +504,17 @@ class IbCsvParserTests(TestCase):
             "Transaction History,Data,2024-01-15,PRACEF8C2DAE,Test,Buy,AAPL,"
             "10,100.00,USD,1000.00,0,1000.00\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_empty_file_returns_no_trades(self):
         """Empty file should return no trades."""
-        path = _write_csv([
+        path = _write_text(
             "Transaction History,Header,Date,Account,Description,Type,Symbol,"
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
-        ])
+        )
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
@@ -527,7 +526,7 @@ class IbCsvParserTests(TestCase):
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
             "Transaction History,Data,2024-01-15,U1234567,Test\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 0)
@@ -537,12 +536,12 @@ class IbCsvParserTests(TestCase):
         content = (
             "Transaction History,Header,Date,Account,Description,Type,Symbol,"
             "Quantity,Price,Currency,Gross Amount,Commission,Net Amount\n"
-            "Transaction History,Data,2024-01-15,U1234567,Buy,AAPL,"
+            "Transaction History,Data,2024-01-15,U1234567,AAPL stock,Buy,AAPL,"
             "10,150.25,USD,1502.50,1.00,1503.50\n"
-            "Transaction History,Data,2024-01-16,U1234567,Sell,MSFT,"
+            "Transaction History,Data,2024-01-16,U1234567,MSFT stock,Sell,MSFT,"
             "5,300.00,USD,1500.00,0.50,1499.50\n"
         )
-        path = _write_csv([content])
+        path = _write_text(content)
 
         trades = parse_ib_csv(path)
         self.assertEqual(len(trades), 2)

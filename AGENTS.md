@@ -46,8 +46,11 @@ Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holding
 # Main test suite (220 tests, all pass)
 /opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test
 
-# pytest suite
-/opt/pm-venv/bin/python -m pytest tests/ -v
+# pytest suite (normal run: plain tests only, no browser tests, works for Pi)
+/opt/pm-venv/bin/python -m pytest tests/
+
+# browser (Playwright) tests — tdw only, not Pi (needs playwright + browsers in /opt/pm-venv)
+RUN_E2E=1 /opt/pm-venv/bin/python -m pytest tests/ -v
 
 # Migrations check
 /opt/pm-venv/bin/python manage.py makemigrations --check --settings=portfolio_manager.settings_test

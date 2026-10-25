@@ -87,3 +87,8 @@ Then run the full tests **once**, at the end of step 3 (before the last commit o
 
 1. *May the "already has a fingerprint" error still echo the user-typed name?* Recommended: **yes** — the prohibition is on listing database names/`account_id`s; the name is what the user just typed, and the current message already does this. The new unknown/duplicate errors stay generic.
 2. *Should the duplicate-name check also consider case/whitespace?* Recommended: **no** — exact `name` match only, as specified; fixing near-duplicates is `merge_duplicate_accounts`' job (step 9/10 territory).
+
+## Decisions (tdw, Oct 25)
+
+- **Q1: yes** — the "already has a fingerprint" error keeps echoing the user-typed name.
+- **Q2: no** — exact `name` matching only; no case/whitespace normalisation in the duplicate-name check.

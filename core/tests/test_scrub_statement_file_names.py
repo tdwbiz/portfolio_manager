@@ -122,7 +122,7 @@ class ScrubStatementFileNamesTests(TestCase):
             self.assertTrue(
                 os.path.exists(os.path.join(processed_dir, 'errors', OLD_ANNUAL_NAME))
             )
-            # The missing-source row in this env is keyed, the found one hashed.
+            # The row without a source file is keyed; the found rows are content-hashed.
             self.assertIn('RbcMonthly: from-file=1 keyed=1 already-safe=0', out)
             self.assertIn('RbcAnnual: from-file=1 keyed=0 already-safe=0', out)
 

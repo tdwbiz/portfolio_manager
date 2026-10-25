@@ -90,6 +90,23 @@ def wrap_tx_hash(raw_hash: str) -> str:
     ).hexdigest()
 
 
+def keyed_hash8(text: str) -> str:
+    """First 8 hex chars of HMAC-SHA256(``ACCOUNT_FINGERPRINT_KEY``, ``text``).
+
+    Used by the statement file-name scrubbing when the source PDF is gone:
+    the hash input is the stored file name verbatim (UTF-8, empty string if
+    ``NULL``). A keyed HMAC — not a plain hash of the name — is required
+    because the old names carry the account number and would otherwise be
+    brute-forceable. Key rules come from :func:`_get_key`; raises
+    ``ValueError`` if the fingerprint key is empty or too short.
+    """
+    return hmac.new(
+        _get_key().encode("utf-8"),
+        (text or "").encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:8]
+
+
 def _is_scrub_candidate(candidate: str) -> bool:
     """True for IB ids and digit runs with at least 8 digits."""
     if any(ch.isalpha() for ch in candidate):

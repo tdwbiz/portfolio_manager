@@ -4,6 +4,7 @@ from django.test import TestCase, override_settings
 
 from core.models import Account
 from core.utils.account_fingerprint import (
+    build_fingerprint_name_map,
     fingerprint_account_number,
     last4,
     lookup_account,
@@ -138,51 +139,62 @@ class ScrubTextTests(TestCase):
             broker="IB",
             fingerprint=fingerprint_account_number("U12345678"),
             last_4="5678")
+        self.name_map = build_fingerprint_name_map()
 
     def test_dashed_number_replaced_with_name(self):
         cleaned, matched, replaced, unmatched = scrub_text(
-            "Buy on 900-00003-1-8 today"
+            "Buy on 900-00003-1-8 today", self.name_map
         )
         self.assertEqual(cleaned, "Buy on ACCOUNT_C today")
         self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
 
     def test_long_digit_run_truncates_to_8_and_matches(self):
-        cleaned, matched, replaced, unmatched = scrub_text("acct 9000000318 end")
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "acct 9000000318 end", self.name_map
+        )
         self.assertEqual(cleaned, "acct ACCOUNT_C end")
         self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
 
     def test_ib_id_replaced(self):
-        cleaned, matched, replaced, unmatched = scrub_text("IB acct U12345678 ok")
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "IB acct U12345678 ok", self.name_map
+        )
         self.assertEqual(cleaned, "IB acct ACCOUNT_IB ok")
         self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
 
     def test_date_untouched(self):
-        cleaned, matched, replaced, unmatched = scrub_text("settled 2026-10-21")
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "settled 2026-10-21", self.name_map
+        )
         self.assertEqual(cleaned, "settled 2026-10-21")
         self.assertEqual((matched, replaced, unmatched), (0, 0, 1))
 
     def test_large_amount_untouched(self):
-        cleaned, matched, replaced, unmatched = scrub_text("amount 12345678.90")
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "amount 12345678.90", self.name_map
+        )
         self.assertEqual(cleaned, "amount 12345678.90")
         self.assertEqual((matched, replaced, unmatched), (0, 0, 1))
 
     def test_number_followed_by_space_and_other_number(self):
         # Only the account-number part is replaced; the other number stays.
         cleaned, matched, replaced, unmatched = scrub_text(
-            "acct 90000003 bal 12345678"
+            "acct 90000003 bal 12345678", self.name_map
         )
         self.assertEqual(cleaned, "acct ACCOUNT_C bal 12345678")
         self.assertEqual((matched, replaced, unmatched), (1, 1, 1))
 
     def test_repeated_number_replaced_each_time(self):
         cleaned, matched, replaced, unmatched = scrub_text(
-            "90000003 and 900-00003-1-8"
+            "90000003 and 900-00003-1-8", self.name_map
         )
         self.assertEqual(cleaned, "ACCOUNT_C and ACCOUNT_C")
         self.assertEqual((matched, replaced, unmatched), (2, 2, 0))
 
     def test_no_candidates(self):
-        self.assertEqual(scrub_text("hello world"), ("hello world", 0, 0, 0))
+        self.assertEqual(
+            scrub_text("hello world", self.name_map), ("hello world", 0, 0, 0)
+        )
 
     def test_empty_text(self):
-        self.assertEqual(scrub_text(""), ("", 0, 0, 0))
+        self.assertEqual(scrub_text("", self.name_map), ("", 0, 0, 0))

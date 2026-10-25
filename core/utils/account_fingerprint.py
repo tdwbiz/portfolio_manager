@@ -97,8 +97,29 @@ def _is_scrub_candidate(candidate: str) -> bool:
     return len(re.sub(r"\D", "", candidate)) >= _MIN_RUN_DIGITS
 
 
-def scrub_text(text: str) -> tuple:
+def build_fingerprint_name_map() -> dict[str, str]:
+    """One query: ``{fingerprint: name}`` for every account with a fingerprint.
+
+    Build this once per run and pass it to :func:`scrub_text` so that
+    scrubbing never issues a query per candidate (which deadlocks SQL Server
+    without MARS while another result set is open).
+    """
+    from core.models import Account  # local import to avoid a cycle at module load
+
+    return {
+        fingerprint: name
+        for fingerprint, name in Account.objects.values_list('fingerprint', 'name')
+        if fingerprint
+    }
+
+
+def scrub_text(text: str, name_map: dict[str, str]) -> tuple:
     """Replace real account numbers in free text with the account name.
+
+    ``name_map`` is a prebuilt ``{fingerprint: name}`` map (see
+    :func:`build_fingerprint_name_map`); it is required so that a caller
+    that forgets it fails in tests instead of querying per call. No query
+    is issued while scrubbing.
 
     Returns ``(cleaned, matched, replaced, unmatched)`` where ``matched`` is
     the number of candidates that matched a stored fingerprint, ``replaced``
@@ -108,8 +129,6 @@ def scrub_text(text: str) -> tuple:
     Never returns or prints the original number. Raises ``ValueError`` if
     the fingerprint key is empty or too short.
     """
-    from core.models import Account  # local import to avoid a cycle at module load
-
     if not text:
         return (text or "", 0, 0, 0)
 
@@ -120,16 +139,14 @@ def scrub_text(text: str) -> tuple:
         candidate = m.group(0)
         if not _is_scrub_candidate(candidate):
             continue
-        account = Account.objects.filter(
-            fingerprint=fingerprint_account_number(candidate)
-        ).first()
-        if account is None:
+        name = name_map.get(fingerprint_account_number(candidate))
+        if name is None:
             unmatched += 1
             continue
         matched += 1
         replaced += 1
         out.append(text[pos:m.start()])
-        out.append(account.name)
+        out.append(name)
         pos = m.end()
     out.append(text[pos:])
     return ("".join(out), matched, replaced, unmatched)

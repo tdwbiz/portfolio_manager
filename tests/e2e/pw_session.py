@@ -6,7 +6,7 @@ lazily by :func:`get_playwright` and stopped by an ``atexit`` handler, so a
 failing ``setUpClass``, a failing ``tearDownClass``, or a plain interpreter
 exit can never leak the driver process.
 
-:class:`PlaywrightLiveServerMixin` gives the ``LiveServerTestCase`` classes a
+:class:`PlaywrightLiveServerMixin` gives the ``StaticLiveServerTestCase`` classes a
 shared Playwright plus a per-class browser and page; the conftest fixtures use
 the same singleton, so fixture-based and class-based tests cannot run two
 sessions.
@@ -39,7 +39,7 @@ def shutdown():
 
 
 class PlaywrightLiveServerMixin:
-    """Mixin for LiveServerTestCase: shared Playwright, per-class browser + page."""
+    """Mixin for StaticLiveServerTestCase: shared Playwright, per-class browser + page."""
 
     @classmethod
     def setUpClass(cls):

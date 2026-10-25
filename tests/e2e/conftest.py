@@ -1,6 +1,10 @@
 """
 Pytest configuration for Playwright end-to-end tests.
 Provides browser fixtures and Django test client setup.
+
+The ``live_server`` fixture is pytest-django's own: it already serves static
+files because ``django.contrib.staticfiles`` is in INSTALLED_APPS (see
+docs/plans/e2e-last.md, Decisions).
 """
 import os
 import pytest

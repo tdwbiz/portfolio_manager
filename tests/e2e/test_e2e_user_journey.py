@@ -10,7 +10,7 @@ from pathlib import Path
 import django
 import pytest
 from django.contrib.auth import get_user_model
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
 from pw_session import PlaywrightLiveServerMixin
 
@@ -21,7 +21,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "portfolio_manager.settings_test
 django.setup()
 
 
-class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestUserAuthentication(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test user authentication flows."""
 
     def setUp(self):
@@ -85,7 +85,7 @@ class TestUserAuthentication(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.assertTrue(self.page.url.startswith(self.live_server_url))
 
 
-class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestDashboardNavigation(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test dashboard and navigation features."""
 
     def setUp(self):
@@ -109,22 +109,36 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
 
     def test_navigation_menu(self):
         """Test that navigation menu items are clickable."""
-        # Check for common navigation links
+        # Top-level navbar links with real hrefs, matching the exact markup in
+        # core/templates/core/base.html (ul.navbar-nav, line 69): each entry is
+        #   <a class="nav-link …" href="{% url '…' %}"> — Dashboard lines 71–76,
+        #   Portfolio 79–84, Transactions 111–116, Accounts 119–124,
+        #   Annual Reports 135–141 (label wraps two source lines).
+        # Dropdown toggles are a.nav-link.dropdown-toggle with href="#" and
+        # dropdown items are a.dropdown-item (the Risk dropdown contains a second
+        # "Dashboard" link, lines 159–163), so a.nav-link[href="…"] matches exactly
+        # one element per entry — see docs/plans/e2e-last.md, Decisions.
         nav_links = [
-            ("Dashboard", "dashboard"),
-            ("Accounts", "accounts"),
-            ("Portfolio", "portfolio"),
-            ("Transactions", "transactions"),
-            ("Reports", "reports"),
+            ("Dashboard", "/dashboard/"),
+            ("Portfolio", "/portfolio/"),
+            ("Transactions", "/transactions/"),
+            ("Accounts", "/accounts/"),
+            ("Annual Reports", "/annual-reports/"),
         ]
 
-        for link_text, expected_in_url in nav_links:
-            # Try to click the link
-            links = self.page.query_selector_all(f'a:has-text("{link_text}")')
-            if links:
-                links[0].click()
-                self.page.wait_for_timeout(500)  # Wait for navigation
-                self.assertIn(expected_in_url, self.page.url.lower())
+        for link_text, expected_path in nav_links:
+            # Start from a known page so a failed click cannot cascade into the next iteration.
+            self.page.goto(f"{self.live_server_url}/dashboard/")
+            link = self.page.locator(
+                f'nav ul.navbar-nav a.nav-link[href="{expected_path}"]'
+            )
+            self.assertEqual(1, link.count())
+            # The label is the icon <i> (no text) plus the menu text; normalise
+            # whitespace to cover the two-line "Annual Reports" markup.
+            self.assertEqual(" ".join(link.text_content().split()), link_text)
+            link.click()
+            self.page.wait_for_url(f"{self.live_server_url}{expected_path}")
+            self.assertTrue(self.page.url.endswith(expected_path))
 
     def test_account_list_page(self):
         """Test navigating to accounts page."""
@@ -133,7 +147,7 @@ class TestDashboardNavigation(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.assertIn("accounts", self.page.url.lower())
 
 
-class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestPortfolioFeatures(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test portfolio management features."""
 
     def setUp(self):
@@ -165,7 +179,7 @@ class TestPortfolioFeatures(PlaywrightLiveServerMixin, LiveServerTestCase):
         self.page.wait_for_selector("table, .summary, .portfolio-summary, h1, h2")
 
 
-class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestResponsiveDesign(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test responsive design across different screen sizes."""
 
     def setUp(self):
@@ -209,7 +223,7 @@ class TestResponsiveDesign(PlaywrightLiveServerMixin, LiveServerTestCase):
                 assert self.page.content(), "Page content is empty"
 
 
-class TestFormValidation(PlaywrightLiveServerMixin, LiveServerTestCase):
+class TestFormValidation(PlaywrightLiveServerMixin, StaticLiveServerTestCase):
     """Test form validation and error handling."""
 
     def setUp(self):

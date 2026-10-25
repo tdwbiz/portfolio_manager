@@ -20,6 +20,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 
+from core.log_filter import ScrubFilter
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
 from core.utils.account_fingerprint import (
     build_fingerprint_name_map,
@@ -46,6 +47,7 @@ def _setup_duplicate_logger() -> None:
     try:
         dup_handler = logging.FileHandler(dup_log_path, encoding='utf-8')
         dup_handler.setFormatter(logging.Formatter('%(message)s'))
+        dup_handler.addFilter(ScrubFilter())  # scrub at the source: this logger writes straight to CSV_Duplicates.csv
         dup_logger.addHandler(dup_handler)
 
         # Write header if file doesn't exist or is empty
@@ -56,6 +58,7 @@ def _setup_duplicate_logger() -> None:
         # File is locked (e.g. open in Excel) — fall back to console logger
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter('%(message)s'))
+        console_handler.addFilter(ScrubFilter())  # scrub at the source for the locked-file fallback
         dup_logger.addHandler(console_handler)
 
 

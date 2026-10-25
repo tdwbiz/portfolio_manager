@@ -1,4 +1,4 @@
-"""Tests for core/utils/log_filter.py (phase 2 step 11, plan step 2)."""
+"""Tests for core/log_filter.py (phase 2 step 11, plan steps 2–3)."""
 
 import logging
 from unittest import mock
@@ -6,8 +6,8 @@ from unittest import mock
 from django.test import TestCase, override_settings
 
 from core.models import Account
+from core.log_filter import ScrubFilter, fallback_scrub
 from core.utils.account_fingerprint import fingerprint_account_number
-from core.utils.log_filter import ScrubFilter, fallback_scrub
 
 
 def _make_record(msg, args=None):
@@ -101,13 +101,36 @@ class FallbackScrubTests(TestCase):
         self.assertEqual(fallback_scrub("900-00001-1-8 and 123.45"), "900-00001-1-8 and 123.45")
 
 
+class ScrubFilterReentryTests(TestCase):
+    def setUp(self) -> None:
+        ScrubFilter.reset_cache()
+
+    def test_reentrant_record_gets_fallback_scrub_not_recursion(self):
+        """A record logged while the name map is being built (e.g. SQL query
+        logging) must get the fallback scrub, not trigger a second build."""
+
+        def fake_build():
+            inner = _make_record("select from account 90000001")
+            self.assertTrue(ScrubFilter().filter(inner))  # must never raise
+            self.assertEqual(inner.msg, "select from account ACCOUNT")
+            return {}
+
+        with mock.patch(
+            "core.utils.account_fingerprint.build_fingerprint_name_map",
+            side_effect=fake_build,
+        ) as builder:
+            outer = _make_record("hello")
+            ScrubFilter().filter(outer)
+            self.assertEqual(builder.call_count, 1)  # no recursive build
+
+
 class ScrubFilterCacheTests(TestCase):
     def setUp(self) -> None:
         ScrubFilter.reset_cache()
 
     def test_name_map_cached_and_resettable(self):
         with mock.patch(
-            "core.utils.log_filter.build_fingerprint_name_map",
+            "core.utils.account_fingerprint.build_fingerprint_name_map",
             side_effect=lambda: {"fp": "NAME"},
         ) as builder:
             ScrubFilter().filter(_make_record("hello"))

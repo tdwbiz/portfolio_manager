@@ -1,5 +1,11 @@
 """Logging filter that scrubs account numbers out of every log record.
 
+Lives at ``core/log_filter.py`` (not ``core.utils``) so that ``settings.LOGGING``
+can reference it without importing the heavy ``core/utils/__init__.py``
+re-export package — and hence Django models — before the app registry is
+populated (tdw decision, step 3 blocker). The ``account_fingerprint``
+helpers are imported lazily inside the methods for the same reason.
+
 Built on ``scrub_text`` (exact fingerprint match → account name; exactly-15-digit
 runs → ``BANK_ACCOUNT``). The fingerprint→name map is cached with a fixed
 300-second TTL (tdw decision, Oct 25: no env setting).
@@ -13,15 +19,19 @@ every remaining run of ≥ 8 digits with ``ACCOUNT``. It never raises inside
 
 import logging
 import re
+import threading
 import time
-
-from core.utils.account_fingerprint import build_fingerprint_name_map, scrub_text
 
 # Fixed cache TTL in code (no env setting — tdw decision, Oct 25).
 CACHE_TTL_SECONDS = 300
 
 _BANK_ACCOUNT_RE = re.compile(r"\b\d{15}\b")
 _LONG_DIGIT_RUN_RE = re.compile(r"\b\d{8,}\b")
+
+# Re-entry guard: building the name map issues a DB query, which can itself
+# emit log records on the same thread (e.g. SQL query logging). Those records
+# must get the fallback scrub instead of recursing into another build.
+_thread_local = threading.local()
 
 
 def fallback_scrub(text: str) -> str:
@@ -50,10 +60,20 @@ class ScrubFilter(logging.Filter):
         cached = self._cache
         if "ts" in cached and now - cached["ts"] < CACHE_TTL_SECONDS:
             return cached.get("map")
+        if getattr(_thread_local, "building", False):
+            # Re-entry on this thread (a record logged while the map was
+            # being built): degraded scrub instead of recursing.
+            return None
+        _thread_local.building = True
         try:
-            name_map = build_fingerprint_name_map()
-        except Exception:
-            name_map = None  # cache the failure for the TTL as well
+            from core.utils.account_fingerprint import build_fingerprint_name_map
+
+            try:
+                name_map = build_fingerprint_name_map()
+            except Exception:
+                name_map = None  # cache the failure for the TTL as well
+        finally:
+            _thread_local.building = False
         ScrubFilter._cache = {"ts": now, "map": name_map}  # class-level: shared
         return name_map
 
@@ -61,6 +81,8 @@ class ScrubFilter(logging.Filter):
         name_map = self._get_name_map()
         if name_map:
             try:
+                from core.utils.account_fingerprint import scrub_text
+
                 return scrub_text(msg, name_map)[0]
             except Exception:
                 pass  # e.g. missing/short fingerprint key → degraded mode

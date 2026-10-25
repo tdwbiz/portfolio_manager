@@ -331,10 +331,17 @@ LOGGING = {
             "style": "{",
         },
     },
+    "filters": {
+        # Scrubs account numbers out of every log record (core/log_filter.py
+        # is stdlib-only at import time so it can be loaded before the app
+        # registry is populated — see docs/plans/log-filter.md, Decision 7).
+        "scrub": {"()": "core.log_filter.ScrubFilter"},
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "filters": ["scrub"],
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
@@ -344,6 +351,7 @@ LOGGING = {
             "formatter": "verbose",
             "encoding": "utf-8",
             "mode": "a",
+            "filters": ["scrub"],
         },
     },
     "root": {

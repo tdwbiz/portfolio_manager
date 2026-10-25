@@ -104,3 +104,44 @@ class TransactionExportTests(TestCase):
     def test_excel_content_type(self):
         response = self.client.get(reverse('transaction_export_excel'))
         self.assertIn('spreadsheetml', response.get('Content-Type'))
+
+    def test_csv_shows_account_name_not_number(self):
+        response = self.client.get(reverse('transaction_export_csv'))
+        self.assertIn(b'Test Account', response.content)
+        self.assertNotIn(b'EXP001', response.content)
+
+    def test_excel_shows_account_name_not_number(self):
+        import io
+        import zipfile
+        response = self.client.get(reverse('transaction_export_excel'))
+        zf = zipfile.ZipFile(io.BytesIO(response.content))
+        xml = b''.join(zf.read(n) for n in zf.namelist() if n.endswith('.xml'))
+        self.assertIn(b'Test Account', xml)
+        self.assertNotIn(b'EXP001', xml)
+
+    def test_csv_filter_by_account_pk(self):
+        # ?account= carries Account.pk
+        other = Account.objects.create(
+            account_id='EXPACC2', name='Other Account', broker='IB'
+        )
+        Transaction.objects.create(
+            statement=self.broker,
+            account=other,
+            date=datetime.date(2024, 1, 4),
+            symbol='GOOG',
+            type='BUY',
+            quantity=Decimal('1'),
+            price=Decimal('10.00'),
+            amount=Decimal('-10.00'),
+            currency='USD',
+            amount_cad=Decimal('-13.30'),
+            exchange_rate_cad=Decimal('1.33'),
+            commission=Decimal('0'),
+            notes='other account tx',
+            tx_hash='exp_tx_other',
+        )
+        response = self.client.get(
+            reverse('transaction_export_csv'), {'account': str(self.account.pk)}
+        )
+        self.assertIn(b'AAPL', response.content)
+        self.assertNotIn(b'GOOG', response.content)

@@ -37,7 +37,7 @@
         <select name="account" id="account" class="form-select form-select-sm">
             <option value="">All</option>
             {% for account in accounts %}
-                <option value="{{ account.account_id }}" {% if filters.account == account.account_id %}selected{% endif %}>{{ account.account_id }}</option>
+                <option value="{{ account.pk }}" {% if filters.account == account.pk %}selected{% endif %}>{{ account.name }}</option>
             {% endfor %}
         </select>
       </div>

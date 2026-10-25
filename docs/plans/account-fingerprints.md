@@ -24,7 +24,7 @@ fingerprint and reject unknown fingerprints instead of using the `RBC_ACCOUNTS` 
   - `lookup_account(raw) -> Account | None`: `Account.objects.filter(fingerprint=...).first()`.
 - **`portfolio_manager/settings.py`** — add `ACCOUNT_FINGERPRINT_KEY = os.getenv("ACCOUNT_FINGERPRINT_KEY", "").strip()`;
   delete `_parse_rbc_accounts()`, `RBC_ACCOUNTS` and `RBC_DEFAULT_ACCOUNT` (lines ~239–253).
-- **`portfolio_manager/settings_test.py`** — add fixed test key `ACCOUNT_FINGERPRINT_KEY = "test-fingerprint-key-0123456789"`;
+- **`portfolio_manager/settings_test.py`** — add fixed test key `ACCOUNT_FINGERPRINT_KEY = "test-fingerprint-key-0123456789ab"` (33 chars, ≥ 32);
   delete `RBC_ACCOUNTS` and `RBC_DEFAULT_ACCOUNT`.
 - **`.env.example`** — delete the `RBC_ACCOUNTS` and `RBC_DEFAULT_ACCOUNT` blocks; add
   `ACCOUNT_FINGERPRINT_KEY=` with a placeholder comment only (never a real key).

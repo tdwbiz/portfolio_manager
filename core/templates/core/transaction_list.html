@@ -37,7 +37,7 @@
         <select name="account" id="account" class="form-select form-select-sm">
             <option value="">All</option>
             {% for account in accounts %}
-                <option value="{{ account.account_id }}" {% if filters.account == account.account_id %}selected{% endif %}>{{ account.account_id }}</option>
+                <option value="{{ account.pk }}" {% if filters.account == account.pk %}selected{% endif %}>{{ account.name }}</option>
             {% endfor %}
         </select>
       </div>
@@ -98,7 +98,7 @@
                 <td>{{ tx.currency }}</td>
                 <td>{{ tx.amount_cad }}</td>
                 <td>{{ tx.exchange_rate_cad }}</td>
-                <td>{{ tx.account.account_id|default:'' }}</td>
+                <td>{{ tx.account.name|default:'' }}</td>
                 <td>{{ tx.statement.source|default:'' }}</td>
                 <td>{{ tx.notes|default:'' }}</td>
             </tr>

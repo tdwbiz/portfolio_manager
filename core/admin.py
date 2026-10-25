@@ -78,14 +78,14 @@ class AccountCurrencyInline(admin.TabularInline):
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
     list_display = [
-        "account_id",
         "name",
+        "last_4",
         "broker",
         "category",
         "owner",
         "currency",
     ]
-    search_fields = ["account_id", "name", "owner"]
+    search_fields = ["name", "last_4", "owner"]
     list_filter = ["broker", "category", "owner"]
     inlines = [AccountCurrencyInline]
 
@@ -137,13 +137,12 @@ class RbcMonthlyAdmin(admin.ModelAdmin):
     list_display = [
         "account",
         "statement_date",
-        "account_number",
         "begin_total_market_value",
         "end_total_market_value",
         "file_name",
     ]
     list_filter = ["account"]
-    search_fields = ["account_number", "file_name"]
+    search_fields = ["account__name", "file_name"]
     date_hierarchy = "statement_date"
 
 
@@ -174,7 +173,7 @@ class RbcAnnualAdmin(admin.ModelAdmin):
         "chg_total_paid",
     ]
     list_filter = ["account", "currency", "report_year"]
-    search_fields = ["account_number", "file_name"]
+    search_fields = ["account__name", "file_name"]
     readonly_fields = ["parsed_at"]
 
 
@@ -195,7 +194,7 @@ class CoreMonthlyStatementAdmin(admin.ModelAdmin):
         "total_transactions",
     ]
     list_filter = ["currency", "account"]
-    search_fields = ["account__account_id"]
+    search_fields = ["account__name"]
     date_hierarchy = "statement_month"
     readonly_fields = ["generated_at"]
 
@@ -210,7 +209,7 @@ class CoreAnnualReportAdmin(admin.ModelAdmin):
         "total_transactions",
     ]
     list_filter = ["currency", "account", "report_year"]
-    search_fields = ["account__account_id"]
+    search_fields = ["account__name"]
     readonly_fields = ["generated_at"]
 
 
@@ -225,6 +224,6 @@ class CoreReconciliationAdmin(admin.ModelAdmin):
         "discrepancy_amount",
     ]
     list_filter = ["reconciliation_type", "matching", "account"]
-    search_fields = ["account__account_id"]
+    search_fields = ["account__name"]
     date_hierarchy = "period_start"
     readonly_fields = ["reconciled_at", "reconciled_by"]

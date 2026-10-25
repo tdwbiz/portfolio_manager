@@ -12,7 +12,7 @@ class AccountCRUDTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
         self.account = Account.objects.create(
-            account_id='TEST001',
+            account_id='TESTACC',
             name='Test Account',
             broker='IB',
             currency='USD',
@@ -30,7 +30,7 @@ class AccountCRUDTests(TestCase):
 
     def test_account_create_post_valid(self):
         response = self.client.post(reverse('account_create'), {
-            'account_id': 'NEW001',
+            'account_id': 'NEWACC',
             'name': 'New Account',
             'broker': 'IB',
             'category': 'TAXABLE',
@@ -38,11 +38,11 @@ class AccountCRUDTests(TestCase):
         })
         # Redirects to account_edit page to set up currencies
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Account.objects.filter(account_id='NEW001').exists())
+        self.assertTrue(Account.objects.filter(account_id='NEWACC').exists())
 
     def test_account_create_post_invalid(self):
         response = self.client.post(reverse('account_create'), {
-            'account_id': 'NEW002',
+            'account_id': 'NEWBACC',
             'name': '',
             'broker': 'IB',
             'category': 'TAXABLE',
@@ -51,10 +51,46 @@ class AccountCRUDTests(TestCase):
             'starting_balance': '500.00',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Account.objects.filter(account_id='NEW002').exists())
+        self.assertFalse(Account.objects.filter(account_id='NEWBACC').exists())
+
+    # ── account_id must not contain digits (decision 3) ────────────────
+
+    def test_account_create_post_rejects_digit_account_id(self):
+        """Posting an account_id containing a digit is rejected."""
+        response = self.client.post(reverse('account_create'), {
+            'account_id': '90000001',
+            'name': 'Number Account',
+            'broker': 'IB',
+            'category': 'TAXABLE',
+            'owner': '',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Account.objects.filter(account_id='90000001').exists())
+        self.assertIn('account_id', response.context['form'].errors)
+
+    def test_account_form_rejects_mixed_digit_account_id(self):
+        """An account_id mixing letters and digits is rejected."""
+        form = AccountForm(data={
+            'account_id': 'ACC2',
+            'name': 'Mixed',
+            'broker': 'IB',
+            'category': 'TAXABLE',
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn('account_id', form.errors)
+
+    def test_account_form_accepts_letter_only_account_id(self):
+        """A letter-only account_id passes validation."""
+        form = AccountForm(data={
+            'account_id': 'TOMTFSA',
+            'name': 'Letters',
+            'broker': 'IB',
+            'category': 'TAXABLE',
+        })
+        self.assertTrue(form.is_valid(), form.errors)
 
     def test_account_edit_get(self):
-        response = self.client.get(reverse('account_edit', kwargs={'account_id': self.account.account_id}))
+        response = self.client.get(reverse('account_edit', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.account.name)
 
@@ -64,7 +100,7 @@ class AccountCRUDTests(TestCase):
             account=self.account, currency='USD',
             starting_balance=Decimal('1000.00'),
         )
-        response = self.client.post(reverse('account_edit', kwargs={'account_id': self.account.account_id}), {
+        response = self.client.post(reverse('account_edit', kwargs={'pk': self.account.pk}), {
             'account_id': self.account.account_id,
             'name': 'Updated Name',
             'broker': 'IB',
@@ -84,12 +120,12 @@ class AccountCRUDTests(TestCase):
         self.assertEqual(self.account.name, 'Updated Name')
 
     def test_account_delete_post(self):
-        response = self.client.post(reverse('account_delete', kwargs={'account_id': self.account.account_id}))
+        response = self.client.post(reverse('account_delete', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 302)
         self.assertFalse(Account.objects.filter(account_id=self.account.account_id).exists())
 
     def test_account_delete_get_not_allowed(self):
-        response = self.client.get(reverse('account_delete', kwargs={'account_id': self.account.account_id}))
+        response = self.client.get(reverse('account_delete', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 405)
 
     # ── New tests for category & owner fields ─────────────────────────────

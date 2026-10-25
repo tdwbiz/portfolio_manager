@@ -70,6 +70,16 @@ def _validate_date_param(date_str):
     return parsed
 
 
+def _parse_account_pk(value):
+    """?account= / POST account carries Account.pk (step 9). Return int pk or None."""
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except ValueError:
+        return None
+
+
 def is_safe_url(url: str, allowed_hosts: set | None = None) -> bool:
     """Validate that a URL is safe for redirects.
 
@@ -255,15 +265,16 @@ def generate_monthly_statements_view(request):
     GET with 'regenerate=1': regenerate from transactions.
     GET with 'batch=1': batch-generate from RBC anchor.
     """
-    account_id = request.GET.get("account")
+    account_param = request.GET.get("account")  # Account.pk
+    account_pk = _parse_account_pk(account_param)
     regenerate = request.GET.get("regenerate", "") == "1"
     batch = request.GET.get("batch", "") == "1"
     message = ""
     stmts = []
 
-    if account_id:
+    if account_pk is not None:
         try:
-            account = Account.objects.get(account_id=account_id)
+            account = Account.objects.get(pk=account_pk)
 
             if regenerate:
                 stmts = generate_monthly_statements(account)
@@ -290,7 +301,7 @@ def generate_monthly_statements_view(request):
                         f"or 'Batch from RBC' to anchor from RBC data."
                     )
         except Account.DoesNotExist:
-            message = f"Account '{account_id}' not found."
+            message = f"Account '{account_param}' not found."
 
     accounts = Account.objects.all()
     return render(
@@ -298,7 +309,7 @@ def generate_monthly_statements_view(request):
         "core/generate_statements.html",
         {
             "accounts": accounts,
-            "selected_account": account_id,
+            "selected_account": account_pk,
             "message": message,
             "statements": list(stmts),
             "regenerate": regenerate,
@@ -313,14 +324,15 @@ def generate_annual_reports_view(request):
     GET without 'regenerate': show existing reports.
     GET with 'regenerate=1': regenerate from monthly statements.
     """
-    account_id = request.GET.get("account")
+    account_param = request.GET.get("account")  # Account.pk
+    account_pk = _parse_account_pk(account_param)
     regenerate = request.GET.get("regenerate", "") == "1"
     message = ""
     reports = []
 
-    if account_id:
+    if account_pk is not None:
         try:
-            account = Account.objects.get(account_id=account_id)
+            account = Account.objects.get(pk=account_pk)
 
             if regenerate:
                 reports = generate_annual_reports(account)
@@ -340,7 +352,7 @@ def generate_annual_reports_view(request):
                         f"Click 'Regenerate' to create from monthly statements."
                     )
         except Account.DoesNotExist:
-            message = f"Account '{account_id}' not found."
+            message = f"Account '{account_param}' not found."
 
     accounts = Account.objects.all()
     return render(
@@ -348,7 +360,7 @@ def generate_annual_reports_view(request):
         "core/generate_annual.html",
         {
             "accounts": accounts,
-            "selected_account": account_id,
+            "selected_account": account_pk,
             "message": message,
             "reports": list(reports),
             "regenerate": regenerate,
@@ -392,27 +404,29 @@ def reconcile_view(request):
 
 def reverse_statements_view(request):
     """Generate monthly statements going backwards from an anchor month."""
-    account_id = request.GET.get("account")
+    account_param = request.GET.get("account")  # Account.pk
+    account_pk = _parse_account_pk(account_param)
     message = ""
     stmts = []
 
     if request.method == "POST":
-        account_id = request.POST.get("account")
+        account_param = request.POST.get("account")
+        account_pk = _parse_account_pk(account_param)
         anchor_month_str = request.POST.get("anchor_month")
         cad_end = request.POST.get("ending_cad")
         usd_end = request.POST.get("ending_usd")
 
         try:
-            account = Account.objects.get(account_id=account_id)
-        except Account.DoesNotExist:
-            message = f"Account '{account_id}' not found."
+            account = Account.objects.get(pk=account_pk)
+        except (Account.DoesNotExist, TypeError):
+            message = f"Account '{account_param}' not found."
             accounts = Account.objects.all()
             return render(
                 request,
                 "core/reverse_statements.html",
                 {
                     "accounts": accounts,
-                    "selected_account": account_id,
+                    "selected_account": account_pk,
                     "message": message,
                 },
             )
@@ -425,7 +439,7 @@ def reverse_statements_view(request):
                 "core/reverse_statements.html",
                 {
                     "accounts": accounts,
-                    "selected_account": account_id,
+                    "selected_account": account_pk,
                     "message": message,
                 },
             )
@@ -440,7 +454,7 @@ def reverse_statements_view(request):
                 "core/reverse_statements.html",
                 {
                     "accounts": accounts,
-                    "selected_account": account_id,
+                    "selected_account": account_pk,
                     "message": message,
                 },
             )
@@ -461,7 +475,7 @@ def reverse_statements_view(request):
                     "core/reverse_statements.html",
                     {
                         "accounts": accounts,
-                        "selected_account": account_id,
+                        "selected_account": account_pk,
                         "message": message,
                     },
                 )
@@ -476,7 +490,7 @@ def reverse_statements_view(request):
                     "core/reverse_statements.html",
                     {
                         "accounts": accounts,
-                        "selected_account": account_id,
+                        "selected_account": account_pk,
                         "message": message,
                     },
                 )
@@ -492,7 +506,7 @@ def reverse_statements_view(request):
         "core/reverse_statements.html",
         {
             "accounts": accounts,
-            "selected_account": account_id,
+            "selected_account": account_pk,
             "message": message,
             "statements": stmts[:50],
         },

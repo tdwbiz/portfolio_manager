@@ -23,7 +23,7 @@ def _apply_transaction_filters(qs, request):
     broker = request.GET.get('broker', '').strip()[:100]  # Limit length to prevent abuse
     symbol = request.GET.get('symbol', '').strip().upper()[:10]  # Limit length
     tx_type = request.GET.get('type', '').strip().upper()[:20]  # Limit length
-    account_id = request.GET.get('account', '').strip()[:50]  # Limit length
+    account_param = request.GET.get('account', '').strip()[:50]  # Limit length
     date_from = request.GET.get('date_from', '').strip()
     date_to = request.GET.get('date_to', '').strip()
     
@@ -52,12 +52,18 @@ def _apply_transaction_filters(qs, request):
             logger.warning(f'Filter request for non-existent broker: {broker}')
             broker = ''
     
-    # Validate account exists
-    if account_id:
-        account_exists = Account.objects.filter(account_id=account_id).exists()
-        if not account_exists:
-            logger.warning(f'Filter request for non-existent account: {account_id}')
-            account_id = ''
+    # Validate account exists (pk-based; ?account= carries Account.pk)
+    account_pk = None
+    if account_param:
+        try:
+            candidate_pk = int(account_param)
+        except ValueError:
+            logger.warning(f'Filter request with non-integer account param: {account_param!r}')
+        else:
+            if Account.objects.filter(pk=candidate_pk).exists():
+                account_pk = candidate_pk
+            else:
+                logger.warning(f'Filter request for non-existent account pk: {candidate_pk}')
     
     # Apply filters
     if broker:
@@ -66,8 +72,8 @@ def _apply_transaction_filters(qs, request):
         qs = qs.filter(symbol=symbol)
     if tx_type:
         qs = qs.filter(type=tx_type)
-    if account_id:
-        qs = qs.filter(account__account_id=account_id)
+    if account_pk is not None:
+        qs = qs.filter(account__pk=account_pk)
     if validated_date_from:
         qs = qs.filter(date__gte=validated_date_from)
     if validated_date_to:
@@ -77,7 +83,7 @@ def _apply_transaction_filters(qs, request):
         'broker': broker,
         'symbol': symbol,
         'type': tx_type,
-        'account': account_id,
+        'account': account_pk if account_pk is not None else '',
         'date_from': date_from,
         'date_to': date_to,
     }
@@ -94,7 +100,7 @@ def transaction_list(request):
     broker = request.GET.get('broker', '')
     symbol = request.GET.get('symbol', '')
     tx_type = request.GET.get('type', '')
-    account_id = request.GET.get('account', '')
+    account_param = request.GET.get('account', '')
     date_from = request.GET.get('date_from', '')
     date_to = request.GET.get('date_to', '')
 
@@ -104,8 +110,17 @@ def transaction_list(request):
         qs = qs.filter(symbol=symbol)
     if tx_type:
         qs = qs.filter(type=tx_type)
-    if account_id:
-        qs = qs.filter(account__account_id=account_id)
+    # ?account= carries Account.pk
+    account_pk = None
+    if account_param.strip():
+        try:
+            candidate_pk = int(account_param.strip())
+        except ValueError:
+            candidate_pk = None
+        if candidate_pk is not None and Account.objects.filter(pk=candidate_pk).exists():
+            account_pk = candidate_pk
+    if account_pk is not None:
+        qs = qs.filter(account__pk=account_pk)
     if date_from:
         qs = qs.filter(date__gte=date_from)
     if date_to:
@@ -133,7 +148,7 @@ def transaction_list(request):
             'broker': broker,
             'symbol': symbol,
             'type': tx_type,
-            'account': account_id,
+            'account': account_pk if account_pk is not None else '',
             'date_from': date_from,
             'date_to': date_to,
         },
@@ -159,7 +174,7 @@ def transaction_export_csv(request):
         writer.writerow([
             tx.date.strftime('%Y-%m-%d'), tx.symbol, tx.type, tx.quantity,
             tx.price, tx.amount, tx.currency, tx.amount_cad,
-            tx.exchange_rate_cad, tx.account.account_id if tx.account else '',
+            tx.exchange_rate_cad, tx.account.name if tx.account else '',
             tx.statement.source, tx.notes
         ])
 
@@ -190,7 +205,7 @@ def transaction_export_excel(request):
         ws.append([
             tx.date.strftime('%Y-%m-%d'), tx.symbol, tx.type, tx.quantity,
             tx.price, tx.amount, tx.currency, tx.amount_cad,
-            tx.exchange_rate_cad, tx.account.account_id if tx.account else '',
+            tx.exchange_rate_cad, tx.account.name if tx.account else '',
             tx.statement.source, tx.notes
         ])
 

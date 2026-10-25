@@ -114,8 +114,10 @@ class AccountsPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_accounts_page_shows_accounts(self):
+        # The accounts page shows the name and last-4, never account_id
         response = self.client.get(reverse('accounts_list'))
-        self.assertContains(response, 'TOM IB')
+        self.assertContains(response, 'Tom IB')
+        self.assertNotContains(response, 'TOM IB')
 
 
 class TransactionListFilterByAccountTests(TestCase):
@@ -145,7 +147,10 @@ class TransactionListFilterByAccountTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
     def test_transaction_list_filter_by_account(self):
-        response = self.client.get(reverse('transaction_list'), {'account': 'TOM IB'})
+        # ?account= carries Account.pk
+        response = self.client.get(reverse('transaction_list'), {'account': str(self.account.pk)})
         self.assertContains(response, 'AAPL')
 
-        response = self.client.get(reverse('transaction_list'), {'account': 'OTHER'})
+        other = Account.objects.create(account_id='OTHERACC', name='Other Account', broker='IB')
+        response = self.client.get(reverse('transaction_list'), {'account': str(other.pk)})
+        self.assertNotContains(response, 'AAPL')

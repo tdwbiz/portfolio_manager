@@ -20,8 +20,8 @@
                 <select name="account" id="account" class="form-select" onchange="this.form.submit()">
                     <option value="">— Select account —</option>
                     {% for acct in accounts %}
-                    <option value="{{ acct.account_id }}" {% if acct.account_id == selected_account %}selected{% endif %}>
-                        {{ acct.account_id }} — {{ acct.name }}
+                    <option value="{{ acct.pk }}" {% if acct.pk == selected_account %}selected{% endif %}>
+                        {{ acct.name }}
                     </option>
                     {% endfor %}
                 </select>
@@ -72,7 +72,7 @@
                 <tbody></tbody>
                     {% for stmt in statements %}
                     <tr></tr>
-                        <td>{{ stmt.account.account_id }}</td>
+                        <td>{{ stmt.account.name }}</td>
                         <td>{{ stmt.statement_month|date:"Y-m" }}</td>
                         <td>{{ stmt.currency }}</td>
                         <td>{{ stmt.beginning_market_value|default:"0.00"|floatformat:2 }}</td>

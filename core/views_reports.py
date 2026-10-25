@@ -85,7 +85,7 @@ def income_summary(request):
     years = sorted(set(r['year'] for r in rows), reverse=True)
 
     # Get all accounts for filter dropdown
-    accounts = Account.objects.all().order_by('account_id')
+    accounts = Account.objects.all().order_by('name')
 
     return render(request, 'core/income_summary.html', {
         'rows': rows,
@@ -227,8 +227,8 @@ def tax_summary(request):
 
     # Add capital gains per category from trades
     for trade in trades:
-        acct_id = trade['account_id']
-        acct = Account.objects.filter(account_id=acct_id).first()
+        acct_name = trade['account_id']  # grouping key is the account name
+        acct = Account.objects.filter(name=acct_name).first()
         cat = acct.category if acct and acct.category else 'TAXABLE'
         if cat not in category_data:
             category_data[cat] = {

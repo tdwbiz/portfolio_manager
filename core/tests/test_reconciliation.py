@@ -28,11 +28,9 @@ class MonthlyStatementGenerationTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="TEST001",
             name="Test Account",
             broker="RBC-DIRECT",
-            currency="CAD",
-        )
+            currency="CAD")
         self.statement = BrokerStatement.objects.create(
             source="RBC",
             file_date=date(2024, 1, 15),
@@ -197,11 +195,9 @@ class AnnualReportGenerationTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="TEST002",
             name="Test Account 2",
             broker="RBC-DIRECT",
-            currency="CAD",
-        )
+            currency="CAD")
         self.statement = BrokerStatement.objects.create(
             source="RBC",
             file_date=date(2024, 1, 15),
@@ -258,11 +254,9 @@ class ReconciliationTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="TEST003",
             name="Test Account 3",
             broker="RBC-DIRECT",
-            currency="CAD",
-        )
+            currency="CAD")
 
     def test_reconciliation_match(self):
         """When CSV and RBC agree, matching=True."""

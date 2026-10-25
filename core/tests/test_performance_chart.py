@@ -12,7 +12,6 @@ class PerformanceChartTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='PERF001',
             name='Test Account',
             broker='IB'
         )
@@ -170,7 +169,6 @@ class PerformanceChartFixesTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='PERF002',
             name='Test Account 2',
             broker='IB'
         )

@@ -12,10 +12,8 @@ class RealisedPnlTests(TestCase):
         cls.user = User.objects.create_user(username='testuser', password='testpass123')
         # Create test account
         cls.account = Account.objects.create(
-            account_id='RPNL001',
             name='Test Account',
-            broker='IB',
-        )
+            broker='IB')
 
         # Create broker statement
         cls.broker_statement = BrokerStatement.objects.create(
@@ -75,18 +73,16 @@ class RealisedPnlTests(TestCase):
 
         # Create second account for filter test
         cls.account2 = Account.objects.create(
-            account_id='RPNL002',
             name='Test Account 2',
-            broker='IB',
-        )
+            broker='IB')
 
     def test_fifo_cost_basis(self):
-        trades = compute_realised_pnl(account_id='RPNL001')
+        trades = compute_realised_pnl(account_id='Test Account')
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['cost_basis_fifo'], Decimal('3100.00'))
 
     def test_avg_cost_basis(self):
-        trades = compute_realised_pnl(account_id='RPNL001')
+        trades = compute_realised_pnl(account_id='Test Account')
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['cost_basis_avg'], Decimal('3150.00'))
 
@@ -119,19 +115,17 @@ class RealisedPnlTests(TestCase):
             tx_hash='rpnl_buy3',
         )
 
-        # Test with account filter - AAPL trade for RPNL001 is visible
-        response = self.client.get('/realised-pnl/?account=RPNL001')
+        # Test with account filter - AAPL trade for 'Test Account' is visible
+        response = self.client.get(f'/realised-pnl/?account={self.account.pk}')
         self.assertIn(b'AAPL', response.content)
-        # RPNL002 has no sells so no trade rows for it should appear in table data
-        self.assertNotIn(b'<td>RPNL002</td>', response.content)
+        # account2 has no sells so no trade rows for it should appear in table data
+        self.assertNotIn(b'<td>Test Account 2</td>', response.content)
 
     def test_date_range_filter(self):
         """Create a SELL in 2024 and a SELL in 2025; filter to 2024 only."""
         acct = Account.objects.create(
-            account_id='RPNL_DATE',
             name='Date Filter Account',
-            broker='IB',
-        )
+            broker='IB')
         stmt = BrokerStatement.objects.create(
             source='IB',
             file_date='2024-01-01',
@@ -173,7 +167,7 @@ class RealisedPnlTests(TestCase):
 
     def test_symbol_filter(self):
         """Create SELLs for AAPL and MSFT; filter with symbol='AAPL'."""
-        trades = compute_realised_pnl(account_id='RPNL001', symbol='AAPL')
+        trades = compute_realised_pnl(account_id='Test Account', symbol='AAPL')
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['symbol'], 'AAPL')
 

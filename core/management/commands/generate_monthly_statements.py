@@ -54,7 +54,7 @@ class Command(BaseCommand):
             to_date = date.fromisoformat(options["to_date"])
 
         if account_id:
-            accounts = Account.objects.filter(account_id=account_id)
+            accounts = Account.objects.filter(name=account_id)
             if not accounts.exists():
                 raise CommandError(f"Account {account_id} not found")
         elif all_accounts:

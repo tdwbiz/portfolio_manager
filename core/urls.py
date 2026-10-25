@@ -104,5 +104,5 @@ urlpatterns = [
     path("accounts/<int:pk>/delete/", account_delete, name="account_delete"),
     path("annual-reports/", annual_reports_view, name="annual_reports"),
     path("health/", health_check, name="health_check"),
-    path("ledger/<str:account_id>/<int:year>/<int:month>/", ledger_month_view, name="ledger_month"),
+    path("ledger/<str:account_name>/<int:year>/<int:month>/", ledger_month_view, name="ledger_month"),
 ]

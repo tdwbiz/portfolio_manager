@@ -158,16 +158,16 @@ class Command(BaseCommand):
         from core.models import Account
         accounts = Account.objects.filter(exclude_from_risk=False)
         if account_filter:
-            accounts = accounts.filter(account_id=account_filter)
+            accounts = accounts.filter(name=account_filter)
 
         # Build position context: latest position per (account, symbol)
         positions = {}
         for acc in accounts:
             latest = acc.position_history.filter(date_to__isnull=True).order_by('-date_from')
             for ph in latest:
-                key = (acc.account_id, ph.symbol)
+                key = (acc.name, ph.symbol)
                 positions[key] = {
-                    'account_id': acc.account_id,
+                    'account_id': acc.name,
                     'account_category': acc.category,
                     'owner': acc.owner,
                     'symbol': ph.symbol,

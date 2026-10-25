@@ -38,7 +38,7 @@ class Command(BaseCommand):
         dry_run = options["dry_run"]
 
         if account_id:
-            accounts = Account.objects.filter(account_id=account_id)
+            accounts = Account.objects.filter(name=account_id)
             if not accounts.exists():
                 self.stderr.write(self.style.ERROR(f"Account '{account_id}' not found."))
                 return

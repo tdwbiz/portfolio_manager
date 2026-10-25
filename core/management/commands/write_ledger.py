@@ -66,7 +66,7 @@ class Command(BaseCommand):
         # Determine which accounts to process
         if account_id:
             try:
-                account = Account.objects.get(account_id=account_id)
+                account = Account.objects.get(name=account_id)
             except Account.DoesNotExist:
                 raise CommandError(f'Account {account_id} not found')
             accounts = [account]
@@ -117,7 +117,7 @@ class Command(BaseCommand):
     def write_month(self, account, month, dry_run):
         """Write ledger entries for a specific month."""
         self.stdout.write(f"\n{'='*70}")
-        self.stdout.write(f"Processing: {account.account_id} - {month.strftime('%Y-%m')}")
+        self.stdout.write(f"Processing: {account.name} - {month.strftime('%Y-%m')}")
         self.stdout.write(f"{'='*70}")
 
         # Check if month is closed
@@ -184,7 +184,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-CASH",
             }
@@ -238,8 +237,7 @@ class Command(BaseCommand):
                 defaults={
                     'quantity': Decimal(0),
                     'cost_basis_total': Decimal(0),
-                    'account_id_str': tx.account.account_id,
-                    'account_name': tx.account.name,
+                        'account_name': tx.account.name,
                     'ledger_name': f"{tx.account.name}-{tx.currency}-TAX",
                 }
             )
@@ -409,7 +407,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
             }
@@ -464,7 +461,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-INCOME-{income_type}",
             }
@@ -507,7 +503,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.account_id,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
             }

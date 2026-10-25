@@ -144,7 +144,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Seeded {created_config} scoring config entries."))
 
         self.stdout.write("Setting TAXABLE_CAR exclude_from_risk=True...")
-        updated = Account.objects.filter(account_id="TS_CAR").update(exclude_from_risk=True)
+        updated = Account.objects.filter(name="TS_CAR").update(exclude_from_risk=True)
         self.stdout.write(self.style.SUCCESS(f"Updated {updated} TAXABLE_CAR account(s)."))
 
         self.stdout.write(self.style.SUCCESS("Seed complete."))

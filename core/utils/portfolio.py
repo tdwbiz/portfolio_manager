@@ -252,7 +252,7 @@ def compute_realised_pnl(
     """
     qs = Transaction.objects.select_related("account")
     if account_id:
-        qs = qs.filter(account__account_id=account_id)
+        qs = qs.filter(account__name=account_id)
 
     # Symbol filter on the query (case-insensitive)
     if symbol:
@@ -263,13 +263,13 @@ def compute_realised_pnl(
     # Group by (symbol, account_id), preserving chronological order
     groups: dict[tuple, list] = {}
     for tx in transactions:
-        key = (tx.symbol, tx.account.account_id if tx.account else "")
+        key = (tx.symbol, tx.account.name if tx.account else "")
         groups.setdefault(key, []).append(tx)
 
     result = []
 
     for (symbol_key, acct_id), txs in groups.items():
-        # Display value: account name (internal grouping key stays account_id)
+        # Grouping key and display value are both the account name.
         acct_name = next((t.account.name for t in txs if t.account), "")
         fifo_deque: deque = deque()
         total_shares = Decimal("0")
@@ -560,14 +560,14 @@ def compute_series_by_account(
     transaction across all accounts to end_date), ensuring arrays
     are the same length as the labels produced by the market-value series.
 
-    Returns a dict keyed by account_id, each value being a list of
+    Returns a dict keyed by account name, each value being a list of
     {'date': 'YYYY-MM-DD', 'market_value_cad': Decimal} dicts.
     """
     try:
         # Get all accounts that have at least one BUY transaction
         accounts_with_buys = (
             Transaction.objects.filter(type="BUY")
-            .values_list("account__account_id", flat=True)
+            .values_list("account__name", flat=True)
             .distinct()
         )
 
@@ -577,7 +577,7 @@ def compute_series_by_account(
         # Compute global date range from ALL accounts
         global_start = (
             Transaction.objects.filter(
-                account__account_id__in=accounts_with_buys, type__in=("BUY", "SELL")
+                account__name__in=accounts_with_buys, type__in=("BUY", "SELL")
             )
             .order_by("date", "id")
             .first()
@@ -615,7 +615,7 @@ def compute_series_by_account(
                 set(
                     tx.symbol
                     for tx in Transaction.objects.filter(
-                        account__account_id__in=accounts_with_buys
+                        account__name__in=accounts_with_buys
                     ).values_list("symbol", flat=True)
                 )
             )
@@ -650,7 +650,7 @@ def compute_series_by_account(
         results = {}
         for account_id in accounts_with_buys:
             account_txs = Transaction.objects.filter(
-                account__account_id=account_id, type__in=("BUY", "SELL")
+                account__name=account_id, type__in=("BUY", "SELL")
             ).order_by("date", "id")
 
             if not account_txs.exists():
@@ -782,8 +782,9 @@ def compute_positions(broker=None):
     positions = {}
 
     for tx in qs:
-        account_id = tx.account.account_id if tx.account else ""
-        account_name = tx.account.name if tx.account else ""
+        # Grouping key is the account name (Account.account_id is gone).
+        account_id = tx.account.name if tx.account else ""
+        account_name = account_id
         key = (tx.symbol, tx.statement.source, account_id)
         if key not in positions:
             positions[key] = {

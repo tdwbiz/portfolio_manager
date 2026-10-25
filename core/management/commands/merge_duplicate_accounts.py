@@ -4,36 +4,32 @@ into the canonical accounts given via --canonical (comma list of account pks).
 Safe to run multiple times — skips accounts that are already canonical or
 have no linked data.
 """
-import re
 import logging
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import Account, RbcMonthly, RbcAnnual
+from core.utils.account_fingerprint import lookup_account
 
 logger = logging.getLogger(__name__)
 
 
-def _normalize(raw: str) -> str:
-    """Strip non-digits and return the first 8 digits."""
-    digits = re.sub(r'\D', '', raw)
-    return digits[:8] if len(digits) >= 8 else digits
-
-
 def _find_target(dupe: Account, canonical_map: dict) -> Account | None:
-    """Find the canonical account this duplicate should merge into."""
-    # 1. Normalize the account_id directly.
-    norm = _normalize(dupe.account_id)
-    if norm in canonical_map:
-        return canonical_map[norm]
+    """Find the canonical account this duplicate should merge into.
 
-    # 2. For FALLBACK-XXXX — the 4-digit suffix appears at the end of a canonical id.
-    if dupe.account_id.startswith('FALLBACK-'):
-        suffix = dupe.account_id.split('-', 1)[1]  # e.g. '2259'
-        for cid, acct in canonical_map.items():
-            if cid.endswith(suffix):
-                return acct
+    Matches by name, then by a unique last-4, then by the fingerprint of an
+    account_number stored on linked RbcMonthly / RbcAnnual records.
+    """
+    # 1. Exact name match.
+    if dupe.name in canonical_map:
+        return canonical_map[dupe.name]
+
+    # 2. Unique last-4 match among the canonical accounts.
+    if dupe.last_4:
+        matches = [a for a in canonical_map.values() if a.last_4 == dupe.last_4]
+        if len(matches) == 1:
+            return matches[0]
 
     # 3. Look at the account_number stored in linked RbcMonthly / RbcAnnual records.
     sample = (
@@ -41,9 +37,9 @@ def _find_target(dupe: Account, canonical_map: dict) -> Account | None:
         or RbcAnnual.objects.filter(account=dupe).values_list('account_number', flat=True).first()
     )
     if sample:
-        norm2 = _normalize(sample)
-        if norm2 in canonical_map:
-            return canonical_map[norm2]
+        acct = lookup_account(sample)
+        if acct is not None and any(a.pk == acct.pk for a in canonical_map.values()):
+            return acct
 
     return None
 
@@ -88,8 +84,8 @@ class Command(BaseCommand):
             ))
             return
 
-        # Keyed by account_id so _find_target can match normalised numbers.
-        canonical_map = {a.account_id: a for a in canonical_accounts}
+        # Keyed by name so _find_target can match duplicates.
+        canonical_map = {a.name: a for a in canonical_accounts}
 
         self.stdout.write(f'Canonical accounts: {len(canonical_map)}\n')
 
@@ -113,17 +109,17 @@ class Command(BaseCommand):
 
                 if target is None:
                     msg = (
-                        f'  SKIP  id={dupe.id:>4}  {dupe.account_id!r:<30}  '
+                        f'  SKIP  id={dupe.id:>4}  {dupe.name!r:<30}  '
                         f'monthly={monthly_count}  annual={annual_count}  '
                         f'(cannot determine target)'
                     )
                     self.stdout.write(self.style.WARNING(msg))
-                    skipped.append(dupe.account_id)
+                    skipped.append(dupe.name)
                     continue
 
                 msg = (
-                    f'  MERGE id={dupe.id:>4}  {dupe.account_id!r:<30}  '
-                    f'-> {target.account_id} ({target.name})  '
+                    f'  MERGE id={dupe.id:>4}  {dupe.name!r:<30}  '
+                    f'-> {target.name} (last_4={target.last_4})  '
                     f'monthly={monthly_count}  annual={annual_count}'
                 )
                 self.stdout.write(msg)

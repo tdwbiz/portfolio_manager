@@ -18,7 +18,7 @@ class Command(BaseCommand):
         # Query transactions
         qs = Transaction.objects.all()
         if account_id:
-            qs = qs.filter(account__account_id=account_id)
+            qs = qs.filter(account__name=account_id)
 
         suspicious = 0
         repairable = 0
@@ -34,9 +34,9 @@ class Command(BaseCommand):
                         tx.amount_cad = Decimal(round(tx.amount * tx.exchange_rate_cad, 2))
                         tx.save()
                         repaired += 1
-                        tx_details.append(f"[REPAIRED] id={tx.id} account={tx.account.account_id if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → set amount_cad={tx.amount_cad}")
+                        tx_details.append(f"[REPAIRED] id={tx.id} account={tx.account.name if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → set amount_cad={tx.amount_cad}")
                     else:
-                        tx_details.append(f"[SUSPICIOUS] id={tx.id} account={tx.account.account_id if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → would set amount_cad={round(tx.amount * tx.exchange_rate_cad, 2)}")
+                        tx_details.append(f"[SUSPICIOUS] id={tx.id} account={tx.account.name if tx.account else ''} date={tx.date} symbol={tx.symbol} amount={tx.amount} {tx.currency} rate={tx.exchange_rate_cad} → would set amount_cad={round(tx.amount * tx.exchange_rate_cad, 2)}")
 
         # Output summary
         self.stdout.write(f"Total transactions scanned: {qs.count()}")

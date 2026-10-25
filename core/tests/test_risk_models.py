@@ -11,11 +11,9 @@ class PositionHistoryTemporalTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="TEST_ACC",
             name="Test Account",
             owner="TOM",
-            currency="CAD",
-        )
+            currency="CAD")
         self.statement = BrokerStatement.objects.create(
             source="IB",
             file_date=date(2025, 1, 1),
@@ -147,12 +145,10 @@ class PositionHistoryTemporalTests(TestCase):
 
     def test_exclude_from_risk_flag_filters_vw_current_portfolio(self):
         excluded_account = Account.objects.create(
-            account_id="EXCLUDED",
             name="Excluded Account",
             owner="TOM",
             currency="CAD",
-            exclude_from_risk=True,
-        )
+            exclude_from_risk=True)
         PositionHistory.objects.create(
             owner="TOM",
             account=excluded_account,
@@ -174,12 +170,10 @@ class PositionHistoryTemporalTests(TestCase):
 
     def test_taxable_car_excluded_by_default(self):
         taxable_car = Account.objects.create(
-            account_id="TS_CAR",
             name="Taxable Car",
             owner="TOM",
             currency="CAD",
-            exclude_from_risk=True,
-        )
+            exclude_from_risk=True)
         PositionHistory.objects.create(
             owner="TOM",
             account=taxable_car,
@@ -203,20 +197,16 @@ class AccountExcludeFromRiskTests(TestCase):
 
     def test_default_exclude_from_risk_is_false(self):
         account = Account.objects.create(
-            account_id="NEW_ACC",
             name="New Account",
             owner="SUSAN",
-            currency="CAD",
-        )
+            currency="CAD")
         self.assertFalse(account.exclude_from_risk)
 
     def test_toggle_exclude_from_risk(self):
         account = Account.objects.create(
-            account_id="TOGGLE_ACC",
             name="Toggle Account",
             owner="TOM",
-            currency="CAD",
-        )
+            currency="CAD")
         account.exclude_from_risk = True
         account.save()
         self.assertTrue(account.exclude_from_risk)

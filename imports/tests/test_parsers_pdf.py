@@ -326,10 +326,8 @@ class TestParseRbcPdf(TestCase):
         """Test 5: Run manage_inbox_import with --dry-run.
         Verify no DB writes occur."""
         account = Account.objects.create(
-            account_id="DUMMY-12345",
             name="Test Account",
-            broker="RBC",
-        )
+            broker="RBC")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             inbox_dir = os.path.join(tmpdir, 'inbox')
@@ -363,12 +361,10 @@ class TestParseRbcPdf(TestCase):
         # Fingerprint of the number in _mock_vl_section; the raw number is
         # never stored on the Account row.
         account = Account.objects.create(
-            account_id="TEST-DUP-1",
             name="Test Duplicate Account",
             broker="RBC",
             fingerprint=fingerprint_account_number("900-00003-1-8"),
-            last_4="0003",
-        )
+            last_4="0003")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             inbox_dir = os.path.join(tmpdir, 'inbox')

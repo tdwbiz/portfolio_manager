@@ -16,11 +16,9 @@ class AccountCurrencyModelTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_MC',
             name='Multi-Currency Test',
             broker='IB',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
 
     def test_create_cad_sub_account(self):
         """Can create a CAD sub-account."""
@@ -32,7 +30,7 @@ class AccountCurrencyModelTests(TestCase):
         )
         self.assertEqual(cur.currency, 'CAD')
         self.assertEqual(cur.starting_balance, Decimal('10000.00'))
-        self.assertEqual(str(cur), 'TEST_MC (CAD)')
+        self.assertEqual(str(cur), 'Multi-Currency Test (CAD)')
 
     def test_create_usd_sub_account(self):
         """Can create a USD sub-account."""
@@ -103,9 +101,9 @@ class AccountFormCurrencyTests(TestCase):
         self.assertNotIn('starting_balance_date', form.fields)
 
     def test_account_form_includes_required_fields(self):
-        """AccountForm should include account_id, name, broker, category, owner."""
+        """AccountForm should include name, broker, category, owner."""
         form = AccountForm()
-        self.assertIn('account_id', form.fields)
+        self.assertNotIn('account_id', form.fields)
         self.assertIn('name', form.fields)
         self.assertIn('broker', form.fields)
         self.assertIn('category', form.fields)
@@ -118,16 +116,14 @@ class AccountCurrencyFormSetTests(TestCase):
     def test_formset_initially_empty(self):
         """Formset starts empty for an account with no currencies."""
         account = Account.objects.create(
-            account_id='EMPTY', name='Empty', broker='IB',
-        )
+            name='Empty', broker='IB')
         formset = AccountCurrencyFormSet(instance=account)
         self.assertEqual(len(formset.forms), 0)
 
     def test_formset_shows_existing_currencies(self):
         """Formset shows existing sub-accounts."""
         account = Account.objects.create(
-            account_id='HAS_CURR', name='Has Currency', broker='IB',
-        )
+            name='Has Currency', broker='IB')
         AccountCurrency.objects.create(
             account=account, currency='CAD', starting_balance=Decimal('1000'),
         )
@@ -143,11 +139,9 @@ class AccountCurrencyViewTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='VIEWACC',
             name='View Test Account',
             broker='IB',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         AccountCurrency.objects.create(
             account=self.account, currency='CAD',
             starting_balance=Decimal('10000.00'),
@@ -188,8 +182,7 @@ class AccountCurrencyViewTests(TestCase):
     def test_account_detail_single_currency(self):
         """Single-currency accounts don't show Multi-Currency badge."""
         account = Account.objects.create(
-            account_id='SINGLE_CUR', name='Single', broker='IB',
-        )
+            name='Single', broker='IB')
         AccountCurrency.objects.create(
             account=account, currency='USD', starting_balance=Decimal('100'),
         )
@@ -255,8 +248,7 @@ class AccountCurrencyTemplateTests(TestCase):
     def test_dashboard_shows_sub_account_currencies(self):
         """Dashboard account table shows currency badges from sub-accounts."""
         account = Account.objects.create(
-            account_id='DASH001', name='Dashboard Test', broker='IB',
-        )
+            name='Dashboard Test', broker='IB')
         AccountCurrency.objects.create(
             account=account, currency='CAD', starting_balance=Decimal('1000'),
         )
@@ -271,8 +263,7 @@ class AccountCurrencyTemplateTests(TestCase):
     def test_accounts_list_shows_multi_currency_account(self):
         """Accounts list page shows multiple currency badges."""
         account = Account.objects.create(
-            account_id='LIST001', name='List Test', broker='IB',
-        )
+            name='List Test', broker='IB')
         AccountCurrency.objects.create(
             account=account, currency='CAD',
         )
@@ -292,8 +283,7 @@ class AccountCurrencyDeleteTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='DELACC', name='Delete Test', broker='IB',
-        )
+            name='Delete Test', broker='IB')
         self.cad_cur = AccountCurrency.objects.create(
             account=self.account, currency='CAD',
             starting_balance=Decimal('10000'),

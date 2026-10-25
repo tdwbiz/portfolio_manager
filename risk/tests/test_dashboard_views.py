@@ -27,10 +27,8 @@ class DashboardViewTest(TestCase):
         """Set up test data shared across all tests in this class."""
         # Create accounts
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         
         # Create owner configs
         OwnerConfig.objects.create(
@@ -274,15 +272,13 @@ class AccountSummaryViewTest(TestCase):
         """Set up test data shared across all tests."""
         # Create accounts
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.taxable = Account.objects.create(
-            account_id='TAXABLE_TOM_SUSAN',
+            name='TAXABLE_TOM',
             owner='TOM',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         
         # Create owner configs
         OwnerConfig.objects.create(
@@ -382,15 +378,11 @@ class OwnerSummaryViewTest(TestCase):
         """Set up test data shared across all tests."""
         # Create accounts
         Account.objects.create(
-            account_id='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         Account.objects.create(
-            account_id='RRSP_SUSAN',
             owner='SUSAN',
-            category='RRSP',
-        )
+            category='RRSP')
         
         # Create owner configs
         OwnerConfig.objects.create(
@@ -534,11 +526,11 @@ class HeatMapViewTest(TestCase):
         
         # Create accounts (ignore errors if they already exist)
         Account.objects.get_or_create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             defaults={'owner': 'TOM', 'category': 'RRSP'}
         )
         Account.objects.get_or_create(
-            account_id='RRSP_SUSAN',
+            name='RRSP_SUSAN',
             defaults={'owner': 'SUSAN', 'category': 'RRSP'}
         )
         

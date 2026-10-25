@@ -29,7 +29,7 @@ warnings.filterwarnings('ignore', category=PendingDeprecationWarning)
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
-from django.db.models import Sum, Count, Q, F, Exists, OuterRef
+from django.db.models import Sum, Count, Q, Exists, OuterRef
 from django.utils import timezone
 
 from core.models import (
@@ -380,7 +380,7 @@ class RBCDataAuditor:
                 SELECT 
                     rm.id,
                     rm.account_id,
-                    a.account_id as acc_display,
+                    a.name as acc_display,
                     rm.statement_date,
                     rm.currency,
                     rm.end_total_market_value,
@@ -400,7 +400,7 @@ class RBCDataAuditor:
                 sql += ' WHERE ' + ' AND '.join(where_clauses)
             
             sql += """
-                GROUP BY rm.id, rm.account_id, a.account_id, rm.statement_date,
+                GROUP BY rm.id, rm.account_id, a.name, rm.statement_date,
                          rm.currency, rm.end_total_market_value
                 HAVING ABS(COALESCE(SUM(rmb.market_value), 0) - rm.end_total_market_value) > %s
                 ORDER BY rm.statement_date DESC
@@ -671,30 +671,31 @@ class RBCDataAuditor:
         self.result.checks_run += 1
         self.printer.print_section('CHECK 6: Account Matching & Duplicates')
         
-        # Find duplicate accounts (same normalized ID)
-        rbc_accounts = Account.objects.filter(broker='RBC')
-        
-        # Group by first 8 digits
-        normalized_groups = {}
+        # Find duplicate accounts (same fingerprint)
+        rbc_accounts = (
+            Account.objects.filter(broker='RBC')
+            .exclude(fingerprint__isnull=True)
+            .exclude(fingerprint='')
+        )
+
+        # Group by fingerprint
+        fp_groups = {}
         for acc in rbc_accounts:
-            digits = ''.join(c for c in acc.account_id if c.isdigit())
-            normalized = digits[:8] if len(digits) >= 8 else digits
-            
-            if normalized not in normalized_groups:
-                normalized_groups[normalized] = []
-            normalized_groups[normalized].append(acc)
-        
-        duplicate_groups = {k: v for k, v in normalized_groups.items() if len(v) > 1}
-        
+            if acc.fingerprint not in fp_groups:
+                fp_groups[acc.fingerprint] = []
+            fp_groups[acc.fingerprint].append(acc)
+
+        duplicate_groups = {k: v for k, v in fp_groups.items() if len(v) > 1}
+
         if duplicate_groups:
-            for normalized, accounts in duplicate_groups.items():
-                account_ids = [a.account_id for a in accounts]
+            for _fp, accounts in duplicate_groups.items():
+                account_names = [a.name for a in accounts]
                 self.result.add_error(
                     'account_matching',
-                    f'Duplicate accounts normalize to same ID {normalized}: {", ".join(account_ids)}',
+                    f'Duplicate accounts share a fingerprint (last_4={accounts[0].last_4}): {", ".join(account_names)}',
                     {
-                        'normalized_id': normalized,
-                        'accounts': account_ids,
+                        'last_4': accounts[0].last_4,
+                        'accounts': account_names,
                     }
                 )
         
@@ -708,36 +709,10 @@ class RBCDataAuditor:
             for acc in auto_created:
                 self.result.add_warning(
                     'account_matching',
-                    f'Auto-created account: {acc.account_id} ({acc.name})',
+                    f'Auto-created account: {acc.name}',
                 )
-        
-        # Check for RbcMonthly records with account_number that doesn't match account
-        mismatched = RbcMonthly.objects.filter(
-            account__broker='RBC'
-        ).exclude(
-            account_number=F('account__account_id')
-        ).values_list(
-            'account__account_id', 'account_number', 'statement_date', 'file_name'
-        ).distinct()[:50]  # Limit to 50 examples
-        
-        if mismatched.exists():
-            self.result.add_warning(
-                'account_matching',
-                f'{mismatched.count()} RbcMonthly records have account_number that doesn\'t match account.account_id',
-                {
-                    'examples': [
-                        {
-                            'account_id': row[0],
-                            'pdf_account_number': row[1],
-                            'statement_date': str(row[2]),
-                            'file_name': row[3],
-                        }
-                        for row in mismatched
-                    ],
-                },
-            )
-        
-        if not duplicate_groups and not auto_created.exists() and not mismatched.exists():
+
+        if not duplicate_groups and not auto_created.exists():
             self.result.add_ok('account_matching', 'All accounts unique and properly configured')
     
     def _check_7_transaction_integrity(self):

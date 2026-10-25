@@ -21,7 +21,7 @@
       <tbody>
         {% for portfolio in portfolios %}
         <tr>
-          <td>{{ portfolio.account.account_id }}</td>
+          <td>{{ portfolio.account.name }}</td>
           <td>{{ portfolio.name }}</td>
           <td class="text-muted small">{{ portfolio.description|truncatewords:20 }}</td>
           <td>{{ portfolio.holdings.count }}</td>

@@ -377,7 +377,7 @@ def reconcile_view(request):
 
     if account_id:
         try:
-            account = Account.objects.get(account_id=account_id)
+            account = Account.objects.get(name=account_id)
             reconciliations = reconcile_fn(account, period_type=period_type)
             matches = sum(1 for r in reconciliations if r.matching)
             discrepancies = sum(1 for r in reconciliations if not r.matching)

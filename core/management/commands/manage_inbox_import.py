@@ -35,7 +35,7 @@ from core.models import (
     RbcMonthlyHolding,
     RbcMonthlyTransaction,
 )
-from core.utils.account_fingerprint import lookup_account, normalize_account_number
+from core.utils.account_fingerprint import lookup_account, normalize_account_number, scrub_text
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -307,7 +307,6 @@ class Command(BaseCommand):
                 report_year=parsed['report_year'],
                 report_period_start=parsed['report_period_start'],
                 report_period_end=parsed['report_period_end'],
-                account_number=parsed.get('account_number', ''),
                 account_type_code=parsed.get('account_type_code', ''),
                 currency=currency,
                 bal_beginning_value=cdata.get('bal_beginning_value', 0),
@@ -439,7 +438,6 @@ class Command(BaseCommand):
                 file_name=pdf_file.name,
                 statement_date=statement_date,
                 currency=currency,
-                account_number=account_number,
                 last_statement_date=parsed.get('last_statement_date'),
                 begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
                 end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
@@ -487,7 +485,7 @@ class Command(BaseCommand):
                     rbc_monthly=rbc_monthly,
                     date=tx['date'],
                     activity_type=tx['activity_type'][:100],
-                    description=tx['description'][:500],
+                    description=scrub_text(tx['description'] or '')[0][:500],
                     symbol=(tx.get('symbol', '') or '')[:200],
                     quantity=tx.get('quantity') or Decimal('0.0000'),
                     price=tx.get('price') or Decimal('0.0000'),

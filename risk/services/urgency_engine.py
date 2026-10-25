@@ -615,7 +615,7 @@ def calculate_urgency_for_date(
         # Fallback: try to get from core accounts
         try:
             from core.models import Account
-            account_ids = set(Account.objects.values_list('account_id', flat=True))
+            account_ids = set(Account.objects.values_list('name', flat=True))
         except Exception:
             account_ids = {'TAXABLE_TOM_SUSAN', 'RRSP_TOM', 'TFSASUSAN'}
 

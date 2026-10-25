@@ -21,11 +21,9 @@ class DashboardDollarSummaryTests(TestCase):
             raw_filename="test.csv",
         )
         self.account = Account.objects.create(
-            account_id="TEST-ACCT",
             name="Test Account",
             broker="IB",
-            currency="USD",
-        )
+            currency="USD")
         self.user = User.objects.create_user(
             username="testuser", password="testpass123"
         )
@@ -137,11 +135,9 @@ class DashboardTopMoversTests(TestCase):
             raw_filename="test.csv",
         )
         self.account = Account.objects.create(
-            account_id="TEST-ACCT",
             name="Test Account",
             broker="IB",
-            currency="USD",
-        )
+            currency="USD")
         self.user = User.objects.create_user(
             username="testuser", password="testpass123"
         )

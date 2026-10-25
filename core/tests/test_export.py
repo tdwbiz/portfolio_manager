@@ -13,7 +13,6 @@ class TransactionExportTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
         # Create test data
         self.account = Account.objects.create(
-            account_id='EXP001',
             name='Test Account',
             broker='IB'
         )
@@ -122,7 +121,7 @@ class TransactionExportTests(TestCase):
     def test_csv_filter_by_account_pk(self):
         # ?account= carries Account.pk
         other = Account.objects.create(
-            account_id='EXPACC2', name='Other Account', broker='IB'
+            name='Other Account', broker='IB'
         )
         Transaction.objects.create(
             statement=self.broker,

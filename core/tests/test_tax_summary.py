@@ -12,7 +12,6 @@ class TaxSummaryTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
         self.account = Account.objects.create(
-            account_id='TAX001',
             name='Tax Account',
             broker='IB',
             category='TAXABLE'

@@ -23,7 +23,7 @@ def alternatives_account(request, account_id: str):
     List and create alternative portfolios for a specific account.
     Also provides risk preview for each alternative.
     """
-    account = get_object_or_404(Account, account_id=account_id)
+    account = get_object_or_404(Account, name=account_id)  # URL carries the account name
     portfolios = AlternativePortfolio.objects.filter(
         account=account, is_active=True
     ).prefetch_related('holdings')
@@ -90,10 +90,10 @@ def alternatives_edit(request, portfolio_id: int):
 
 def alternatives_create(request):
     """Create a new alternative portfolio for a given account."""
-    accounts = Account.objects.filter(exclude_from_risk=False).order_by('account_id')
+    accounts = Account.objects.filter(exclude_from_risk=False).order_by('name')
 
     if request.method == 'POST':
-        account = get_object_or_404(Account, account_id=request.POST.get('account_id'))
+        account = get_object_or_404(Account, name=request.POST.get('account_id'))
         portfolio = AlternativePortfolio.objects.create(
             owner=account.owner,
             account=account,

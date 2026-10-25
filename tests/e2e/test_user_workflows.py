@@ -106,9 +106,8 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, StaticLiveServerTestC
         # Create a test account (fingerprint of 90000001; the number itself
         # is never stored on the row)
         self.account = Account.objects.create(
-            account_id="ACCOUNT_A", name="ACCOUNT_A", broker="RBC", currency="CAD",
-            fingerprint=fingerprint_account_number("90000001"), last_4="0001",
-        )
+            name="ACCOUNT_A", broker="RBC", currency="CAD",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001")
 
     def _login(self):
         """Helper method to log in."""

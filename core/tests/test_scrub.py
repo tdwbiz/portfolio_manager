@@ -137,6 +137,42 @@ class ScrubAccountNumbersTests(TestCase):
             output,
         )
 
+    def test_bank_account_run_reported_and_rewritten(self) -> None:
+        bank_tx = Transaction.objects.create(
+            statement=self.statement,
+            account=self.account,
+            date=date(2024, 1, 15),
+            symbol="CASH",
+            type="TRANSFER",
+            quantity=Decimal("0"),
+            price=Decimal("0.00"),
+            commission=Decimal("0.00"),
+            amount=Decimal("-500.00"),
+            currency="CAD",
+            amount_cad=Decimal("-500.00"),
+            notes="transfer to 123456789012345 done",
+        )
+
+        # Dry run: the 15-digit run is counted as bank (not unmatched) and
+        # nothing is written; the value is never printed.
+        output = self._run()
+        self.assertIn(
+            "core_transaction,notes,matched=1,replaced=2,unmatched=1,bank=1",
+            output,
+        )
+        self.assertNotIn("123456789012345", output)
+        self.assertEqual(
+            Transaction.objects.get(pk=bank_tx.pk).notes,
+            "transfer to 123456789012345 done",
+        )
+
+        # Apply: the run is rewritten with the fixed label.
+        self._run("--apply")
+        self.assertEqual(
+            Transaction.objects.get(pk=bank_tx.pk).notes,
+            "transfer to BANK_ACCOUNT done",
+        )
+
     def _make_txs(self, count: int) -> None:
         for i in range(count):
             Transaction.objects.create(

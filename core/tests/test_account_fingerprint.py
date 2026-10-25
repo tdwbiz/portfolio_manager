@@ -199,6 +199,36 @@ class ScrubTextTests(TestCase):
     def test_empty_text(self):
         self.assertEqual(scrub_text("", self.name_map), ("", 0, 0, 0, 0))
 
+    def test_15_digit_run_replaced_with_bank_account(self):
+        cleaned, matched, replaced, unmatched, bank = scrub_text(
+            "transfer to 123456789012345 done", self.name_map
+        )
+        self.assertEqual(cleaned, "transfer to BANK_ACCOUNT done")
+        self.assertEqual((matched, replaced, unmatched, bank), (0, 1, 0, 1))
+
+    def test_14_and_16_digit_runs_not_replaced(self):
+        for run in ("12345678901234", "1234567890123456"):
+            cleaned, matched, replaced, unmatched, bank = scrub_text(
+                f"acct {run} end", self.name_map
+            )
+            self.assertEqual(cleaned, f"acct {run} end")
+            self.assertEqual((matched, replaced, bank), (0, 0, 0))
+
+    def test_15_digit_run_adjacent_to_stored_account(self):
+        cleaned, matched, replaced, unmatched, bank = scrub_text(
+            "90000003 123456789012345", self.name_map
+        )
+        self.assertEqual(cleaned, "ACCOUNT_C BANK_ACCOUNT")
+        self.assertEqual((matched, replaced, unmatched, bank), (1, 2, 0, 1))
+
+    def test_amounts_dates_and_rate_unchanged(self):
+        text = "amount 1234567.89 on 2026-10-21 rate 1.36540000"
+        cleaned, matched, replaced, unmatched, bank = scrub_text(
+            text, self.name_map
+        )
+        self.assertEqual(cleaned, text)
+        self.assertEqual((matched, replaced, bank), (0, 0, 0))
+
 
 class FingerprintNameMapTests(TestCase):
     def setUp(self):

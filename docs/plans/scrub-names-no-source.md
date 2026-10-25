@@ -22,6 +22,8 @@ old names carry the account number and would otherwise be brute-forceable (see
   otherwise built from account + date;
 - if `ACCOUNT_FINGERPRINT_KEY` is missing or shorter than 32 chars, **stop before writing anything**
   (also for `--dry-run`, so the dry run reports what the real run would do);
+- rows with an empty/`NULL` `file_name` are hashed like any other name — the HMAC input is the
+  empty string — so they end up safe (decision, tdw, Oct 25);
 - `--dry-run` prints counts only, per model: `from-file`, `keyed`, `already-safe` (no names, no
   numbers);
 - still idempotent: a second run is a no-op, because keyed names are already safe.
@@ -96,11 +98,14 @@ never renamed.
   sanitises to nothing) — stop, do not special-case silently.
 - `safe_file_name` raises for a stored date/year (monthly row without `statement_date`, annual row
   without `report_year`): the plan has no fallback for that; ask instead of guessing.
-- The key gate turns out to be wanted only for real runs (see open question 1) — plan is revised.
+- ~~The key gate turns out to be wanted only for real runs (see open question 1) — plan is revised.~~
+  Resolved: the key gate applies to both modes (Decisions, tdw, Oct 25).
 - Anything needed from `mercury` data (real counts, real names): agents do not touch that DB; tdw
   runs the dry run.
 
 ## Open questions
+
+All four were answered by tdw on Oct 25 — see **Decisions** below.
 
 1. *Should `--dry-run` also require a valid key?* **Recommended: yes** — check the key before the
    loop in both modes and raise `CommandError`, so the dry run cannot report success for a run that
@@ -113,3 +118,17 @@ never renamed.
    input) so they end up safe; if tdw prefers them skipped, that is a one-line change.
 4. *Where does `keyed_hash8` live?* **Recommended: `core/utils/account_fingerprint.py`**, next to
    `wrap_tx_hash`, because that module owns `_get_key()`; `safe_names.py` stays key-free.
+
+## Decisions (tdw, Oct 25)
+
+tdw accepts the recommended answer for every open question:
+
+1. **Key gate in both modes.** The command validates `ACCOUNT_FINGERPRINT_KEY` before the loop and
+   raises `CommandError` for a missing/short key in *both* `--dry-run` and real runs, so nothing is
+   written (or reported as safe) without a valid key.
+2. **HMAC input.** The stored `file_name` string verbatim, UTF-8 encoded; the empty string when
+   `file_name` is `NULL`. No basename or other normalisation.
+3. **Empty/`NULL` `file_name` rows** are hashed like any other name (empty input) and rewritten to
+   a safe name — not skipped.
+4. **`keyed_hash8` lives in `core/utils/account_fingerprint.py`**, next to `wrap_tx_hash`
+   (the module owns `_get_key()`); `safe_names.py` stays key-free.

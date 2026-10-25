@@ -35,7 +35,12 @@ from core.models import (
     RbcMonthlyHolding,
     RbcMonthlyTransaction,
 )
-from core.utils.account_fingerprint import lookup_account, normalize_account_number, scrub_text
+from core.utils.account_fingerprint import (
+    build_fingerprint_name_map,
+    lookup_account,
+    normalize_account_number,
+    scrub_text,
+)
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -104,6 +109,10 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN MODE — no database changes'))
 
+        # One query for the fingerprint->name map; scrub_text must never
+        # query per candidate (SQL Server without MARS).
+        name_map = build_fingerprint_name_map()
+
         # Collect PDFs (non-recursive — only direct children of inbox)
         pdf_files = sorted(target_path.glob('*.pdf'))
         if limit:
@@ -151,7 +160,7 @@ class Command(BaseCommand):
             elif doc_type == 'monthly':
                 classified_monthly += 1
                 stmts, txns, bals, holdings, errs, json_sections, err_msgs = self._process_monthly(
-                    pdf_file, dry_run
+                    pdf_file, dry_run, name_map
                 )
                 imported_monthly_stmts += stmts
                 imported_transactions += txns
@@ -351,7 +360,7 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
 
     def _process_monthly(
-        self, pdf_file: Path, dry_run: bool
+        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str]
     ) -> tuple[int, int, int, int, int, list, list]:
         """Parse and import a monthly statement PDF.
 
@@ -485,7 +494,7 @@ class Command(BaseCommand):
                     rbc_monthly=rbc_monthly,
                     date=tx['date'],
                     activity_type=tx['activity_type'][:100],
-                    description=scrub_text(tx['description'] or '')[0][:500],
+                    description=scrub_text(tx['description'] or '', name_map)[0][:500],
                     symbol=(tx.get('symbol', '') or '')[:200],
                     quantity=tx.get('quantity') or Decimal('0.0000'),
                     price=tx.get('price') or Decimal('0.0000'),

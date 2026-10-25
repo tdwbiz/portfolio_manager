@@ -21,7 +21,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
-from core.utils.account_fingerprint import lookup_account, scrub_text, wrap_tx_hash
+from core.utils.account_fingerprint import (
+    build_fingerprint_name_map,
+    lookup_account,
+    scrub_text,
+    wrap_tx_hash,
+)
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -70,6 +75,10 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                   skipped_count = duplicates already in DB,
                   parsed_count = total trades found by parser
     """
+    # One query for the fingerprint->name map; scrub_text must never query
+    # per candidate (SQL Server without MARS).
+    name_map = build_fingerprint_name_map()
+
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         return (0, 0, 0)
@@ -228,7 +237,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                         currency=trade.get('currency', 'USD'),
                         exchange_rate_cad=rate,
                         amount_cad=amount_cad,
-                        notes=scrub_text(trade.get('notes', '') or '')[0],
+                        notes=scrub_text(trade.get('notes', '') or '', name_map)[0],
                         tx_hash=tx_hash,
                     )
                     imported_count += 1

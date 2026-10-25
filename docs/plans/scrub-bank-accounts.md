@@ -97,7 +97,7 @@ No migrations, no models, no views.
   stop; the plan is revised first.
 - Never print or log an original number; tests use fake 15-digit values only.
 
-## Open questions
+## Open questions (all answered — see Decisions below)
 
 1. **Precedence:** may a 15-digit run whose first 8 digits match a stored
    fingerprint still become `BANK_ACCOUNT`? **Recommended: yes** — the rule
@@ -114,3 +114,18 @@ No migrations, no models, no views.
    fingerprint path.
 4. **Return shape:** 5-tuple vs dict/dataclass. **Recommended: 5-tuple** —
    smallest diff; the two import callers use `[0]` and are unaffected.
+
+## Decisions (tdw, Oct 25)
+
+tdw accepts all the recommended answers above:
+
+1. **Precedence:** yes — a contiguous pure-digit run of exactly 15 digits
+   becomes `BANK_ACCOUNT` unconditionally, with no fingerprint lookup, even
+   if its first 8 digits match a stored account.
+2. **Bank hits in `replaced`:** yes — counted in `replaced`, excluded from
+   `matched` and `unmatched`; step 11's log filter reads `bank=` instead of
+   relying on `unmatched`.
+3. **Dashed runs totalling 15 digits:** no — only a contiguous pure-digit
+   run of exactly 15 digits is replaced; dashed candidates keep the existing
+   fingerprint behaviour.
+4. **Return shape:** 5-tuple `(cleaned, matched, replaced, unmatched, bank)`.

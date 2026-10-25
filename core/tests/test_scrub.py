@@ -83,7 +83,10 @@ class ScrubAccountNumbersTests(TestCase):
         output = self._run()
 
         # Counts only — no value from the database is printed.
-        self.assertIn("core_transaction,notes,matched=1,replaced=1", output)
+        self.assertIn(
+            "core_transaction,notes,matched=1,replaced=1,unmatched=1,bank=0",
+            output,
+        )
         self.assertIn("DRY-RUN", output)
         for needle in ("90000001", "BUY GOOGL ACCT"):
             self.assertNotIn(needle, output)
@@ -127,8 +130,12 @@ class ScrubAccountNumbersTests(TestCase):
         self.assertEqual(
             Transaction.objects.get(pk=self.tx.pk).notes, "Buy GOOGL on ACCOUNT_A, settled 2026-10-21"
         )
-        # Second pass finds no matches (the name is not a number candidate).
-        self.assertIn("core_transaction,notes,matched=0,replaced=0", output)
+        # Second pass finds no matches (the name is not a number candidate);
+        # the look-alike date is still counted as unmatched.
+        self.assertIn(
+            "core_transaction,notes,matched=0,replaced=0,unmatched=1,bank=0",
+            output,
+        )
 
     def _make_txs(self, count: int) -> None:
         for i in range(count):

@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from core.models import Account, PositionHistory
+from core.utils.account_fingerprint import lookup_account
 
 logger = logging.getLogger(__name__)
 
@@ -402,12 +403,6 @@ def import_holdings_snapshot(
 
     from django.db import transaction
 
-    # Build lookup of valid RBC account IDs for this file's broker
-    valid_accounts = {
-        a.account_id: a
-        for a in Account.objects.filter(broker='RBC')
-    }
-
     with transaction.atomic():
         for pos in positions:
             acct_id = pos['account_id']
@@ -420,18 +415,12 @@ def import_holdings_snapshot(
                 skipped += 1
                 continue
             
-            # Look up existing account — do NOT auto-create
-            account = valid_accounts.get(acct_id)
-            if account is None:
-                # Try normalizing (in case CSV has different format)
-                digits = re.sub(r'\D', '', acct_id)
-                normalized = digits[:8] if len(digits) >= 8 else digits
-                account = valid_accounts.get(normalized)
-            
+            # Look up existing account by fingerprint — do NOT auto-create
+            account = lookup_account(acct_id)
             if account is None:
                 logger.warning(
-                    f"Account {acct_id!r} not found in database — skipping position {pos['symbol']}. "
-                    f"Import the account's CSV first or create the account manually."
+                    f"Account with unknown fingerprint — skipping position {pos['symbol']}. "
+                    f"Run set_account_fingerprint for this account first."
                 )
                 skipped += 1
                 continue

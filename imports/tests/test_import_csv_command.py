@@ -14,6 +14,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 
 from core.models import FileImportLog, Transaction, Account
+from core.utils.account_fingerprint import fingerprint_account_number
 
 
 # ---------------------------------------------------------------------------
@@ -39,9 +40,11 @@ class ImportCsvCommandTest(TestCase):
         self.processed_dir = os.path.join(self.temp_dir, 'processed')
         os.makedirs(self.inbox_dir)
 
-        # Fake account from settings_test's RBC_ACCOUNTS whitelist.
+        # Fake account 90000001 (ACCOUNT_A) with a stored fingerprint — the
+        # importer resolves rows by fingerprint, never by the raw number.
         self.account = Account.objects.create(
-            account_id="90000001", name="ACCOUNT_A", broker="RBC"
+            account_id="ACCOUNT_A", name="ACCOUNT_A", broker="RBC",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001",
         )
 
         # RBC file

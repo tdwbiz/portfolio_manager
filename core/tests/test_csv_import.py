@@ -23,6 +23,7 @@ from imports.parsers_holdings import (
     import_holdings_snapshot,
     parse_holdings_csv,
 )
+from core.utils.account_fingerprint import fingerprint_account_number
 from imports.auto_import import auto_import
 
 
@@ -132,6 +133,17 @@ class ComputeTxHashTests(TestCase):
 
 class RbcCsvParserTests(TestCase):
     """Test RBC CSV parsing with settlement_date extraction."""
+
+    def setUp(self) -> None:
+        # Fake account 90000001 (ACCOUNT_A) with a stored fingerprint — the
+        # parser resolves rows by fingerprint, never by the raw number.
+        self.account = Account.objects.create(
+            account_id='ACCOUNT_A',
+            name='ACCOUNT_A',
+            broker='RBC',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
+        )
 
     def test_parses_activity_with_settlement_date(self):
         """Settlement Date column (index 6) should be parsed."""
@@ -326,11 +338,13 @@ class HoldingsImportTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='ACCOUNT_A',
             broker='RBC',
             owner='ACCOUNT_A',
             currency='CAD',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
 
     def test_creates_new_positions(self):
@@ -443,11 +457,13 @@ class PositionHistoryQueryTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='ACCOUNT_A',
             broker='RBC',
             owner='ACCOUNT_A',
             currency='CAD',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
 
     def test_current_holdings_query(self):
@@ -537,11 +553,13 @@ class TransactionDedupTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='ACCOUNT_A',
             broker='RBC',
             owner='ACCOUNT_A',
             currency='CAD',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
 
     def test_duplicate_hash_skips_transaction(self):
@@ -678,11 +696,13 @@ class TransactionSettlementDateTests(TestCase):
             raw_filename='test.csv',
         )
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='ACCOUNT_A',
             broker='RBC',
             owner='ACCOUNT_A',
             currency='CAD',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
 
     def test_settlement_date_stored(self):
@@ -734,11 +754,13 @@ class AutoImportTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='Test Account',
             broker='RBC',
             category='TAXABLE',
             owner='Test',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
         self.statement = BrokerStatement.objects.create(
             source='RBC',
@@ -832,11 +854,13 @@ class ImportCsvManagementCommandTests(TestCase):
 
         # Create account needed for RBC import
         self.account = Account.objects.create(
-            account_id='90000001',
+            account_id='ACCOUNT_A',
             name='Test Account',
             broker='RBC',
             category='TAXABLE',
             owner='Test',
+            fingerprint=fingerprint_account_number('90000001'),
+            last_4='0001',
         )
 
         # Create a test RBC CSV

@@ -412,11 +412,18 @@ def _parse_ib_activity_statement(rows: list[list[str]],
 # RBC CSV parser
 # ---------------------------------------------------------------------------
 
-def valid_accounts() -> set[str]:
-    """Whitelist of known RBC account IDs, from settings.RBC_ACCOUNTS
-    (environment variable RBC_ACCOUNTS in .env)."""
-    from django.conf import settings
-    return set(settings.RBC_ACCOUNTS)
+def is_known_account(account_id: str) -> bool:
+    """True if the row's account number matches a stored Account fingerprint.
+
+    The full number is normalised and hashed on the fly; it is never stored.
+    Raises ``ValueError`` if ACCOUNT_FINGERPRINT_KEY is not set (fail loudly).
+    """
+    from core.models import Account
+    from core.utils.account_fingerprint import fingerprint_account_number
+
+    return Account.objects.filter(
+        fingerprint=fingerprint_account_number(account_id)
+    ).exists()
 
 def parse_rbc_csv(file_path: str,
                   rejections: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], Decimal]:
@@ -629,8 +636,8 @@ def parse_rbc_csv(file_path: str,
                     })
                     continue
 
-                # Skip accounts not in whitelist
-                if account_id and account_id not in valid_accounts():
+                # Skip accounts whose number has no stored fingerprint
+                if account_id and not is_known_account(account_id):
                     logger.debug(f"Row {row_num}: Skipping unknown account '{account_id}'")
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,

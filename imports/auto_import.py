@@ -21,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
+from core.utils.account_fingerprint import lookup_account
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -151,14 +152,12 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                 else:
                     normalized_id = None
                 
-                if normalized_id:
-                    try:
-                        account = Account.objects.get(account_id=normalized_id)
-                    except Account.DoesNotExist:
+                if raw_account_id:
+                    account = lookup_account(raw_account_id)
+                    if account is None:
                         logger.warning(
-                            "Account %r not found in database — skipping transaction "
-                            "(do not auto-create accounts from CSV)",
-                            normalized_id
+                            "Unknown account fingerprint — skipping transaction "
+                            "(do not auto-create accounts from CSV)"
                         )
                         skipped_count += 1
                         continue

@@ -56,7 +56,7 @@ class Command(BaseCommand):
         self.stdout.write(f'scrub_account_numbers [{"APPLY" if apply else "DRY-RUN"}]')
 
         for model, field in TARGETS:
-            matched = replaced = unmatched = 0
+            matched = replaced = unmatched = bank = 0
             # Materialize the pks first so no result set is open while we
             # fetch and write (SQL Server without MARS).
             pks = list(model.objects.values_list('pk', flat=True))
@@ -68,10 +68,11 @@ class Command(BaseCommand):
                     value = getattr(obj, field) or ''
                     if not value:
                         continue
-                    cleaned, m, r, u = scrub_text(value, name_map)
+                    cleaned, m, r, u, b = scrub_text(value, name_map)
                     matched += m
                     replaced += r
                     unmatched += u
+                    bank += b
                     if cleaned != value:
                         setattr(obj, field, cleaned)
                         changed.append(obj)
@@ -80,7 +81,7 @@ class Command(BaseCommand):
 
             self.stdout.write(
                 f'{model._meta.db_table},{field},'
-                f'matched={matched},replaced={replaced},unmatched={unmatched}'
+                f'matched={matched},replaced={replaced},unmatched={unmatched},bank={bank}'
             )
 
         if apply:

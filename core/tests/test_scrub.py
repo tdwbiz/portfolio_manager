@@ -83,7 +83,10 @@ class ScrubAccountNumbersTests(TestCase):
         output = self._run()
 
         # Counts only — no value from the database is printed.
-        self.assertIn("core_transaction,notes,matched=1,replaced=1", output)
+        self.assertIn(
+            "core_transaction,notes,matched=1,replaced=1,unmatched=1,bank=0",
+            output,
+        )
         self.assertIn("DRY-RUN", output)
         for needle in ("90000001", "BUY GOOGL ACCT"):
             self.assertNotIn(needle, output)
@@ -127,8 +130,48 @@ class ScrubAccountNumbersTests(TestCase):
         self.assertEqual(
             Transaction.objects.get(pk=self.tx.pk).notes, "Buy GOOGL on ACCOUNT_A, settled 2026-10-21"
         )
-        # Second pass finds no matches (the name is not a number candidate).
-        self.assertIn("core_transaction,notes,matched=0,replaced=0", output)
+        # Second pass finds no matches (the name is not a number candidate);
+        # the look-alike date is still counted as unmatched.
+        self.assertIn(
+            "core_transaction,notes,matched=0,replaced=0,unmatched=1,bank=0",
+            output,
+        )
+
+    def test_bank_account_run_reported_and_rewritten(self) -> None:
+        bank_tx = Transaction.objects.create(
+            statement=self.statement,
+            account=self.account,
+            date=date(2024, 1, 15),
+            symbol="CASH",
+            type="TRANSFER",
+            quantity=Decimal("0"),
+            price=Decimal("0.00"),
+            commission=Decimal("0.00"),
+            amount=Decimal("-500.00"),
+            currency="CAD",
+            amount_cad=Decimal("-500.00"),
+            notes="transfer to 123456789012345 done",
+        )
+
+        # Dry run: the 15-digit run is counted as bank (not unmatched) and
+        # nothing is written; the value is never printed.
+        output = self._run()
+        self.assertIn(
+            "core_transaction,notes,matched=1,replaced=2,unmatched=1,bank=1",
+            output,
+        )
+        self.assertNotIn("123456789012345", output)
+        self.assertEqual(
+            Transaction.objects.get(pk=bank_tx.pk).notes,
+            "transfer to 123456789012345 done",
+        )
+
+        # Apply: the run is rewritten with the fixed label.
+        self._run("--apply")
+        self.assertEqual(
+            Transaction.objects.get(pk=bank_tx.pk).notes,
+            "transfer to BANK_ACCOUNT done",
+        )
 
     def _make_txs(self, count: int) -> None:
         for i in range(count):

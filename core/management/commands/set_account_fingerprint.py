@@ -1,10 +1,15 @@
 """One-off command: store an account's fingerprint and last 4 digits.
 
 The full account number is entered twice at a hidden prompt, compared in
-memory, and then discarded — it is never printed, logged or stored. Only
-the keyed HMAC-SHA256 fingerprint and the last 4 digits are saved on the
-Account row. Refuses to run without a valid ACCOUNT_FINGERPRINT_KEY and
-refuses to overwrite an existing fingerprint unless --replace is given.
+memory (after normalisation), and then discarded — it is never printed,
+logged or stored. Only the keyed HMAC-SHA256 fingerprint and the last 4
+digits are saved on the Account row.
+
+This command never creates an Account: it requires exactly one existing
+Account whose name matches the entered name exactly, and errors out
+(otherwise) without storing anything. Refuses to run without a valid
+ACCOUNT_FINGERPRINT_KEY and refuses to overwrite an existing fingerprint
+unless --replace is given.
 """
 
 import getpass
@@ -42,16 +47,21 @@ class Command(BaseCommand):
         if not name:
             raise CommandError("No account name given; nothing stored.")
 
+        matches = list(Account.objects.filter(name=name))
+        if len(matches) == 0:
+            raise CommandError("No account with that name; nothing stored.")
+        if len(matches) > 1:
+            raise CommandError(
+                "Multiple accounts share that name; nothing stored. Fix the duplicate accounts first."
+            )
+        account = matches[0]
+
         number1 = getpass.getpass("Account number (hidden): ")
         number2 = getpass.getpass("Account number again (hidden): ")
         if not normalize_account_number(number1):
             raise CommandError("No account number given; nothing stored.")
-        if number1 != number2:
+        if normalize_account_number(number1) != normalize_account_number(number2):
             raise CommandError("The two entries differ; nothing stored.")
-
-        account = Account.objects.filter(name=name).first()
-        if account is None:
-            account = Account.objects.create(account_id=name, name=name, broker="RBC")
 
         if account.fingerprint and not options["replace"]:
             raise CommandError(

@@ -328,7 +328,7 @@ class ReverseStatementViewTests(TestCase):
             amount_cad=Decimal('-1005'),
         )
         response = self.client.post(reverse('reverse_statements'), {
-            'account': 'REVVIEW',
+            'account': str(self.account.pk),
             'anchor_month': '2024-06',
             'ending_cad': '10000',
         })

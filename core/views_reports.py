@@ -16,6 +16,7 @@ from django.db.models import Q as dj_Q
 from core.models import Transaction, Account, FileImportLog, RbcAnnual
 from core.views import (
     _is_path_safe,
+    _parse_account_pk,
     _get_transaction_type_options,
     INCOME_TRANSACTION_TYPES,
     TAX_TRANSACTION_TYPES,
@@ -31,12 +32,12 @@ def income_summary(request):
     """Income summary grouped by year, symbol, and type."""
     year_filter = request.GET.get('year', '')
     type_filter = request.GET.get('type', '')
-    account_filter = request.GET.get('account', '').strip()[:50]
+    account_param = request.GET.get('account', '').strip()[:50]  # Account.pk
+    account_pk = _parse_account_pk(account_param)
 
     # Validate account exists
-    if account_filter:
-        if not Account.objects.filter(account_id=account_filter).exists():
-            account_filter = ''
+    if account_param and (account_pk is None or not Account.objects.filter(pk=account_pk).exists()):
+        account_pk = None
 
     # Income and tax types
     income_types = list(INCOME_TRANSACTION_TYPES)
@@ -50,8 +51,8 @@ def income_summary(request):
         qs = qs.filter(date__year=int(year_filter))
     if type_filter:
         qs = qs.filter(type=type_filter)
-    if account_filter:
-        qs = qs.filter(account__account_id=account_filter)
+    if account_pk is not None:
+        qs = qs.filter(account__pk=account_pk)
 
     # Group by (year, symbol, type) in Python
     groups = defaultdict(lambda: {'total_amount_cad': Decimal('0'), 'count': 0})
@@ -95,7 +96,7 @@ def income_summary(request):
         'income_types': _get_transaction_type_options(all_types),
         'year_filter': year_filter,
         'type_filter': type_filter,
-        'account_filter': account_filter,
+        'account_filter': account_pk,
         'accounts': accounts,
     })
 

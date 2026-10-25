@@ -170,7 +170,7 @@ class BatchStatementsViewTests(TestCase):
 
         response = self.client.get(
             reverse('generate_monthly_statements'),
-            {'account': 'VIEW001'},
+            {'account': str(self.account.pk)},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'existing monthly statements')
@@ -180,11 +180,11 @@ class BatchStatementsViewTests(TestCase):
         """Monthly statements view regenerates when regenerate=1."""
         response = self.client.get(
             reverse('generate_monthly_statements'),
-            {'account': 'VIEW001', 'regenerate': '1'},
+            {'account': str(self.account.pk), 'regenerate': '1'},
         )
         self.assertEqual(response.status_code, 200)
         # Should not crash - even with no transactions, it should show a message
-        self.assertContains(response, 'VIEW001')
+        self.assertContains(response, 'View Test Account')
 
     def test_monthly_statements_view_batch(self):
         """Monthly statements view uses batch when batch=1."""
@@ -201,7 +201,7 @@ class BatchStatementsViewTests(TestCase):
 
         response = self.client.get(
             reverse('generate_monthly_statements'),
-            {'account': 'VIEW001', 'batch': '1'},
+            {'account': str(self.account.pk), 'batch': '1'},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Batch-generated')
@@ -219,7 +219,7 @@ class BatchStatementsViewTests(TestCase):
 
         response = self.client.get(
             reverse('generate_annual_reports'),
-            {'account': 'VIEW001'},
+            {'account': str(self.account.pk)},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'existing annual reports')
@@ -245,7 +245,7 @@ class BatchStatementsViewTests(TestCase):
 
         response = self.client.get(
             reverse('generate_annual_reports'),
-            {'account': 'VIEW001', 'regenerate': '1'},
+            {'account': str(self.account.pk), 'regenerate': '1'},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Regenerated')
@@ -254,7 +254,7 @@ class BatchStatementsViewTests(TestCase):
         """View handles missing account gracefully."""
         response = self.client.get(
             reverse('generate_monthly_statements'),
-            {'account': 'NONEXISTENT'},
+            {'account': '999999'},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'not found')

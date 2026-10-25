@@ -186,7 +186,7 @@ class IncomeSummaryTests(TestCase):
             commission=Decimal('0'),
             tx_hash='inc_acct2_div'
         )
-        response = self.client.get(reverse('income_summary'), {'account': 'INC001'})
+        response = self.client.get(reverse('income_summary'), {'account': str(self.account.pk)})
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         # INC001 transactions should appear
@@ -195,8 +195,8 @@ class IncomeSummaryTests(TestCase):
         self.assertNotIn('MSFT', content)
 
     def test_income_account_filter_invalid(self):
-        """GET /income/?account=DOESNOTEXIST; assert 200 and rows is empty (not an error)."""
-        response = self.client.get(reverse('income_summary'), {'account': 'DOESNOTEXIST'})
+        """GET /income/?account=<unknown pk>; assert 200 (not an error)."""
+        response = self.client.get(reverse('income_summary'), {'account': '999999'})
         self.assertEqual(response.status_code, 200)
         # Should not crash, and should show no rows (or empty)
         self.assertEqual(response.status_code, 200)

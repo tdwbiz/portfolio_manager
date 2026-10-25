@@ -25,9 +25,9 @@
                     <select name="account" id="account" class="form-select">
                         <option value="">— Select account —</option>
                         {% for acct in accounts %}
-                        <option value="{{ acct.account_id }}"
-                                {% if selected_account == acct.account_id %}selected{% endif %}>
-                            {{ acct.account_id }} — {{ acct.name }}
+                        <option value="{{ acct.pk }}"
+                                {% if selected_account == acct.pk %}selected{% endif %}>
+                            {{ acct.name }}
                         </option>
                         {% endfor %}
                     </select>
@@ -68,7 +68,7 @@
     </div>
     <div class="card-body">
         {% for acct in accounts %}
-        {% if acct.account_id == selected_account %}
+        {% if acct.pk == selected_account %}
         {% if acct.currencies.all %}
         <table class="table table-sm table-striped">
             <thead>

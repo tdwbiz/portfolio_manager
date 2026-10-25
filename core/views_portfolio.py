@@ -28,6 +28,7 @@ from core.utils import (
 )
 from core.views import (
     INCOME_TRANSACTION_TYPES,
+    _parse_account_pk,
     _validate_date_param,
     utils_fetch_last_prices,
 )
@@ -224,7 +225,11 @@ def portfolio_summary(request):
 @login_required
 def realised_pnl(request):
     """Realised P&L page with FIFO and average-cost methods."""
-    account = request.GET.get("account", "")
+    account_param = request.GET.get("account", "")  # Account.pk
+    account_pk = _parse_account_pk(account_param)
+    resolved_account = (
+        Account.objects.filter(pk=account_pk).first() if account_pk is not None else None
+    )
     raw_symbol = request.GET.get("symbol", "").strip().upper()
     # Validate symbol: only allow alphanumeric, dots, hyphens, and slashes (e.g., T.TO, BNS-UN)
     if raw_symbol and not re.match(r"^[A-Z0-9.\-/]+$", raw_symbol):
@@ -247,8 +252,16 @@ def realised_pnl(request):
         except ValueError:
             validated_date_to = None
 
+    # Internal grouping key stays account_id (plan step 9); unknown pk matches nothing.
+    if resolved_account:
+        filter_account_id = resolved_account.account_id
+    elif account_param:
+        filter_account_id = account_param
+    else:
+        filter_account_id = None
+
     trades = compute_realised_pnl(
-        account_id=account if account else None,
+        account_id=filter_account_id,
         symbol=symbol if symbol else None,
         date_from=validated_date_from.strftime("%Y-%m-%d")
         if validated_date_from
@@ -292,7 +305,7 @@ def realised_pnl(request):
             "total_pnl_fifo": total_pnl_fifo,
             "total_pnl_avg": total_pnl_avg,
             "accounts": accounts,
-            "account_filter": account,
+            "account_filter": resolved_account.pk if resolved_account else '',
             "symbol_filter": symbol,
             "date_from_filter": validated_date_from.strftime("%Y-%m-%d")
             if validated_date_from

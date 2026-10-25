@@ -350,9 +350,6 @@ class RbcMonthly(models.Model):
     last_statement_date = models.DateField(
         null=True, blank=True, help_text="Date of previous statement"
     )
-    account_number = models.CharField(
-        max_length=50, blank=True, default="", help_text="RBC account number from PDF"
-    )
     fx_rate = models.DecimalField(
         max_digits=10,
         decimal_places=6,
@@ -658,12 +655,6 @@ class RbcAnnual(models.Model):
     )
     report_period_end = models.DateField(
         help_text="Last day of period, e.g. 2017-12-31"
-    )
-    account_number = models.CharField(
-        max_length=50,
-        blank=True,
-        default="",
-        help_text="RBC account number from PDF, e.g. 900-00005",
     )
     account_type_code = models.CharField(
         max_length=50,
@@ -1095,17 +1086,13 @@ class LedgerAccount(models.Model):
         help_text="Parent brokerage account"
     )
     # Denormalized fields for quick lookup without joins
-    account_id_str = models.CharField(
-        max_length=50, db_index=True,
-        help_text="Denormalized account ID (e.g., '90000001')"
-    )
     account_name = models.CharField(
         max_length=100,
         help_text="Denormalized account name (e.g., 'ACCOUNT_A')"
     )
     ledger_name = models.CharField(
         max_length=150, db_index=True,
-        help_text="Human-readable name: account_id-type-currency[-symbol]"
+        help_text="Human-readable name: name-type-currency[-symbol]"
     )
     account_type = models.CharField(max_length=10, choices=ACCOUNT_TYPES)
     currency = models.CharField(max_length=3)

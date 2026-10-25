@@ -39,7 +39,6 @@ from core.models import (
     RbcMonthlyBalance,
     RbcMonthlyTransaction,
 )
-from core.utils.account_fingerprint import fingerprint_account_number
 
 logger = logging.getLogger(__name__)
 
@@ -713,40 +712,7 @@ class RBCDataAuditor:
                     f'Auto-created account: {acc.name}',
                 )
 
-        # Check for RbcMonthly records whose stored account_number does not
-        # fingerprint-match the linked account (values never printed)
-        mismatched = []
-        pairs = (
-            RbcMonthly.objects.filter(account__broker='RBC')
-            .exclude(account_number='')
-            .values_list(
-                'account_id', 'account__fingerprint', 'account_number',
-                'statement_date', 'file_name'
-            )
-            .distinct()
-        )
-        for rm_account_pk, fp, number, stmt_date, file_name in pairs:
-            if fingerprint_account_number(number) != fp:
-                mismatched.append((rm_account_pk, stmt_date, file_name))
-        mismatched = mismatched[:50]  # Limit to 50 examples
-
-        if mismatched:
-            self.result.add_warning(
-                'account_matching',
-                f'{len(mismatched)} RbcMonthly records have an account_number that does not fingerprint-match their account',
-                {
-                    'examples': [
-                        {
-                            'account_id': row[0],
-                            'statement_date': str(row[1]),
-                            'file_name': row[2],
-                        }
-                        for row in mismatched
-                    ],
-                },
-            )
-
-        if not duplicate_groups and not auto_created.exists() and not mismatched:
+        if not duplicate_groups and not auto_created.exists():
             self.result.add_ok('account_matching', 'All accounts unique and properly configured')
     
     def _check_7_transaction_integrity(self):

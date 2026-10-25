@@ -184,7 +184,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.name,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-CASH",
             }
@@ -238,8 +237,7 @@ class Command(BaseCommand):
                 defaults={
                     'quantity': Decimal(0),
                     'cost_basis_total': Decimal(0),
-                    'account_id_str': tx.account.name,
-                    'account_name': tx.account.name,
+                        'account_name': tx.account.name,
                     'ledger_name': f"{tx.account.name}-{tx.currency}-TAX",
                 }
             )
@@ -409,7 +407,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.name,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
             }
@@ -464,7 +461,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.name,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-INCOME-{income_type}",
             }
@@ -507,7 +503,6 @@ class Command(BaseCommand):
             defaults={
                 'quantity': Decimal(0),
                 'cost_basis_total': Decimal(0),
-                'account_id_str': tx.account.name,
                 'account_name': tx.account.name,
                 'ledger_name': f"{tx.account.name}-{tx.currency}-POSITION-{tx.symbol}",
             }

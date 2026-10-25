@@ -58,7 +58,6 @@ class BatchGenerationTests(TestCase):
         # Create RBC data with known ending balance
         RbcMonthly.objects.create(
             account=self.account,
-            account_number='TEST-001',
             statement_date=date(2024, 6, 30),
             currency='CAD',
             begin_total_market_value=Decimal('45000'),
@@ -81,7 +80,6 @@ class BatchGenerationTests(TestCase):
         """Batch generation handles multiple currencies from RBC."""
         RbcMonthly.objects.create(
             account=self.account,
-            account_number='TEST-001',
             statement_date=date(2024, 6, 30),
             currency='CAD',
             begin_total_market_value=Decimal('45000'),
@@ -90,7 +88,6 @@ class BatchGenerationTests(TestCase):
         )
         RbcMonthly.objects.create(
             account=self.account,
-            account_number='TEST-001',
             statement_date=date(2024, 6, 30),
             currency='USD',
             begin_total_market_value=Decimal('20000'),
@@ -119,8 +116,7 @@ class BatchGenerationTests(TestCase):
         for month in range(1, 7):
             RbcMonthly.objects.create(
                 account=self.account,
-                account_number='TEST-001',
-                statement_date=date(2024, month, 28),
+                    statement_date=date(2024, month, 28),
                 currency='CAD',
                 begin_total_market_value=Decimal('40000') + (month * Decimal('1000')),
                 end_total_market_value=Decimal('41000') + (month * Decimal('1000')),
@@ -187,7 +183,6 @@ class BatchStatementsViewTests(TestCase):
         # Create RBC data for batch to use
         RbcMonthly.objects.create(
             account=self.account,
-            account_number='TEST-001',
             statement_date=date(2024, 6, 30),
             currency='CAD',
             begin_total_market_value=Decimal('45000'),

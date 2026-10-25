@@ -66,8 +66,10 @@ class ScrubStatementFileNamesTests(TestCase):
                     statement_date=date(2024, 3, 31), currency=currency,
                 )
         if empty_name:
+            # file_name is NOT NULL on the model; '' exercises the same
+            # empty-input path as a hypothetical NULL.
             RbcMonthly.objects.create(
-                account=self.account, file_name=None,
+                account=self.account, file_name='',
                 statement_date=date(2022, 6, 30), currency='CAD',
             )
         RbcAnnual.objects.create(
@@ -120,7 +122,8 @@ class ScrubStatementFileNamesTests(TestCase):
             self.assertTrue(
                 os.path.exists(os.path.join(processed_dir, 'errors', OLD_ANNUAL_NAME))
             )
-            self.assertIn('RbcMonthly: from-file=1 keyed=0 already-safe=0', out)
+            # The missing-source row in this env is keyed, the found one hashed.
+            self.assertIn('RbcMonthly: from-file=1 keyed=1 already-safe=0', out)
             self.assertIn('RbcAnnual: from-file=1 keyed=0 already-safe=0', out)
 
     def test_same_old_name_account_and_date_get_identical_new_name(self):
@@ -149,7 +152,7 @@ class ScrubStatementFileNamesTests(TestCase):
             for row in RbcAnnual.objects.all():
                 self.assertTrue(is_safe_file_name(row.file_name), row.file_name)
 
-            # A NULL file_name is keyed-hashed like any other name (empty
+            # An empty file_name is keyed-hashed like any other name (empty
             # input) and ends up safe — not skipped.
             null_row = RbcMonthly.objects.get(statement_date=date(2022, 6, 30))
             self.assertEqual(
@@ -180,9 +183,9 @@ class ScrubStatementFileNamesTests(TestCase):
             self.assertEqual(RbcAnnual.objects.get().file_name, OLD_ANNUAL_NAME)
 
     def test_missing_or_short_key_raises_and_writes_nothing(self):
-        for bad_key in ('', 'abcdefghij'):  # empty and 10-char key
-            with tempfile.TemporaryDirectory() as tmpdir:
-                processed_dir = self._make_env(tmpdir, pair=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir = self._make_env(tmpdir, pair=False)
+            for bad_key in ('', 'abcdefghij'):  # empty and 10-char key
                 with override_settings(
                     IMPORT_PROCESSED_DIR=processed_dir,
                     ACCOUNT_FINGERPRINT_KEY=bad_key,
@@ -191,16 +194,16 @@ class ScrubStatementFileNamesTests(TestCase):
                         with self.assertRaises(CommandError):
                             self._run(*args)
 
-                # No row changed after either attempt.
-                self.assertEqual(
-                    RbcMonthly.objects.get(file_name=OLD_MONTHLY_NAME).file_name,
-                    OLD_MONTHLY_NAME,
-                )
-                self.assertEqual(
-                    RbcMonthly.objects.get(file_name=MISSING_MONTHLY_NAME).file_name,
-                    MISSING_MONTHLY_NAME,
-                )
-                self.assertEqual(RbcAnnual.objects.get().file_name, OLD_ANNUAL_NAME)
+            # No row changed after any attempt.
+            self.assertEqual(
+                RbcMonthly.objects.get(file_name=OLD_MONTHLY_NAME).file_name,
+                OLD_MONTHLY_NAME,
+            )
+            self.assertEqual(
+                RbcMonthly.objects.get(file_name=MISSING_MONTHLY_NAME).file_name,
+                MISSING_MONTHLY_NAME,
+            )
+            self.assertEqual(RbcAnnual.objects.get().file_name, OLD_ANNUAL_NAME)
 
     def test_second_run_is_a_noop(self):
         with tempfile.TemporaryDirectory() as tmpdir:

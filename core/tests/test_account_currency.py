@@ -143,7 +143,7 @@ class AccountCurrencyViewTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='VIEW001',
+            account_id='VIEWACC',
             name='View Test Account',
             broker='IB',
             category='TAXABLE',
@@ -213,7 +213,7 @@ class AccountCurrencyViewTests(TestCase):
         response = self.client.post(
             reverse('account_edit', kwargs={'pk': self.account.pk}),
             {
-                'account_id': 'VIEW001',
+                'account_id': 'VIEWACC',
                 'name': 'Updated Name',
                 'broker': 'IB',
                 'category': 'TAXABLE',
@@ -292,7 +292,7 @@ class AccountCurrencyDeleteTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='DEL001', name='Delete Test', broker='IB',
+            account_id='DELACC', name='Delete Test', broker='IB',
         )
         self.cad_cur = AccountCurrency.objects.create(
             account=self.account, currency='CAD',
@@ -308,7 +308,7 @@ class AccountCurrencyDeleteTests(TestCase):
         response = self.client.post(
             reverse('account_edit', kwargs={'pk': self.account.pk}),
             {
-                'account_id': 'DEL001',
+                'account_id': 'DELACC',
                 'name': 'Delete Test',
                 'broker': 'IB',
                 'category': 'TAXABLE',

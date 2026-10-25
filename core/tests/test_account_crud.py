@@ -30,7 +30,7 @@ class AccountCRUDTests(TestCase):
 
     def test_account_create_post_valid(self):
         response = self.client.post(reverse('account_create'), {
-            'account_id': 'NEW001',
+            'account_id': 'NEWACC',
             'name': 'New Account',
             'broker': 'IB',
             'category': 'TAXABLE',
@@ -38,11 +38,11 @@ class AccountCRUDTests(TestCase):
         })
         # Redirects to account_edit page to set up currencies
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Account.objects.filter(account_id='NEW001').exists())
+        self.assertTrue(Account.objects.filter(account_id='NEWACC').exists())
 
     def test_account_create_post_invalid(self):
         response = self.client.post(reverse('account_create'), {
-            'account_id': 'NEW002',
+            'account_id': 'NEWBACC',
             'name': '',
             'broker': 'IB',
             'category': 'TAXABLE',
@@ -51,7 +51,41 @@ class AccountCRUDTests(TestCase):
             'starting_balance': '500.00',
         })
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(Account.objects.filter(account_id='NEW002').exists())
+        self.assertFalse(Account.objects.filter(account_id='NEWBACC').exists())
+
+    # ── account_id must not contain digits (decision 3) ────────────────
+
+    def test_account_create_post_rejects_digit_account_id(self):
+        """Posting an account_id containing a digit is rejected."""
+        response = self.client.post(reverse('account_create'), {
+            'account_id': '90000001',
+            'name': 'Number Account',
+            'broker': 'IB',
+            'category': 'TAXABLE',
+            'owner': '',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Account.objects.filter(account_id='90000001').exists())
+        self.assertIn('account_id', response.context['form'].errors)
+
+    def test_account_form_rejects_mixed_digit_account_id(self):
+        """An account_id mixing letters and digits is rejected."""
+        form = AccountForm(data={
+            'account_id': 'ACC2',
+            'name': 'Mixed',
+            'broker': 'IB',
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn('account_id', form.errors)
+
+    def test_account_form_accepts_letter_only_account_id(self):
+        """A letter-only account_id passes validation."""
+        form = AccountForm(data={
+            'account_id': 'TOMTFSA',
+            'name': 'Letters',
+            'broker': 'IB',
+        })
+        self.assertTrue(form.is_valid(), form.errors)
 
     def test_account_edit_get(self):
         response = self.client.get(reverse('account_edit', kwargs={'pk': self.account.pk}))

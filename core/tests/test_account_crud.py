@@ -12,7 +12,7 @@ class AccountCRUDTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
         self.account = Account.objects.create(
-            account_id='TEST001',
+            account_id='TESTACC',
             name='Test Account',
             broker='IB',
             currency='USD',
@@ -74,6 +74,7 @@ class AccountCRUDTests(TestCase):
             'account_id': 'ACC2',
             'name': 'Mixed',
             'broker': 'IB',
+            'category': 'TAXABLE',
         })
         self.assertFalse(form.is_valid())
         self.assertIn('account_id', form.errors)
@@ -84,6 +85,7 @@ class AccountCRUDTests(TestCase):
             'account_id': 'TOMTFSA',
             'name': 'Letters',
             'broker': 'IB',
+            'category': 'TAXABLE',
         })
         self.assertTrue(form.is_valid(), form.errors)
 

@@ -154,6 +154,32 @@ class ManageInboxImportSafeNameTests(TestCase):
             self.assertEqual(RbcMonthly.objects.count(), 0)
             _assert_no_number_anywhere(processed_dir)
 
+    def _run_monthly_without_usable_date(self, statement_date):
+        section = _monthly_section()
+        section['statement_date'] = statement_date
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir = self._run_command(
+                tmpdir, f'RBC Monthly Statement {FAKE_NUMBER}.pdf', 'monthly',
+                [section],
+            )
+            errors_dir = os.path.join(processed_dir, 'errors')
+            moved = os.listdir(errors_dir)
+            self.assertEqual(len(moved), 1)
+            self.assertIn('UNKNOWN_ACCOUNT', moved[0])
+            self.assertTrue(is_safe_file_name(moved[0]))
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            _assert_no_number_anywhere(processed_dir)
+
+    def test_monthly_section_without_statement_date_uses_unknown_name(self):
+        # No statement date: the run must not stop and the PDF gets the
+        # unattributable UNKNOWN_ACCOUNT name (moved to errors/).
+        self._run_monthly_without_usable_date(None)
+
+    def test_monthly_section_with_malformed_statement_date_does_not_stop_run(self):
+        # A truthy but unusable date used to make safe_file_name raise and
+        # stop the whole run; it is now treated as unattributable too.
+        self._run_monthly_without_usable_date('OCT 31, 2025')
+
     def test_annual_import_uses_safe_names_and_scrubbed_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             processed_dir = self._run_command(

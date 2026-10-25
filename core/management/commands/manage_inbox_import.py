@@ -17,8 +17,10 @@ Usage examples:
 
 import json
 import logging
+import re
 import shutil
 import time
+from datetime import date as date_type
 from decimal import Decimal
 from pathlib import Path
 
@@ -413,7 +415,7 @@ class Command(BaseCommand):
         json_sections = []
 
         for parsed in parsed_list:
-            statement_date = parsed.get('statement_date')
+            statement_date = _coerce_statement_date(parsed.get('statement_date'))
             account_number = parsed.get('account_number', '')
             currency = parsed.get('currency', 'CAD')
 
@@ -434,7 +436,11 @@ class Command(BaseCommand):
                 stmts_created += 1
                 continue
 
-            if not statement_date:
+            if statement_date is None:
+                # No usable date: the section cannot be stored and must not
+                # reach safe_file_name (which would raise and stop the whole
+                # run). The file falls back to the unattributable
+                # UNKNOWN_ACCOUNT name below when no other section yields one.
                 msg = 'Parser did not return statement_date'
                 file_errors.append({'currency': currency, 'error': msg})
                 self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
@@ -617,6 +623,25 @@ def _annual_safe_name(original_name, account_name, report_year, hash8: str) -> s
 def _unattributable_safe_name(original_name: str, hash8: str) -> str:
     """Safe name for a PDF that cannot be attributed to an account."""
     return safe_file_name(original_name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=hash8)
+
+
+def _coerce_statement_date(value):
+    """Return ``value`` as a ``datetime.date``, or ``None`` when it is not a
+    usable YYYY-MM-DD statement date (missing, empty or malformed).
+
+    A section with no usable date must be treated as unattributable —
+    passing the raw value to :func:`safe_file_name` would raise ``ValueError``
+    and stop the whole import run.
+    """
+    if isinstance(value, date_type):
+        return value
+    text = str(value or '').strip()
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+        return None
+    try:
+        return date_type.fromisoformat(text)  # rejects e.g. 2025-13-40
+    except ValueError:
+        return None
 
 
 def _json_log_path(json_dir: Path, safe_name: str, has_error: bool) -> Path:

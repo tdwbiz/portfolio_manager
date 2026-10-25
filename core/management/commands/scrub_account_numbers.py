@@ -16,7 +16,12 @@ from core.models import (
     RbcMonthlyTransaction,
     Transaction,
 )
-from core.utils.account_fingerprint import scrub_text
+from core.utils.account_fingerprint import build_fingerprint_name_map, scrub_text
+
+# Pks fetched per chunk. Must stay small enough that bulk_update (about 2
+# parameters per row per field plus the pks) stays under SQL Server's limit
+# of 2100 parameters per statement.
+CHUNK_SIZE = 200
 
 # (model, field) pairs — the scrub targets from docs/plans/number-columns.md.
 TARGETS = [
@@ -45,25 +50,33 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         apply = options['apply']
+        # One query for the fingerprint->name map; scrub_text never queries
+        # per candidate (SQL Server without MARS).
+        name_map = build_fingerprint_name_map()
         self.stdout.write(f'scrub_account_numbers [{"APPLY" if apply else "DRY-RUN"}]')
 
         for model, field in TARGETS:
             matched = replaced = unmatched = 0
-            updates = []
-            for obj in model.objects.all().iterator():
-                value = getattr(obj, field) or ''
-                if not value:
-                    continue
-                cleaned, m, r, u = scrub_text(value)
-                matched += m
-                replaced += r
-                unmatched += u
-                if cleaned != value:
-                    updates.append((obj.pk, cleaned))
-
-            if apply and updates:
-                for pk, cleaned in updates:
-                    model.objects.filter(pk=pk).update(**{field: cleaned})
+            # Materialize the pks first so no result set is open while we
+            # fetch and write (SQL Server without MARS).
+            pks = list(model.objects.values_list('pk', flat=True))
+            for i in range(0, len(pks), CHUNK_SIZE):
+                chunk = pks[i:i + CHUNK_SIZE]
+                objs = list(model.objects.filter(pk__in=chunk))
+                changed = []
+                for obj in objs:
+                    value = getattr(obj, field) or ''
+                    if not value:
+                        continue
+                    cleaned, m, r, u = scrub_text(value, name_map)
+                    matched += m
+                    replaced += r
+                    unmatched += u
+                    if cleaned != value:
+                        setattr(obj, field, cleaned)
+                        changed.append(obj)
+                if apply and changed:
+                    model.objects.bulk_update(changed, [field], batch_size=CHUNK_SIZE)
 
             self.stdout.write(
                 f'{model._meta.db_table},{field},'

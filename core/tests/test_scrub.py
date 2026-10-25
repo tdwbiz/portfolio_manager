@@ -5,6 +5,7 @@ from decimal import Decimal
 from io import StringIO
 
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
 
 from core.models import (
@@ -128,3 +129,44 @@ class ScrubAccountNumbersTests(TestCase):
         )
         # Second pass finds no matches (the name is not a number candidate).
         self.assertIn("core_transaction,notes,matched=0,replaced=0", output)
+
+    def _make_txs(self, count: int) -> None:
+        for i in range(count):
+            Transaction.objects.create(
+                statement=self.statement,
+                account=self.account,
+                date=date(2024, 1, 15),
+                symbol="GOOGL",
+                type="BUY",
+                quantity=Decimal("1"),
+                price=Decimal("100.00"),
+                commission=Decimal("0.00"),
+                amount=Decimal("-100.00"),
+                currency="USD",
+                amount_cad=Decimal("-135.00"),
+                notes=f"Buy {i} on 90000001",
+            )
+
+    def _run_and_count_queries(self) -> int:
+        """Run the command (dry run) and return how many queries it issued."""
+        out = StringIO()
+        connection.force_debug_cursor = True
+        try:
+            start = len(connection.queries)
+            call_command("scrub_account_numbers", stdout=out)
+            return len(connection.queries) - start
+        finally:
+            connection.force_debug_cursor = False
+
+    def test_query_count_flat_across_row_counts(self) -> None:
+        # 3 rows on one target field (setUp's tx + 2 more).
+        self._make_txs(2)
+        count_3 = self._run_and_count_queries()
+        self.assertGreater(count_3, 0)
+
+        # Bring the total to 10 rows — still well under one chunk of 200,
+        # so the command must issue exactly the same number of queries.
+        self._make_txs(7)
+        count_10 = self._run_and_count_queries()
+
+        self.assertEqual(count_3, count_10)

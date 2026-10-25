@@ -20,6 +20,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 
+from core.log_filter import ScrubFilter
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
 from core.utils.account_fingerprint import (
     build_fingerprint_name_map,
@@ -46,6 +47,7 @@ def _setup_duplicate_logger() -> None:
     try:
         dup_handler = logging.FileHandler(dup_log_path, encoding='utf-8')
         dup_handler.setFormatter(logging.Formatter('%(message)s'))
+        dup_handler.addFilter(ScrubFilter())  # scrub at the source: this logger writes straight to CSV_Duplicates.csv
         dup_logger.addHandler(dup_handler)
 
         # Write header if file doesn't exist or is empty
@@ -56,6 +58,7 @@ def _setup_duplicate_logger() -> None:
         # File is locked (e.g. open in Excel) — fall back to console logger
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter('%(message)s'))
+        console_handler.addFilter(ScrubFilter())  # scrub at the source for the locked-file fallback
         dup_logger.addHandler(console_handler)
 
 
@@ -197,14 +200,14 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     row_num = trade.get('row_number', '')
                     # Write duplicate detail to dedicated logfile
                     dup_logger.info(
-                        f'{os.path.basename(file_path)},Line {row_num},{normalized_id},'  
+                        f'{os.path.basename(file_path)},Line {row_num},{account.name},'
                         f'{trade["date"]},{trade["symbol"]},{trade["type"]},'  
                         f'{trade["quantity"]},{trade["price"]},{trade["amount"]},'  
                         f'{trade.get("currency", "USD")},{trade.get("notes", "")}'
                     )
                     failed_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': normalized_id,
+                        'account': account.name,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],
@@ -243,7 +246,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     imported_count += 1
                     imported_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': normalized_id,
+                        'account': account.name,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],

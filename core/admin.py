@@ -63,9 +63,11 @@ class BrandingConfigAdmin(admin.ModelAdmin):
 
 @admin.register(BrokerStatement)
 class BrokerStatementAdmin(admin.ModelAdmin):
-    list_display = ["source", "file_date", "raw_filename"]
+    # The original file name is deliberately not shown or searched: it carries
+    # the real account number (docs/architecture.md — name and last 4 only).
+    list_display = ["source", "file_date"]
     list_filter = ["source"]
-    search_fields = ["source", "raw_filename"]
+    search_fields = ["source"]
 
 
 class AccountCurrencyInline(admin.TabularInline):

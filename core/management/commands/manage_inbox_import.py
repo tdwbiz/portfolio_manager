@@ -17,8 +17,10 @@ Usage examples:
 
 import json
 import logging
+import re
 import shutil
 import time
+from datetime import date as date_type
 from decimal import Decimal
 from pathlib import Path
 
@@ -37,10 +39,12 @@ from core.models import (
 )
 from core.utils.account_fingerprint import (
     build_fingerprint_name_map,
+    fingerprint_account_number,
     lookup_account,
     normalize_account_number,
     scrub_text,
 )
+from core.utils.safe_names import ANNUAL, MONTHLY, UNKNOWN, hash8_of, safe_file_name
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -137,7 +141,10 @@ class Command(BaseCommand):
         errors = 0
 
         for i, pdf_file in enumerate(pdf_files, 1):
-            self.stdout.write(f'\n[{i}/{total}] {pdf_file.name}')
+            # Content-based hash: the original file name carries the account
+            # number and must never appear in stdout, logs or new names.
+            h8 = hash8_of(pdf_file)
+            self.stdout.write(f'\n[{i}/{total}] {h8}.pdf')
 
             # ── Step 1: classify ──────────────────────────────────────────
             self.stdout.write('  Classifying...')
@@ -147,11 +154,13 @@ class Command(BaseCommand):
             # ── Step 2: parse + import + log ──────────────────────────────
             if doc_type == 'annual':
                 classified_annual += 1
-                rec, errs, err_msg, annual_data = self._process_annual(pdf_file, dry_run)
+                rec, errs, err_msg, annual_data, safe_name = self._process_annual(
+                    pdf_file, dry_run, h8
+                )
                 imported_annual += rec
                 errors += errs
 
-                json_data = {'type': 'annual', 'filename': pdf_file.name,
+                json_data = {'type': 'annual', 'filename': safe_name,
                              'processed_at': timezone.now().isoformat(),
                              'records_created': rec, 'errors': errs,
                              'error_messages': [err_msg] if err_msg else [],
@@ -159,8 +168,8 @@ class Command(BaseCommand):
 
             elif doc_type == 'monthly':
                 classified_monthly += 1
-                stmts, txns, bals, holdings, errs, json_sections, err_msgs = self._process_monthly(
-                    pdf_file, dry_run, name_map
+                stmts, txns, bals, holdings, errs, json_sections, err_msgs, safe_name = (
+                    self._process_monthly(pdf_file, dry_run, name_map, h8)
                 )
                 imported_monthly_stmts += stmts
                 imported_transactions += txns
@@ -170,7 +179,7 @@ class Command(BaseCommand):
 
                 json_data = {
                     'type': 'monthly',
-                    'filename': pdf_file.name,
+                    'filename': safe_name,
                     'processed_at': timezone.now().isoformat(),
                     'errors': errs,
                     'error_messages': err_msgs,
@@ -180,16 +189,21 @@ class Command(BaseCommand):
             else:
                 classified_unknown += 1
                 errors += 1
+                # Cannot be attributed to an account (or even a type):
+                # safe name with UNKNOWN_ACCOUNT and today's date.
+                safe_name = None if dry_run else safe_file_name(
+                    pdf_file.name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=h8
+                )
                 self.stderr.write(
                     self.style.ERROR(
-                        f'  Cannot classify {pdf_file.name} — moving to errors/'
+                        f'  Cannot classify {h8}.pdf — moving to errors/'
                     )
                 )
                 if not dry_run:
-                    self._log_import(pdf_file.name, 0, 'error', 'Document type unknown')
+                    self._log_import(safe_name, 0, 'error', 'Document type unknown')
                     json_data = {
                         'type': 'unknown',
-                        'filename': pdf_file.name,
+                        'filename': safe_name,
                         'processed_at': timezone.now().isoformat(),
                         'errors': 1,
                         'error_messages': (
@@ -199,43 +213,38 @@ class Command(BaseCommand):
                             'scanned image quality, or cover page before statement.',
                         ),
                     }
-                    json_path = json_dir / f'{pdf_file.stem}_ERROR.json'
+                    json_path = _json_log_path(json_dir, safe_name, has_error=True)
                     try:
                         with open(json_path, 'w', encoding='utf-8') as fh:
-                            json.dump(json_data, fh, indent=2, default=str)
+                            fh.write(_scrubbed_json(json_data, name_map))
                     except OSError as exc:
-                        logger.warning("Could not write JSON log for %s: %s", pdf_file.name, exc)
-                    dest = errors_dir / pdf_file.name
-                    _move_file(pdf_file, dest)
+                        logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+                    dest = errors_dir / safe_name
+                    _move_file(pdf_file, dest, h8)
                 continue
 
             # ── Step 3: save JSON log (always) ──────────────────────────
             if not dry_run:
-                json_filename = pdf_file.stem + ('_ERROR' if errs > 0 else '')
-                json_path = json_dir / f'{json_filename}.json'
+                json_path = _json_log_path(json_dir, safe_name, has_error=errs > 0)
                 try:
                     with open(json_path, 'w', encoding='utf-8') as fh:
-                        json.dump(json_data, fh, indent=2, default=str)
+                        fh.write(_scrubbed_json(json_data, name_map))
                 except OSError as exc:
-                    logger.warning("Could not write JSON log for %s: %s", pdf_file.name, exc)
+                    logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
 
             # ── Step 4: move PDF ──────────────────────────────────────────
             if not dry_run:
                 had_error = errs > 0
-                if had_error:
-                    dest = errors_dir / pdf_file.name
-                    moved = _move_file(pdf_file, dest)
-                    if moved:
-                        self.stdout.write(
-                            self.style.WARNING(f'  Moved to errors/: {pdf_file.name}')
-                        )
-                else:
-                    dest = processed_dir / pdf_file.name
-                    moved = _move_file(pdf_file, dest)
-                    if moved:
-                        self.stdout.write(
-                            self.style.SUCCESS(f'  Moved to processed/: {pdf_file.name}')
-                        )
+                dest_dir = errors_dir if had_error else processed_dir
+                dest = dest_dir / safe_name
+                moved = _move_file(pdf_file, dest, h8)
+                if moved:
+                    label = 'errors/' if had_error else 'processed/'
+                    line = f'  Moved to {label}: {safe_name}'
+                    if had_error:
+                        self.stdout.write(self.style.WARNING(line))
+                    else:
+                        self.stdout.write(self.style.SUCCESS(line))
 
         # ── Final summary ──────────────────────────────────────────────────
         self.stdout.write(self.style.SUCCESS(
@@ -258,28 +267,35 @@ class Command(BaseCommand):
     # Annual processing
     # ------------------------------------------------------------------
 
-    def _process_annual(self, pdf_file: Path, dry_run: bool) -> tuple[int, int, str, dict]:
+    def _process_annual(
+        self, pdf_file: Path, dry_run: bool, hash8: str
+    ) -> tuple[int, int, str, dict, str | None]:
         """Parse and import an annual report PDF.
 
-        Returns (records_created, error_count, error_message, parsed_data).
+        Returns (records_created, error_count, error_message, parsed_data,
+                 safe_name). ``safe_name`` is None in dry-run mode.
         """
         try:
             parsed = parse_rbc_annual_report_vl(str(pdf_file))
         except Exception as exc:
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
-                self._log_import(pdf_file.name, 0, 'error', str(exc))
-            return 0, 1, str(exc), {}
+                safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+                self._log_import(safe_name, 0, 'error', str(exc))
+                return 0, 1, str(exc), {}, safe_name
+            return 0, 1, str(exc), {}, None
 
         if dry_run:
             currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
+            acct = lookup_account(parsed.get('account_number'))
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'  [DRY-RUN] Would import annual: {parsed.get("account_number")} '
+                    f'  [DRY-RUN] Would import annual: '
+                    f'{acct.name if acct else "UNKNOWN_ACCOUNT"} '
                     f'year={parsed["report_year"]} currencies={currencies}'
                 )
             )
-            return len(currencies), 0, '', parsed
+            return len(currencies), 0, '', parsed, None
 
         account = _get_or_create_account(
             parsed['account_number'],
@@ -287,11 +303,13 @@ class Command(BaseCommand):
         )
         if account is None:
             msg = 'Unknown account fingerprint — file rejected (run set_account_fingerprint first)'
-            self.stderr.write(self.style.ERROR(f'  {pdf_file.name}: {msg}'))
+            self.stderr.write(self.style.ERROR(f'  {hash8}.pdf: {msg}'))
+            safe_name = _annual_safe_name(pdf_file.name, None, parsed.get('report_year'), hash8)
             if not dry_run:
-                self._log_import(pdf_file.name, 0, 'error', msg)
-            return 0, 1, msg, parsed
+                self._log_import(safe_name, 0, 'error', msg)
+            return 0, 1, msg, parsed, safe_name
 
+        safe_name = _annual_safe_name(pdf_file.name, account.name, parsed.get('report_year'), hash8)
         records_created = 0
         for currency, cdata in [('CAD', parsed.get('cad')), ('USD', parsed.get('usd'))]:
             if cdata is None:
@@ -304,7 +322,7 @@ class Command(BaseCommand):
             if existing.exists():
                 self.stdout.write(
                     self.style.WARNING(
-                        f'  Duplicate annual: {pdf_file.name} '
+                        f'  Duplicate annual: {safe_name} '
                         f'(year={parsed["report_year"]}, {currency})'
                     )
                 )
@@ -312,7 +330,7 @@ class Command(BaseCommand):
 
             RbcAnnual.objects.create(
                 account=account,
-                file_name=pdf_file.name,
+                file_name=safe_name,
                 report_year=parsed['report_year'],
                 report_period_start=parsed['report_period_start'],
                 report_period_end=parsed['report_period_end'],
@@ -343,47 +361,52 @@ class Command(BaseCommand):
         if records_created > 0:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'  Imported annual: {pdf_file.name} -> {records_created} record(s)'
+                    f'  Imported annual: {safe_name} -> {records_created} record(s)'
                 )
             )
-            self._log_import(pdf_file.name, records_created, 'ok', '')
+            self._log_import(safe_name, records_created, 'ok', '')
         else:
             self.stdout.write(
-                self.style.WARNING(f'  All duplicates: {pdf_file.name}')
+                self.style.WARNING(f'  All duplicates: {safe_name}')
             )
-            self._log_import(pdf_file.name, 0, 'ok', 'All records already exist')
+            self._log_import(safe_name, 0, 'ok', 'All records already exist')
 
-        return records_created, 0, '', parsed
+        return records_created, 0, '', parsed, safe_name
 
     # ------------------------------------------------------------------
     # Monthly processing
     # ------------------------------------------------------------------
 
     def _process_monthly(
-        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str]
-    ) -> tuple[int, int, int, int, int, list, list]:
+        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str], hash8: str
+    ) -> tuple[int, int, int, int, int, list, list, str | None]:
         """Parse and import a monthly statement PDF.
 
         Returns (statements_created, transactions_imported, balances_recorded,
-                 holdings_recorded, error_count, json_sections, error_messages).
+                 holdings_recorded, error_count, json_sections, error_messages,
+                 safe_name). ``safe_name`` is None in dry-run mode.
         """
         try:
             parsed_list = parse_rbc_monthly_vl(str(pdf_file))
         except Exception as exc:
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
-                self._log_import(pdf_file.name, 0, 'error', str(exc))
-            return 0, 0, 0, 0, 1, [], [str(exc)]
+                safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+                self._log_import(safe_name, 0, 'error', str(exc))
+                return 0, 0, 0, 0, 1, [], [str(exc)], safe_name
+            return 0, 0, 0, 0, 1, [], [str(exc)], None
 
         if parsed_list is None:
             empty_msg = 'Parser returned no sections (possible unsupported statement format)'
             if dry_run:
                 self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
-                return 0, 0, 0, 0, 1, [], [empty_msg]
-            return 0, 0, 0, 0, 1, [], [empty_msg]
+                return 0, 0, 0, 0, 1, [], [empty_msg], None
+            safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+            return 0, 0, 0, 0, 1, [], [empty_msg], safe_name
 
         # parsed_list is a list of dicts, one per currency section (CAD, USD, etc.)
         account = None
+        safe_name = None  # computed once, on the first resolvable section
         stmts_created = 0
         txns_imported = 0
         bals_imported = 0
@@ -392,7 +415,7 @@ class Command(BaseCommand):
         json_sections = []
 
         for parsed in parsed_list:
-            statement_date = parsed.get('statement_date')
+            statement_date = _coerce_statement_date(parsed.get('statement_date'))
             account_number = parsed.get('account_number', '')
             currency = parsed.get('currency', 'CAD')
 
@@ -400,10 +423,11 @@ class Command(BaseCommand):
             json_sections.append(parsed)
 
             if dry_run:
+                acct = lookup_account(account_number) if account_number else None
                 self.stdout.write(
                     self.style.SUCCESS(
                         f'  [DRY-RUN] Would import monthly [{currency}]: '
-                        f'{account_number} {statement_date} '
+                        f'{acct.name if acct else "UNKNOWN_ACCOUNT"} {statement_date} '
                         f'\u2014 {len(parsed.get("transactions", []))} txns, '
                         f'{len(parsed.get("holdings", []))} holdings, '
                         f'{len(parsed.get("balances", []))} balances'
@@ -412,7 +436,11 @@ class Command(BaseCommand):
                 stmts_created += 1
                 continue
 
-            if not statement_date:
+            if statement_date is None:
+                # No usable date: the section cannot be stored and must not
+                # reach safe_file_name (which would raise and stop the whole
+                # run). The file falls back to the unattributable
+                # UNKNOWN_ACCOUNT name below when no other section yields one.
                 msg = 'Parser did not return statement_date'
                 file_errors.append({'currency': currency, 'error': msg})
                 self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
@@ -421,22 +449,28 @@ class Command(BaseCommand):
             if account is None:
                 account = _get_or_create_account(account_number, '')
                 if account is None:
-                    msg = f'Cannot resolve account for account_number={account_number!r}'
+                    msg = 'Cannot resolve account for the parsed account number (UNKNOWN_ACCOUNT)'
                     file_errors.append({'currency': currency, 'error': msg})
                     self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
                     continue
+
+            if safe_name is None:
+                safe_name = safe_file_name(
+                    pdf_file.name, account.name, MONTHLY,
+                    date=statement_date, hash8=hash8,
+                )
 
             # Duplicate check
             existing = RbcMonthly.objects.filter(
                 account=account,
                 statement_date=statement_date,
                 currency=currency,
-                file_name=pdf_file.name,
+                file_name=safe_name,
             )
             if existing.exists():
                 self.stdout.write(
                     self.style.WARNING(
-                        f'  Duplicate monthly [{currency}]: {pdf_file.name} '
+                        f'  Duplicate monthly [{currency}]: {safe_name} '
                         f'(account={account}, date={statement_date})'
                     )
                 )
@@ -444,7 +478,7 @@ class Command(BaseCommand):
 
             rbc_monthly = RbcMonthly.objects.create(
                 account=account,
-                file_name=pdf_file.name,
+                file_name=safe_name,
                 statement_date=statement_date,
                 currency=currency,
                 last_statement_date=parsed.get('last_statement_date'),
@@ -511,7 +545,7 @@ class Command(BaseCommand):
             stmts_created += 1
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'  Imported monthly [{currency}]: {account_number} {statement_date} '
+                    f'  Imported monthly [{currency}]: {account.name} {statement_date} '
                     f'\u2014 {len(txs_to_create)} txns, '
                     f'{len(holdings_to_create)} holdings, '
                     f'{len(balances_to_create)} balances'
@@ -519,17 +553,21 @@ class Command(BaseCommand):
             )
 
         if dry_run:
-            return stmts_created, 0, 0, 0, 0, [], []
+            return stmts_created, 0, 0, 0, 0, [], [], None
 
-        if not dry_run and stmts_created > 0:
+        # No section could be attributed to an account (or had a date).
+        if safe_name is None:
+            safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+
+        if stmts_created > 0:
             self._log_import(
-                pdf_file.name,
+                safe_name,
                 stmts_created + txns_imported + bals_imported + holdings_imported,
                 'success',
                 '',
             )
 
-        return stmts_created, txns_imported, bals_imported, holdings_imported, len(file_errors), json_sections, [e['error'] for e in file_errors]
+        return stmts_created, txns_imported, bals_imported, holdings_imported, len(file_errors), json_sections, [e['error'] for e in file_errors], safe_name
 
     # ------------------------------------------------------------------
     # Helpers
@@ -573,33 +611,115 @@ def _get_or_create_account(account_number: str, account_type_code: str) -> Accou
     return lookup_account(account_number)
 
 
-def _move_file(src: Path, dest: Path) -> bool:
+def _annual_safe_name(original_name, account_name, report_year, hash8: str) -> str:
+    """Safe name for an annual PDF; falls back to the unknown pattern when the
+    account or the report year is missing."""
+    year = str(report_year or '').strip()
+    if account_name and len(year) == 4 and year.isdigit():
+        return safe_file_name(original_name, account_name, ANNUAL, date=year, hash8=hash8)
+    return _unattributable_safe_name(original_name, hash8)
+
+
+def _unattributable_safe_name(original_name: str, hash8: str) -> str:
+    """Safe name for a PDF that cannot be attributed to an account."""
+    return safe_file_name(original_name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=hash8)
+
+
+def _coerce_statement_date(value):
+    """Return ``value`` as a ``datetime.date``, or ``None`` when it is not a
+    usable YYYY-MM-DD statement date (missing, empty or malformed).
+
+    A section with no usable date must be treated as unattributable —
+    passing the raw value to :func:`safe_file_name` would raise ``ValueError``
+    and stop the whole import run.
+    """
+    if isinstance(value, date_type):
+        return value
+    text = str(value or '').strip()
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+        return None
+    try:
+        return date_type.fromisoformat(text)  # rejects e.g. 2025-13-40
+    except ValueError:
+        return None
+
+
+def _json_log_path(json_dir: Path, safe_name: str, has_error: bool) -> Path:
+    """JSON log path derived from the safe name (``_ERROR`` suffix on errors)."""
+    stem = safe_name.rsplit('.', 1)[0]
+    return json_dir / f'{stem}{"_ERROR" if has_error else ""}.json'
+
+
+def _parsed_account_sections(data):
+    """Yield every dict in a JSON log payload that carries an ``account_number``."""
+    for section in data.get('sections') or []:
+        if isinstance(section, dict):
+            yield section
+    annual = data.get('data')
+    if isinstance(annual, dict):
+        yield annual
+
+
+def _scrubbed_json(data, name_map: dict[str, str]) -> str:
+    """Serialise and scrub a JSON log payload before it is written.
+
+    The VL payload carries the parsed ``account_number``; ``scrub_text`` alone
+    would leave it when the number has no stored fingerprint (unmatched
+    candidates are untouched by design). So, before dumping: every parsed
+    account number is labelled — the account name when its fingerprint is in
+    ``name_map``, else ``UNKNOWN_ACCOUNT`` — the field itself is set to that
+    label, and every other occurrence of the same value (as parsed and in
+    normalized form) is replaced with it, so a number repeated in a
+    description or raw text field cannot survive (tdw decision, Oct 25).
+    The dump then goes through ``scrub_text`` for fingerprint matches and
+    15-digit bank runs; there is no general digit scrub. Raises (loudly) if
+    the fingerprint key is missing — never writes an unscrubbed payload.
+    """
+    labels = {}
+    for section in _parsed_account_sections(data):
+        raw = section.get('account_number')
+        if not raw or raw in labels:
+            continue
+        label = name_map.get(fingerprint_account_number(str(raw)), 'UNKNOWN_ACCOUNT')
+        labels[raw] = label
+        section['account_number'] = label
+
+    payload = json.dumps(data, indent=2, default=str)
+    for raw, label in labels.items():
+        for value in dict.fromkeys((str(raw), normalize_account_number(str(raw)))):
+            if len(value) >= 8:  # only plausible account numbers, never short tokens
+                payload = payload.replace(value, label)
+    return scrub_text(payload, name_map)[0]
+
+
+def _move_file(src: Path, dest: Path, label: str) -> bool:
     """Move src to dest, retrying up to 5 times on PermissionError.
 
-    Returns True if the file was moved, False otherwise.
-    If the source file is already gone (moved by a concurrent process),
-    logs a warning and returns False without raising.
+    ``label`` is the content hash8 used in log lines — the original file name
+    carries the account number and must never be logged. Returns True if the
+    file was moved, False otherwise. If the source file is already gone (moved
+    by a concurrent process), logs a warning and returns False without raising.
     """
     if not src.exists():
-        logger.warning("_move_file: %s not found — already moved by another process", src.name)
+        logger.warning("_move_file: %s not found — already moved by another process", label)
         return False
     for attempt in range(5):
         try:
             shutil.move(str(src), str(dest))
-            logger.info("Moved %s -> %s", src.name, dest)
+            logger.info("Moved %s -> %s", label, dest.name)
             return True
         except PermissionError:
             if attempt == 4:
-                logger.error("Failed to move %s after 5 attempts", src.name)
+                logger.error("Failed to move %s after 5 attempts", label)
                 return False
             delay = 2 * (attempt + 1)
             logger.warning("File locked, retrying move in %ds...", delay)
             time.sleep(delay)
         except FileNotFoundError:
-            logger.warning("_move_file: %s disappeared during move — already moved by another process", src.name)
+            logger.warning("_move_file: %s disappeared during move — already moved by another process", label)
             return False
         except Exception as exc:
-            logger.error("Cannot move %s: %s", src.name, exc)
+            logger.error("Cannot move %s: %s", label, exc)
             return False
     return False
 

@@ -21,14 +21,24 @@ from core.utils.account_fingerprint import fingerprint_account_number
 # Fixtures
 # ---------------------------------------------------------------------------
 
-RBC_CSV = (
+RBC_CSV_HEADER = (
     '"Activity Export as of January 15, 2024"\n'
     '"Exchange Rate: 1 USD = 1.3500 CAD"\n'
     '"Date","Activity","Symbol","Symbol Description","Quantity","Price",'
     '"Settlement Date","Account","Value","Currency","Description"\n'
+)
+
+RBC_ROW_A = (
     '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5","2800.00",'
     '"January 17, 2024","90000001","13990.05","USD","Buy GOOGL"\n'
 )
+
+RBC_ROW_B = (
+    '"January 16, 2024","Sell","AAPL","Apple Inc.","2","200.00",'
+    '"January 18, 2024","90000001","395.00","USD","Sell AAPL"\n'
+)
+
+RBC_CSV = RBC_CSV_HEADER + RBC_ROW_A
 
 
 class ImportCsvCommandTest(TestCase):
@@ -158,3 +168,49 @@ class ImportCsvCommandTest(TestCase):
 
         # The duplicate file should not have a log
         self.assertFalse(FileImportLog.objects.filter(filename='rbc_duplicate.csv').exists())
+
+    def test_reimported_row_found_as_duplicate_after_wrapping(self) -> None:
+        """A row re-imported from a different file is found as a duplicate.
+
+        The stored tx_hash is the wrapped (HMAC) value, so the second pass
+        must wrap its computed hash the same way to match the first import.
+        """
+        # First import: only row A.
+        self._run()
+        self.assertEqual(Transaction.objects.count(), 1)
+        stored_hash = Transaction.objects.get().tx_hash
+        self.assertEqual(len(stored_hash), 64)
+
+        # Second file: different content (so the file-content-hash shortcut
+        # does not apply) containing row A again plus a new row B.
+        second_file = os.path.join(self.inbox_dir, 'rbc_second.csv')
+        with open(second_file, 'w', newline='', encoding='utf-8-sig') as f:
+            f.write(RBC_CSV_HEADER + RBC_ROW_A + RBC_ROW_B)
+
+        self._run()
+
+        # Row A was matched by its wrapped hash (no duplicate row), row B new.
+        self.assertEqual(Transaction.objects.count(), 2)
+        self.assertEqual(
+            Transaction.objects.filter(tx_hash=stored_hash).count(), 1
+        )
+        second_log = FileImportLog.objects.get(filename='rbc_second.csv')
+        self.assertEqual(second_log.records_imported, 1)
+        self.assertEqual(second_log.records_skipped, 1)
+
+    def test_transaction_notes_scrubbed_of_account_number(self) -> None:
+        """Account numbers in the CSV description are scrubbed before store."""
+        os.remove(self.rbc_file)  # only the notes file should be imported
+        notes_file = os.path.join(self.inbox_dir, 'rbc_notes.csv')
+        with open(notes_file, 'w', newline='', encoding='utf-8-sig') as f:
+            f.write(
+                RBC_CSV_HEADER
+                + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
+                  '"2800.00","January 17, 2024","90000001","13990.05",'
+                  '"USD","Buy GOOGL on 90000001"\n'
+            )
+
+        self._run()
+
+        tx = Transaction.objects.get()
+        self.assertEqual(tx.notes, 'Buy GOOGL on ACCOUNT_A')

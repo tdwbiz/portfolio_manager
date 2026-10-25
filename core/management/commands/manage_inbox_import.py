@@ -35,7 +35,7 @@ from core.models import (
     RbcMonthlyHolding,
     RbcMonthlyTransaction,
 )
-from core.utils.account_fingerprint import lookup_account, normalize_account_number
+from core.utils.account_fingerprint import lookup_account, normalize_account_number, scrub_text
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -487,7 +487,7 @@ class Command(BaseCommand):
                     rbc_monthly=rbc_monthly,
                     date=tx['date'],
                     activity_type=tx['activity_type'][:100],
-                    description=tx['description'][:500],
+                    description=scrub_text(tx['description'] or '')[0][:500],
                     symbol=(tx.get('symbol', '') or '')[:200],
                     quantity=tx.get('quantity') or Decimal('0.0000'),
                     price=tx.get('price') or Decimal('0.0000'),

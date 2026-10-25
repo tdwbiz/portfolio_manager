@@ -21,7 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.models import BrokerStatement, Transaction, Account, FileImportLog, compute_tx_hash
-from core.utils.account_fingerprint import lookup_account
+from core.utils.account_fingerprint import lookup_account, scrub_text, wrap_tx_hash
 from imports.parsers import parse_ib_csv, parse_rbc_csv
 
 logger = logging.getLogger(__name__)
@@ -166,8 +166,10 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     skipped_count += 1
                     continue
 
-                # Compute tx_hash for deduplication
-                tx_hash = compute_tx_hash(
+                # Compute tx_hash for deduplication, then wrap it: the stored
+                # value is HMAC-SHA256(fingerprint key, raw hash) — never the
+                # raw SHA-256 itself.
+                tx_hash = wrap_tx_hash(compute_tx_hash(
                     broker=broker,
                     account_id=normalized_id,
                     date=trade['date'],
@@ -178,7 +180,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     currency=trade.get('currency', 'USD'),
                     amount=trade['amount'],
                     row_number=trade.get('row_number'),
-                )
+                ))
 
                 # Check for duplicate by tx_hash
                 if Transaction.objects.filter(tx_hash=tx_hash).exists():
@@ -226,7 +228,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                         currency=trade.get('currency', 'USD'),
                         exchange_rate_cad=rate,
                         amount_cad=amount_cad,
-                        notes=trade.get('notes', ''),
+                        notes=scrub_text(trade.get('notes', '') or '')[0],
                         tx_hash=tx_hash,
                     )
                     imported_count += 1

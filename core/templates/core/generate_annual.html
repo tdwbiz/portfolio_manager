@@ -66,7 +66,7 @@
                 <tbody>
                     {% for report in reports %}
                     <tr>
-                        <td>{{ report.account.account_id }}</td>
+                        <td>{{ report.account.name }}</td>
                         <td>{{ report.report_year }}</td>
                         <td>{{ report.currency }}</td>
                         <td>{{ report.beginning_value|default:"0.00"|floatformat:2 }}</td>

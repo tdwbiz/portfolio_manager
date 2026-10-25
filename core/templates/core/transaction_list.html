@@ -98,7 +98,7 @@
                 <td>{{ tx.currency }}</td>
                 <td>{{ tx.amount_cad }}</td>
                 <td>{{ tx.exchange_rate_cad }}</td>
-                <td>{{ tx.account.account_id|default:'' }}</td>
+                <td>{{ tx.account.name|default:'' }}</td>
                 <td>{{ tx.statement.source|default:'' }}</td>
                 <td>{{ tx.notes|default:'' }}</td>
             </tr>

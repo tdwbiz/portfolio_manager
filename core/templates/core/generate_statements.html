@@ -72,7 +72,7 @@
                 <tbody></tbody>
                     {% for stmt in statements %}
                     <tr></tr>
-                        <td>{{ stmt.account.account_id }}</td>
+                        <td>{{ stmt.account.name }}</td>
                         <td>{{ stmt.statement_month|date:"Y-m" }}</td>
                         <td>{{ stmt.currency }}</td>
                         <td>{{ stmt.beginning_market_value|default:"0.00"|floatformat:2 }}</td>

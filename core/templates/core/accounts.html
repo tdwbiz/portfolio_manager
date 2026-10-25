@@ -41,7 +41,7 @@ Money{% endblock %} {% block content %}
     <table class="table table-striped table-hover align-middle">
         <thead>
             <tr>
-                <th>Account ID</th>
+                <th>Account</th>
                 <th>Name</th>
                 <th>Broker</th>
                 <th>Currency</th>
@@ -57,7 +57,7 @@ Money{% endblock %} {% block content %}
         <tbody>
             {% for account in accounts %}
             <tr>
-                <td><code>{{ account.account_id }}</code></td>
+                <td><code>&bull;&bull;&bull;&bull;{{ account.last_4 }}</code></td>
                 <td><strong>{{ account.name|default:"\u2014" }}</strong></td>
                 <td>{{ account.get_broker_display|default:"\u2014" }}</td>
                 <td>

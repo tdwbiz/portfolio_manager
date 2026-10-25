@@ -28,7 +28,7 @@
                 <tbody>
                     {% for r in results %}
                     <tr>
-                        <td><strong>{{ r.account_id }}</strong></td>
+                        <td><strong>{{ r.account_name }}</strong></td>
                         <td>{{ r.earliest_csv_date|default:"&mdash;" }}</td>
                         <td>{{ r.continuous_start|default:"&mdash;" }} to {{ r.continuous_end|default:"&mdash;" }}</td>
                         <td>{{ r.days_missing_continuous|default:"&mdash;" }}</td>

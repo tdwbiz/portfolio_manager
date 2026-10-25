@@ -269,6 +269,8 @@ def compute_realised_pnl(
     result = []
 
     for (symbol_key, acct_id), txs in groups.items():
+        # Display value: account name (internal grouping key stays account_id)
+        acct_name = next((t.account.name for t in txs if t.account), "")
         fifo_deque: deque = deque()
         total_shares = Decimal("0")
         total_cost = Decimal("0")
@@ -316,6 +318,7 @@ def compute_realised_pnl(
                     {
                         "symbol": symbol_key,
                         "account_id": acct_id,
+                        "account_name": acct_name,
                         "sell_date": tx.date,
                         "qty_sold": qty_to_sell,
                         "sell_amount_cad": sell_amount,

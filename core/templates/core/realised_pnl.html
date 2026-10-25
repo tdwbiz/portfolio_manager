@@ -82,7 +82,7 @@
               <tr>
                 <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
                 <td>{{ trade.symbol }}</td>
-                <td>{{ trade.account_id }}</td>
+                <td>{{ trade.account_name|default:'' }}</td>
                 <td>{{ trade.qty_sold|floatformat:2 }}</td>
                 <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
                 <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>
@@ -124,7 +124,7 @@
         <tr>
           <td>{{ trade.sell_date|date:"Y-m-d" }}</td>
           <td>{{ trade.symbol }}</td>
-          <td>{{ trade.account_id }}</td>
+          <td>{{ trade.account_name|default:'' }}</td>
           <td>{{ trade.qty_sold|floatformat:2 }}</td>
           <td style="text-align:right">{{ trade.sell_amount_cad|floatformat:2 }}</td>
           <td style="text-align:right">{{ trade.cost_basis_fifo|floatformat:2 }}</td>

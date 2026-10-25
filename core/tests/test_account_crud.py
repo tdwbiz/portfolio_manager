@@ -54,7 +54,7 @@ class AccountCRUDTests(TestCase):
         self.assertFalse(Account.objects.filter(account_id='NEW002').exists())
 
     def test_account_edit_get(self):
-        response = self.client.get(reverse('account_edit', kwargs={'account_id': self.account.account_id}))
+        response = self.client.get(reverse('account_edit', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.account.name)
 
@@ -64,7 +64,7 @@ class AccountCRUDTests(TestCase):
             account=self.account, currency='USD',
             starting_balance=Decimal('1000.00'),
         )
-        response = self.client.post(reverse('account_edit', kwargs={'account_id': self.account.account_id}), {
+        response = self.client.post(reverse('account_edit', kwargs={'pk': self.account.pk}), {
             'account_id': self.account.account_id,
             'name': 'Updated Name',
             'broker': 'IB',
@@ -84,12 +84,12 @@ class AccountCRUDTests(TestCase):
         self.assertEqual(self.account.name, 'Updated Name')
 
     def test_account_delete_post(self):
-        response = self.client.post(reverse('account_delete', kwargs={'account_id': self.account.account_id}))
+        response = self.client.post(reverse('account_delete', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 302)
         self.assertFalse(Account.objects.filter(account_id=self.account.account_id).exists())
 
     def test_account_delete_get_not_allowed(self):
-        response = self.client.get(reverse('account_delete', kwargs={'account_id': self.account.account_id}))
+        response = self.client.get(reverse('account_delete', kwargs={'pk': self.account.pk}))
         self.assertEqual(response.status_code, 405)
 
     # ── New tests for category & owner fields ─────────────────────────────

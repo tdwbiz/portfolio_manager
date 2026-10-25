@@ -169,7 +169,7 @@ class AccountCurrencyViewTests(TestCase):
     def test_account_detail_shows_sub_accounts(self):
         """Account detail page shows sub-account currency breakdown."""
         response = self.client.get(
-            reverse('account_detail', kwargs={'account_id': 'VIEW001'})
+            reverse('account_detail', kwargs={'pk': self.account.pk})
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Sub-Account Currencies')
@@ -181,7 +181,7 @@ class AccountCurrencyViewTests(TestCase):
     def test_account_detail_shows_multi_currency_badge(self):
         """Multi-currency accounts show a Multi-Currency badge."""
         response = self.client.get(
-            reverse('account_detail', kwargs={'account_id': 'VIEW001'})
+            reverse('account_detail', kwargs={'pk': self.account.pk})
         )
         self.assertContains(response, 'Multi-Currency')
 
@@ -194,7 +194,7 @@ class AccountCurrencyViewTests(TestCase):
             account=account, currency='USD', starting_balance=Decimal('100'),
         )
         response = self.client.get(
-            reverse('account_detail', kwargs={'account_id': 'SINGLE_CUR'})
+            reverse('account_detail', kwargs={'pk': account.pk})
         )
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'Multi-Currency')
@@ -202,7 +202,7 @@ class AccountCurrencyViewTests(TestCase):
     def test_account_edit_shows_currency_formset(self):
         """Account edit page includes the currency formset."""
         response = self.client.get(
-            reverse('account_edit', kwargs={'account_id': 'VIEW001'})
+            reverse('account_edit', kwargs={'pk': self.account.pk})
         )
         self.assertEqual(response.status_code, 200)
         # The form should render with currency fields
@@ -211,7 +211,7 @@ class AccountCurrencyViewTests(TestCase):
     def test_account_edit_post_updates_currencies(self):
         """Posting to account edit saves both account and currency changes."""
         response = self.client.post(
-            reverse('account_edit', kwargs={'account_id': 'VIEW001'}),
+            reverse('account_edit', kwargs={'pk': self.account.pk}),
             {
                 'account_id': 'VIEW001',
                 'name': 'Updated Name',
@@ -306,7 +306,7 @@ class AccountCurrencyDeleteTests(TestCase):
     def test_delete_currency_via_formset(self):
         """Deleting a currency sub-account via edit form removes it."""
         response = self.client.post(
-            reverse('account_edit', kwargs={'account_id': 'DEL001'}),
+            reverse('account_edit', kwargs={'pk': self.account.pk}),
             {
                 'account_id': 'DEL001',
                 'name': 'Delete Test',

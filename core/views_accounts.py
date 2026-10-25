@@ -23,8 +23,8 @@ def accounts_list(request):
 
 
 @login_required
-def account_detail(request, account_id):
-    account = get_object_or_404(Account, account_id=account_id)
+def account_detail(request, pk):
+    account = get_object_or_404(Account, pk=pk)
     transactions = Transaction.objects.filter(account=account).order_by('-date')
 
     # Get sub-account currencies
@@ -91,7 +91,7 @@ def account_create(request):
         form = AccountForm(request.POST)
         if form.is_valid():
             account = form.save()
-            return redirect('account_edit', account_id=account.account_id)
+            return redirect('account_edit', pk=account.pk)
     else:
         form = AccountForm()
 
@@ -102,8 +102,8 @@ def account_create(request):
 
 
 @login_required
-def account_edit(request, account_id):
-    account = get_object_or_404(Account, account_id=account_id)
+def account_edit(request, pk):
+    account = get_object_or_404(Account, pk=pk)
 
     if request.method == 'POST':
         form = AccountForm(request.POST, instance=account)
@@ -111,7 +111,7 @@ def account_edit(request, account_id):
         if form.is_valid() and currency_formset.is_valid():
             form.save()
             currency_formset.save()
-            return redirect('account_detail', account_id=account.account_id)
+            return redirect('account_detail', pk=account.pk)
     else:
         form = AccountForm(instance=account)
         currency_formset = AccountCurrencyFormSet(instance=account)
@@ -124,11 +124,11 @@ def account_edit(request, account_id):
 
 
 @login_required
-def account_delete(request, account_id):
+def account_delete(request, pk):
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
     
-    account = get_object_or_404(Account, account_id=account_id)
+    account = get_object_or_404(Account, pk=pk)
     
     # SECURITY: Verify authorization - currently all logged-in users own all data
     # In a multi-tenant app, add ownership check here:
@@ -136,7 +136,7 @@ def account_delete(request, account_id):
     #     logger.warning(f'Unauthorized account deletion attempt: {request.user} tried to delete account {account_id}')
     #     return HttpResponse('Unauthorized', status=403)
     
-    account_display = account.account_id
+    account_display = account.name
     account.delete()
     logger.info(f'Account {account_display} deleted by user {request.user.username}')
     return redirect('accounts_list')

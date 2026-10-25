@@ -161,7 +161,7 @@
                                 <td>{{ account.owner|default:"—" }}</td>
                                 <td>{{ account.transaction_count }}</td>
                                 <td>
-                                    <a href="{% url 'account_detail' account.account_id %}" class="btn btn-sm btn-outline-primary">
+                                    <a href="{% url 'account_detail' account.pk %}" class="btn btn-sm btn-outline-primary">
                                         <i class="bi bi-eye"></i> View
                                     </a>
                                 </td>

@@ -82,21 +82,21 @@ Money{% endblock %} {% block content %}
                 </td>
                 <td>
                     <a
-                        href="{% url 'account_detail' account.account_id %}"
+                        href="{% url 'account_detail' account.pk %}"
                         class="btn btn-sm btn-outline-primary me-1"
                         title="View"
                     >
                         <i class="bi bi-eye"></i>
                     </a>
                     <a
-                        href="{% url 'account_edit' account.account_id %}"
+                        href="{% url 'account_edit' account.pk %}"
                         class="btn btn-sm btn-outline-secondary me-1"
                         title="Edit"
                     >
                         <i class="bi bi-pencil"></i>
                     </a>
                     <a
-                        href="{% url 'account_delete' account.account_id %}"
+                        href="{% url 'account_delete' account.pk %}"
                         class="btn btn-sm btn-outline-danger"
                         title="Delete"
                     >

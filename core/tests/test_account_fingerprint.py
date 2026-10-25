@@ -8,6 +8,8 @@ from core.utils.account_fingerprint import (
     last4,
     lookup_account,
     normalize_account_number,
+    scrub_text,
+    wrap_tx_hash,
 )
 
 
@@ -97,3 +99,96 @@ class LookupAccountTests(TestCase):
 
     def test_unknown_number_returns_none(self):
         self.assertIsNone(lookup_account("90000099"))
+
+
+class WrapTxHashTests(TestCase):
+    RAW = "ab" * 32
+
+    def test_deterministic_64_hex(self):
+        a = wrap_tx_hash(self.RAW)
+        b = wrap_tx_hash(self.RAW)
+        self.assertEqual(a, b)
+        self.assertEqual(len(a), 64)
+
+    def test_differs_from_raw_and_between_hashes(self):
+        self.assertNotEqual(wrap_tx_hash(self.RAW), self.RAW)
+        self.assertNotEqual(
+            wrap_tx_hash(self.RAW), wrap_tx_hash("cd" * 32)
+        )
+
+    def test_wrong_key_differs(self):
+        with_default_key = wrap_tx_hash(self.RAW)
+        with override_settings(ACCOUNT_FINGERPRINT_KEY="another-test-key-abcdefghijklmnop"):
+            with_other_key = wrap_tx_hash(self.RAW)
+        self.assertNotEqual(with_default_key, with_other_key)
+
+    @override_settings(ACCOUNT_FINGERPRINT_KEY="")
+    def test_empty_key_raises(self):
+        with self.assertRaises(ValueError):
+            wrap_tx_hash(self.RAW)
+
+
+class ScrubTextTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(
+            account_id="ACCOUNT_C",
+            name="ACCOUNT_C",
+            broker="RBC",
+            fingerprint=fingerprint_account_number("90000003"),
+            last_4="0003",
+        )
+        self.ib = Account.objects.create(
+            account_id="ACCOUNT_IB",
+            name="ACCOUNT_IB",
+            broker="IB",
+            fingerprint=fingerprint_account_number("U12345678"),
+            last_4="5678",
+        )
+
+    def test_dashed_number_replaced_with_name(self):
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "Buy on 900-00003-1-8 today"
+        )
+        self.assertEqual(cleaned, "Buy on ACCOUNT_C today")
+        self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
+
+    def test_long_digit_run_truncates_to_8_and_matches(self):
+        cleaned, matched, replaced, unmatched = scrub_text("acct 9000000318 end")
+        self.assertEqual(cleaned, "acct ACCOUNT_C end")
+        self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
+
+    def test_ib_id_replaced(self):
+        cleaned, matched, replaced, unmatched = scrub_text("IB acct U12345678 ok")
+        self.assertEqual(cleaned, "IB acct ACCOUNT_IB ok")
+        self.assertEqual((matched, replaced, unmatched), (1, 1, 0))
+
+    def test_date_untouched(self):
+        cleaned, matched, replaced, unmatched = scrub_text("settled 2026-10-21")
+        self.assertEqual(cleaned, "settled 2026-10-21")
+        self.assertEqual((matched, replaced, unmatched), (0, 0, 1))
+
+    def test_large_amount_untouched(self):
+        cleaned, matched, replaced, unmatched = scrub_text("amount 12345678.90")
+        self.assertEqual(cleaned, "amount 12345678.90")
+        self.assertEqual((matched, replaced, unmatched), (0, 0, 1))
+
+    def test_number_followed_by_space_and_other_number(self):
+        # Only the account-number part is replaced; the other number stays.
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "acct 90000003 bal 12345678"
+        )
+        self.assertEqual(cleaned, "acct ACCOUNT_C bal 12345678")
+        self.assertEqual((matched, replaced, unmatched), (1, 1, 1))
+
+    def test_repeated_number_replaced_each_time(self):
+        cleaned, matched, replaced, unmatched = scrub_text(
+            "90000003 and 900-00003-1-8"
+        )
+        self.assertEqual(cleaned, "ACCOUNT_C and ACCOUNT_C")
+        self.assertEqual((matched, replaced, unmatched), (2, 2, 0))
+
+    def test_no_candidates(self):
+        self.assertEqual(scrub_text("hello world"), ("hello world", 0, 0, 0))
+
+    def test_empty_text(self):
+        self.assertEqual(scrub_text(""), ("", 0, 0, 0))

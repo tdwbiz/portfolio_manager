@@ -17,7 +17,6 @@ Usage examples:
 
 import json
 import logging
-import re
 import shutil
 import time
 from decimal import Decimal
@@ -36,6 +35,7 @@ from core.models import (
     RbcMonthlyHolding,
     RbcMonthlyTransaction,
 )
+from core.utils.account_fingerprint import lookup_account, normalize_account_number
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -276,6 +276,12 @@ class Command(BaseCommand):
             parsed['account_number'],
             parsed.get('account_type_code', ''),
         )
+        if account is None:
+            msg = 'Unknown account fingerprint — file rejected (run set_account_fingerprint first)'
+            self.stderr.write(self.style.ERROR(f'  {pdf_file.name}: {msg}'))
+            if not dry_run:
+                self._log_import(pdf_file.name, 0, 'error', msg)
+            return 0, 1, msg, parsed
 
         records_created = 0
         for currency, cdata in [('CAD', parsed.get('cad')), ('USD', parsed.get('usd'))]:
@@ -542,38 +548,22 @@ class Command(BaseCommand):
 def _normalize_rbc_account_id(raw: str) -> str:
     """Extract the 8-digit canonical RBC account ID from any format.
 
-    Handles: '900-00003-1-8' -> '90000003', '9000000318' -> '90000003',
-             '90000003' -> '90000003'.
+    Delegates to the shared normaliser (core/utils/account_fingerprint.py):
+    '900-00003-1-8' -> '90000003', '9000000318' -> '90000003',
+    '90000003' -> '90000003'.
     """
-    digits = re.sub(r'\D', '', raw)
-    return digits[:8] if len(digits) >= 8 else digits
+    return normalize_account_number(raw)
 
 
-def _get_or_create_account(account_number: str, account_type_code: str) -> Account:
-    """Look up an existing Account by number, or auto-create one."""
-    if account_number:
-        # Normalize to 8-digit canonical form first
-        canonical = _normalize_rbc_account_id(account_number)
-        try:
-            return Account.objects.get(account_id=canonical)
-        except Account.DoesNotExist:
-            pass
-        # Fallback: exact match on raw string
-        try:
-            return Account.objects.get(account_id=account_number)
-        except Account.DoesNotExist:
-            pass
+def _get_or_create_account(account_number: str, account_type_code: str) -> Account | None:
+    """Look up an existing Account by fingerprint only.
 
-    # Auto-create
-    account_id = _normalize_rbc_account_id(account_number) if account_number else f'RBC-AUTO-{timezone.now().strftime("%H%M%S")}'
-    name = f'Auto-created from PDF: {account_number}'
-    account = Account.objects.create(
-        account_id=account_id,
-        name=name,
-        broker='RBC',
-    )
-    logger.warning("Auto-created account for unrecognised number %r — assign to correct account manually", account_number)
-    return account
+    Never auto-creates: returns ``None`` when the number has no stored
+    fingerprint (the caller rejects the file via its error path).
+    """
+    if not account_number:
+        return None
+    return lookup_account(account_number)
 
 
 def _move_file(src: Path, dest: Path) -> bool:

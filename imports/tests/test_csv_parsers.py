@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from core.models import Account
+from core.utils.account_fingerprint import fingerprint_account_number
 from imports.parsers import parse_rbc_csv, parse_ib_csv
 
 
@@ -42,6 +44,14 @@ def _write_text(text: str) -> str:
 
 class RbcCsvParserTests(TestCase):
     """Test RBC CSV parsing."""
+
+    def setUp(self) -> None:
+        # Fake account 90000001 (ACCOUNT_A) with a stored fingerprint — the
+        # parser resolves rows by fingerprint, never by the raw number.
+        self.account = Account.objects.create(
+            account_id="ACCOUNT_A", name="ACCOUNT_A", broker="RBC",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001",
+        )
 
     def test_parses_buy_with_settlement_date(self):
         """BUY with settlement date should be parsed."""
@@ -372,6 +382,24 @@ class RbcCsvParserTests(TestCase):
         trades, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['amount'], Decimal('0'))
+
+    def test_unknown_account_number_rejected(self):
+        """A row whose number has no stored fingerprint is rejected."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.37 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000099',
+             '-1666.20', 'CAD'],
+        ])
+
+        rejections = []
+        trades, _rate = parse_rbc_csv(path, rejections)
+        self.assertEqual(len(trades), 0)
+        self.assertEqual(len(rejections), 1)
+        self.assertIn('Unknown account', rejections[0]['Reason Rejected'])
 
     def test_empty_file_returns_no_trades(self):
         """Empty file should return no trades."""

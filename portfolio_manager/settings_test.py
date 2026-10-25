@@ -11,19 +11,10 @@ DATABASES = {
     }
 }
 
-# Fake RBC accounts for tests — no .env needed.
-# (Labels ACCOUNT_A ... ACCOUNT_H correspond to the fake IDs 90000001-90000008.)
-RBC_ACCOUNTS = {
-    "90000001": "ACCOUNT_A",
-    "90000002": "ACCOUNT_B",
-    "90000003": "ACCOUNT_C",
-    "90000004": "ACCOUNT_D",
-    "90000005": "ACCOUNT_E",
-    "90000006": "ACCOUNT_F",
-    "90000007": "ACCOUNT_G",
-    "90000008": "ACCOUNT_H",
-}
-RBC_DEFAULT_ACCOUNT = "90000001"
+# Fixed test key for account fingerprints (>= 32 chars; never a real key).
+# Tests create fake Account rows 90000001-90000008 (ACCOUNT_A ... ACCOUNT_H)
+# with fingerprint=fingerprint_account_number('90000001') etc.
+ACCOUNT_FINGERPRINT_KEY = "test-fingerprint-key-0123456789ab"
 
 # Amibroker export watch folder (temp dir for tests)
 AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix="amibroker_")

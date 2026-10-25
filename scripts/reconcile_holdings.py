@@ -23,7 +23,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 
 import django
 django.setup()
-from django.conf import settings
 
 from core.models import (
     Account, RbcMonthly, RbcMonthlyHolding,
@@ -273,7 +272,7 @@ def generate_report(account_id, year, currency, pdf_data, csv_data):
 
 def main():
     parser = argparse.ArgumentParser(description='Reconcile PDF vs CSV holdings')
-    parser.add_argument('--account', default=settings.RBC_DEFAULT_ACCOUNT, help='Account ID')
+    parser.add_argument('--account', required=True, help='Account ID (required — no default)')
     parser.add_argument('--year', type=int, default=2026, help='Year to reconcile')
     parser.add_argument('--currency', default='CAD', help='Currency')
     args = parser.parse_args()

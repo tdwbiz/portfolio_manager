@@ -235,24 +235,12 @@ _json_raw = (
 )
 IMPORT_JSON_DIR = Path(_json_raw) if _json_raw else BASE_DIR / "processed" / "json_logs"
 
-# RBC account configuration via environment variables (.env)
-# RBC_ACCOUNTS: comma-separated list of "id:label" pairs,
-#   e.g. "90000001:ACCOUNT_A,90000002:ACCOUNT_B"
-# Parsed into a dict {account_id: label} for easy lookup.
-def _parse_rbc_accounts(raw: str) -> dict[str, str]:
-    accounts: dict[str, str] = {}
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        acc_id, _, label = part.partition(":")
-        accounts[acc_id.strip()] = label.strip()
-    return accounts
+# Account fingerprint key: HMAC-SHA256 key for Account.fingerprint.
+# Must be at least 32 characters when set; with an empty/short key the
+# fingerprint code fails loudly at the point of use (see core/utils/account_fingerprint.py).
+ACCOUNT_FINGERPRINT_KEY = os.getenv("ACCOUNT_FINGERPRINT_KEY", "").strip()
 
-RBC_ACCOUNTS = _parse_rbc_accounts(os.getenv("RBC_ACCOUNTS", ""))
-RBC_DEFAULT_ACCOUNT = os.getenv("RBC_DEFAULT_ACCOUNT", "").strip()
-
-# Vision-language (VL) model settings (via .env, like RBC_ACCOUNTS)
+# Vision-language (VL) model settings (via .env)
 VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11435/v1").strip()
 VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "halogen-qwen3.8-flash-next").strip()
 VL_MODEL_API_KEY = os.getenv("VL_MODEL_API_KEY", "not-used").strip() or "not-used"

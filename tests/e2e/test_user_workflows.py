@@ -16,6 +16,7 @@ from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 from pw_session import PlaywrightLiveServerMixin
 
 from core.models import Account
+from core.utils.account_fingerprint import fingerprint_account_number
 
 # Setup Django
 project_root = str(Path(__file__).parent.parent.parent)
@@ -102,9 +103,11 @@ class TestTransactionManagement(PlaywrightLiveServerMixin, StaticLiveServerTestC
             email="transaction@test.com",
         )
 
-        # Create a test account
+        # Create a test account (fingerprint of 90000001; the number itself
+        # is never stored on the row)
         self.account = Account.objects.create(
-            account_id="90000001", name="ACCOUNT_A", broker="RBC", currency="CAD"
+            account_id="ACCOUNT_A", name="ACCOUNT_A", broker="RBC", currency="CAD",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001",
         )
 
     def _login(self):

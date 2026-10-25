@@ -149,6 +149,10 @@ class Account(models.Model):
         max_length=50, unique=True
     )  # e.g. "TOM IB", "TS JOINT", "RBC-123456"
     name = models.CharField(max_length=100)  # human display name, editable
+    # Keyed HMAC-SHA256 of the normalised full account number; the number
+    # itself is never stored. Nullable so existing rows migrate cleanly.
+    fingerprint = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    last_4 = models.CharField(max_length=4, blank=True, default="")
     broker = models.CharField(max_length=3, choices=BROKER_CHOICES)
     # DEPRECATED: Use AccountCurrency instead. Kept for backward compat.
     # After migration, this reflects the dominant currency or 'MIX' for multi-currency.

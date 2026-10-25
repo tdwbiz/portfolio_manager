@@ -12,6 +12,7 @@ from django.core.management import call_command
 from io import BytesIO
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
+from core.utils.account_fingerprint import fingerprint_account_number
 from imports.parsers_pdf import parse_rbc_pdf, _parse_rbc_date
 
 
@@ -359,10 +360,14 @@ class TestParseRbcPdf(TestCase):
     def test_duplicate_detection(self):
         """Test 6: Import the same PDF twice via manage_inbox_import.
         Verify the second import is skipped with a warning."""
+        # Fingerprint of the number in _mock_vl_section; the raw number is
+        # never stored on the Account row.
         account = Account.objects.create(
-            account_id="900-00003-1-8",
+            account_id="TEST-DUP-1",
             name="Test Duplicate Account",
             broker="RBC",
+            fingerprint=fingerprint_account_number("900-00003-1-8"),
+            last_4="0003",
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:

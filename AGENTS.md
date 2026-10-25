@@ -4,7 +4,7 @@ Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holding
 
 ## Sharing data with a cloud AI
 
-   Target design (`docs/architecture.md` §5): the app stores no account numbers; accounts are identified by name, and the only digits shown are the last 4 on the accounts page. Until phase 2 of the clean-up is done, the real numbers are still in `.env` (`RBC_ACCOUNTS`) and in the database on `mercury`. Rules for sharing anything about this repo with a cloud AI:
+   Target design (`docs/architecture.md` §5): the app stores no account numbers; accounts are identified by name, and the only digits shown are the last 4 on the accounts page. `.env` holds only `ACCOUNT_FINGERPRINT_KEY`; until phase 2 of the clean-up is done, the real numbers are still in the database on `mercury` (`core_account.account_id` and stored statement fields). Rules for sharing anything about this repo with a cloud AI:
 
 - **Never paste into a cloud AI:** account numbers (not even last-4 digits), `.env` content, log lines, `docs/reconciliation/` content, statement files (CSV or PDF), or VL JSON output from `processed/json_logs/`.
 - **Never paste full names, surnames, addresses or SINs** — these never leave the machine.
@@ -30,14 +30,12 @@ Django app for tdw's RBC investment accounts: CSV/PDF statement imports, holding
 - **Tests:** SQLite in-memory via `--settings=portfolio_manager.settings_test`. Always use it; never run tests against the production settings.
 - `requirements.txt` has `django>=5.1` (unpinned): Linux runs 6.1, Windows 5.1.
 
-### RBC account configuration (env-driven)
-- Real RBC account numbers are **not** in the repo. They come from `.env`:
-  - `RBC_ACCOUNTS` — comma list of `id:label` pairs, e.g. `90000001:ACCOUNT_A,90000002:ACCOUNT_B`
-  - `RBC_DEFAULT_ACCOUNT` — default account ID for script `--account` flags
-- Exposed as `settings.RBC_ACCOUNTS` (dict `{id: label}`) and `settings.RBC_DEFAULT_ACCOUNT`. See `.env.example`.
-- Used by: the CSV parser account whitelist (`imports/parsers.py`), `merge_duplicate_accounts`, `scripts/generate_accounting_ledger.py`, and the `--account` defaults in `scripts/ledger_high_change.py`, `pdf_internal_reconciliation.py`, `reconcile_holdings.py`, `reconcile_tx.py`, `verify_pdf_integrity.py`.
-- **If `RBC_ACCOUNTS` is empty, RBC CSV rows are rejected as unknown accounts.**
-- Tests use fake accounts `90000001`–`90000008` (labels `ACCOUNT_A`…`ACCOUNT_H`) via `settings_test.py` — no `.env` needed.
+### Account identification (fingerprints)
+- Real RBC account numbers are **not** in the repo or `.env`. `Account` stores a keyed HMAC-SHA256 **fingerprint** (`core/utils/account_fingerprint.py`) plus the **last 4 digits**; the number itself is never stored, printed or logged.
+- `ACCOUNT_FINGERPRINT_KEY` (in `.env`, ≥ 32 chars) keys the HMAC. With an empty/short key the fingerprint code fails loudly at the point of use (import commands error out; pages keep working).
+- The one-off command `manage.py set_account_fingerprint` asks for the number twice (hidden prompt), stores only fingerprint + last 4, prints only the account name and last 4, and needs `--replace` to overwrite an existing fingerprint.
+- Importers (`import_csv`, `import_csv --holdings`, `manage_inbox_import`) resolve accounts by fingerprint and reject unknown fingerprints; `manage_inbox_import` never auto-creates accounts. Scripts that take `--account` require it (no default).
+- Tests use fake accounts `90000001`–`90000008` (labels `ACCOUNT_A`…`ACCOUNT_H`) as `Account` rows with `fingerprint=fingerprint_account_number('90000001')` etc., keyed by the fixed test key in `settings_test.py` — no `.env` needed.
 - **`PRACEF…` (e.g. `PRACEF8C2DAE`) is a PRACTICE account / Goal container — NEVER import it.** Skip every row whose account id starts with `PRACEF`, in both Activity and Holdings CSV imports.
 
 ## Key commands (saturn Ubuntu)
@@ -180,7 +178,7 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 - Dates like `"JAN. 08"` (dot after the month) must become `datetime.date` via `_parse_date_from_string()` before saving.
 
 ### VL model (PDF reading)
-- The VL model is env-driven via `.env` (like `RBC_ACCOUNTS`): `VL_MODEL_BASE_URL`, `VL_MODEL_NAME`, plus optional `VL_MODEL_API_KEY`, `VL_MAX_TOKENS`, `VL_TEMPERATURE`. Defaults: Halogen on port 11435 (`http://127.0.0.1:11435/v1`), model `halogen-qwen3.8-flash-next` (see `.env.example`; all lines optional).
+- The VL model is env-driven via `.env`: `VL_MODEL_BASE_URL`, `VL_MODEL_NAME`, plus optional `VL_MODEL_API_KEY`, `VL_MAX_TOKENS`, `VL_TEMPERATURE`. Defaults: Halogen on port 11435 (`http://127.0.0.1:11435/v1`), model `halogen-qwen3.8-flash-next` (see `.env.example`; all lines optional).
 - If the VL client logs a `finish_reason='length'` warning, the output was truncated — raise `VL_MAX_TOKENS` in `.env` (reasoning tokens count toward the limit).
 - PDFs are used only for validation and where CSV data isn't available.
 

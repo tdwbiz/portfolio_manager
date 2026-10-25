@@ -15,12 +15,12 @@ Fix: `scrub_text` takes a prebuilt fingerprint→name map (Account has ~12 rows,
 
 - `core/utils/account_fingerprint.py`
   - New helper `build_fingerprint_name_map() -> dict[str, str]`: one query, `Account.objects.values_list('fingerprint', 'name')`, skips rows with an empty fingerprint.
-  - `scrub_text(text, name_map=None)`: uses the given map, never queries per candidate. If `name_map is None`, build it once inside the call (fallback keeps the old call sites working and is at most one query per call, not per candidate). Return contract `(cleaned, matched, replaced, unmatched)` unchanged.
+  - `scrub_text(text, name_map)`: uses the given map, never queries per candidate. `name_map` is **required** (no default), so a caller that forgets the map fails in tests instead of querying per call on mercury. All callers and tests are updated to pass it. Return contract `(cleaned, matched, replaced, unmatched)` unchanged.
 - `imports/auto_import.py` (`auto_import()`): build the map once at the top of the function, pass it to the `scrub_text(...)` call (~line 231).
 - `core/management/commands/manage_inbox_import.py`: build the map once in `handle()`, pass it down to `_process_monthly()` (used at ~line 488). Update the `_process_monthly` signature accordingly.
 - `core/management/commands/scrub_account_numbers.py`:
   - Build the map once in `handle()` and pass it to every `scrub_text` call.
-  - Per `(model, field)` target: first materialize `pks = list(model.objects.values_list('pk', flat=True))` (result set closed), then process in chunks of `CHUNK_SIZE = 500` pks: fetch `list(model.objects.filter(pk__in=chunk))`, scrub in Python (0 queries), and on `--apply` write with `model.objects.bulk_update(objs, [field], batch_size=CHUNK_SIZE)`. No iterator, no open result set during writes.
+  - Per `(model, field)` target: first materialize `pks = list(model.objects.values_list('pk', flat=True))` (result set closed), then process in chunks of `CHUNK_SIZE = 200` pks: fetch `list(model.objects.filter(pk__in=chunk))`, scrub in Python (0 queries), and on `--apply` write with `model.objects.bulk_update(objs, [field], batch_size=CHUNK_SIZE)`. `batch_size=CHUNK_SIZE` is required because SQL Server allows at most 2100 parameters per statement and `bulk_update` uses about 2 per row per field plus the pks. No iterator, no open result set during writes.
   - Printed output format (`model,field,matched=…,replaced=…,unmatched=…`) unchanged.
 - Tests: `core/tests/test_account_fingerprint.py`, `core/tests/test_scrub.py`.
 
@@ -35,7 +35,7 @@ No migrations. No settings changes.
 
 ## Steps
 
-1. **Map helper + scrub_text signature.** Add `build_fingerprint_name_map()`; change `scrub_text` to accept the optional `name_map` and drop the per-candidate `Account` query. Update existing scrub tests in `core/tests/test_account_fingerprint.py` to pass a map where they currently rely on the DB lookup.
+1. **Map helper + scrub_text signature.** Add `build_fingerprint_name_map()`; change `scrub_text` to take the required `name_map` (no default) and drop the per-candidate `Account` query. Update existing scrub tests in `core/tests/test_account_fingerprint.py` to pass a map where they currently rely on the DB lookup.
    Check: `/opt/pm-venv/bin/python manage.py test core.tests.test_account_fingerprint --settings=portfolio_manager.settings_test`. Commit.
 
 2. **Callers pass the map.** `auto_import()` builds the map once and passes it at ~line 231; `manage_inbox_import` builds it in `handle()` and passes it into `_process_monthly()`.
@@ -46,7 +46,7 @@ No migrations. No settings changes.
 
 4. **New tests.**
    - `test_account_fingerprint.py`: `scrub_text` with a given map → `assertNumQueries(0)`; `build_fingerprint_name_map()` → `assertNumQueries(1)` and correct contents.
-   - `test_scrub.py`: create rows (e.g. 3 and then 6 rows on one target field), run the command via `call_command`, and assert the query count with more rows is not larger than with fewer rows (same chunk size, so same query count — use `CaptureStdOut` and `assertNumQueries` or a `Connection.queries_count` capture around both runs).
+   - `test_scrub.py`: create 3 rows on one target field, run the command via `call_command`, record the query count; then bring the total to 10 rows and run again — assert the two query counts are **equal** (both well under one chunk of 200, so the count is flat). Use a `Connection.queries_count` capture around both runs.
    Check: `/opt/pm-venv/bin/python -m pytest --collect-only -q` (collection still clean). Commit.
 
 5. **Full test run (once, at the end).**
@@ -62,6 +62,14 @@ No migrations. No settings changes.
 
 ## Open questions
 
-1. Should `name_map` be required or optional on `scrub_text`? **Recommended: optional (`None` → build the map once inside the call).** It keeps the public contract backward compatible, still removes the per-candidate query everywhere, and the three real call sites all pass a map explicitly.
-2. Where exactly does `manage_inbox_import` build the map? **Recommended: in `handle()`, passed down to `_process_monthly()`** — one query per command run, matching the task wording ("builds it once per run and passes it in").
-3. Chunk size? **Recommended: module constant `CHUNK_SIZE = 500`** in the command — small enough for SQL Server parameter limits, and the query-count test uses row counts well below one chunk so the count is flat.
+All resolved — see Decisions below.
+
+1. Should `name_map` be required or optional on `scrub_text`? (Resolved: required.)
+2. Where exactly does `manage_inbox_import` build the map? (Resolved: in `handle()`.)
+3. Chunk size? (Resolved: `CHUNK_SIZE = 200`, with `batch_size` passed to `bulk_update`.)
+
+## Decisions (tdw, Oct 25)
+
+- **Q1:** required, not optional: `scrub_text(text, name_map)` with no default, so a caller that forgets the map fails in tests instead of querying per call on mercury; update all callers and tests.
+- **Q2:** yes, build it in `handle()` and pass it to `_process_monthly()`.
+- **Q3:** `CHUNK_SIZE = 200`, and also pass `batch_size` to `bulk_update`, because SQL Server allows at most 2100 parameters per statement and `bulk_update` uses about 2 per row per field plus the pks; a test that updates two fields in one chunk must stay under that limit. In the query-count test compare two different row counts (e.g. 3 rows and 10 rows) and assert the same count.

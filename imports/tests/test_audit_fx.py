@@ -8,7 +8,6 @@ class AuditFxCommandTests(TestCase):
     def setUp(self):
         # Create test data
         self.account = Account.objects.create(
-            account_id='AUDIT001',
             name='Test Account',
             broker='IB'
         )
@@ -101,7 +100,6 @@ class AuditFxCommandTests(TestCase):
     def test_audit_account_filter(self):
         # Create second account with bad transaction
         account2 = Account.objects.create(
-            account_id='AUDIT002',
             name='Second Account',
             broker='RBC'
         )
@@ -127,7 +125,7 @@ class AuditFxCommandTests(TestCase):
         )
 
         out = StringIO()
-        call_command('audit_fx', account=self.account.account_id, stdout=out)
+        call_command('audit_fx', account=self.account.name, stdout=out)
         
         self.assertIn('Suspicious (amount_cad = 0, amount ≠ 0): 1', out.getvalue())
         self.assertNotIn('Suspicious (amount_cad = 0, amount ≠ 0): 2', out.getvalue())

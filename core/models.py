@@ -132,7 +132,7 @@ class AccountCurrency(models.Model):
         ordering = ["currency"]
 
     def __str__(self):
-        return f"{self.account.account_id} ({self.currency})"
+        return f"{self.account.name} ({self.currency})"
 
 
 class Account(models.Model):
@@ -145,10 +145,7 @@ class Account(models.Model):
         ("RESP", "RESP (Education)"),
         ("OTHER", "Other"),
     ]
-    account_id = models.CharField(
-        max_length=50, unique=True
-    )  # e.g. "TOM IB", "TS JOINT", "RBC-123456"
-    name = models.CharField(max_length=100)  # human display name, editable
+    name = models.CharField(max_length=100)  # account identifier and display name
     # Keyed HMAC-SHA256 of the normalised full account number; the number
     # itself is never stored. Nullable so existing rows migrate cleanly.
     fingerprint = models.CharField(max_length=64, unique=True, null=True, blank=True)
@@ -1348,4 +1345,4 @@ class LedgerMonthClosure(models.Model):
     
     def __str__(self):
         status = "CLOSED" if self.is_closed else "OPEN"
-        return f"{self.account.account_id} {self.currency} {self.statement_month} [{status}]"
+        return f"{self.account.name} {self.currency} {self.statement_month} [{status}]"

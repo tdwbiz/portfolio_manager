@@ -13,7 +13,6 @@ class IncomeSummaryTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
         # Create test account
         self.account = Account.objects.create(
-            account_id='INC001',
             name='Test Account',
             broker='IB'
         )
@@ -163,7 +162,6 @@ class IncomeSummaryTests(TestCase):
     def test_income_account_filter(self):
         """Create income transactions in two accounts; GET /income/?account=ACCOUNT1; assert only transactions from ACCOUNT1 appear."""
         acct2 = Account.objects.create(
-            account_id='INC002',
             name='Test Account 2',
             broker='IB'
         )

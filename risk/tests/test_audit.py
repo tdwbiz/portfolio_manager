@@ -130,11 +130,9 @@ class AuditScoreSnapshotTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_ACCT',
             name='Test Account',
             owner='TOM',
-            currency='CAD',
-        )
+            currency='CAD')
 
     def test_create_snapshot(self):
         """Basic snapshot creation works."""
@@ -206,11 +204,9 @@ class AuditRecommendationLogTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_ACCT',
             name='Test Account',
             owner='TOM',
-            currency='CAD',
-        )
+            currency='CAD')
         self.template = StrategyTemplate.objects.create(
             code='protective_put',
             name='Protective Put',
@@ -373,11 +369,9 @@ class TaxDecisionAcknowledgementTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_ACCT',
             name='Test Account',
             owner='TOM',
-            currency='CAD',
-        )
+            currency='CAD')
         self.template = StrategyTemplate.objects.create(
             code='protective_put',
             name='Protective Put',
@@ -620,11 +614,9 @@ class TaxAcknowledgementServiceTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_ACCT',
             name='Test Account',
             owner='TOM',
-            currency='CAD',
-        )
+            currency='CAD')
         self.template = StrategyTemplate.objects.create(
             code='protective_put',
             name='Protective Put',
@@ -803,11 +795,9 @@ class AuditActionLogTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TEST_ACCT',
             name='Test Account',
             owner='TOM',
-            currency='CAD',
-        )
+            currency='CAD')
         self.template = StrategyTemplate.objects.create(
             code='protective_put',
             name='Protective Put',

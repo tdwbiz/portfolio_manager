@@ -30,8 +30,8 @@ def owner_summary(request, owner: str):
         entity_type='account',
         calc_date=calc_date
     ).filter(
-        Q(entity_id__in=Account.objects.filter(owner=owner).values('account_id')) |
-        Q(entity_id__in=Account.objects.filter(owner='JOINT').values('account_id'))
+        Q(entity_id__in=Account.objects.filter(owner=owner).values('name')) |
+        Q(entity_id__in=Account.objects.filter(owner='JOINT').values('name'))
     ).order_by('-score_raw') if calc_date else []
 
     # Other owner for comparison panel

@@ -129,7 +129,7 @@ def transaction_list(request):
     # Get distinct values for filter dropdowns
     brokers = BrokerStatement.objects.values_list('source', flat=True).distinct().order_by('source')
     symbols = Transaction.objects.values_list('symbol', flat=True).distinct().order_by('symbol')
-    accounts = Account.objects.all().order_by('account_id')
+    accounts = Account.objects.all().order_by('name')
 
     # Pagination
     page = request.GET.get('page', 1)

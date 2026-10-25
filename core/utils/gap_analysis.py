@@ -99,16 +99,16 @@ def count_months_without_transactions(tx_dates, start_date, end_date):
     return len(all_months - tx_months)
 
 
-def account_gap_analysis(account_id):
+def account_gap_analysis(account_name):
     """Return completeness metrics for a single account."""
     try:
-        account = Account.objects.get(account_id=account_id)
+        account = Account.objects.get(name=account_name)
     except Account.DoesNotExist:
         return None
 
     # Get all transaction dates
     tx_dates_list = list(
-        Transaction.objects.filter(account__account_id=account.account_id)
+        Transaction.objects.filter(account__name=account.name)
         .values_list("date", flat=True)
         .distinct()
         .order_by("date")
@@ -117,7 +117,7 @@ def account_gap_analysis(account_id):
 
     if not tx_dates_list:
         return {
-            "account_id": account.account_id,
+            "account_id": account.name,  # grouping key is the account name
             "account_name": account.name,
             "earliest_csv_date": None,
             "continuous_start": None,
@@ -158,19 +158,19 @@ def account_gap_analysis(account_id):
 
     # RBC dates
     earliest_rbc_stmt = RbcMonthly.objects.filter(
-        account__account_id=account.account_id
+        account__name=account.name
     ).aggregate(Min("statement_date"))["statement_date__min"]
 
     earliest_rbc_tx = RbcMonthlyTransaction.objects.filter(
-        rbc_monthly__account__account_id=account.account_id
+        rbc_monthly__account__name=account.name
     ).aggregate(Min("date"))["date__min"]
 
     earliest_rbc_annual = RbcAnnual.objects.filter(
-        account__account_id=account.account_id
+        account__name=account.name
     ).aggregate(Min("report_year"))["report_year__min"]
 
     return {
-        "account_id": account.account_id,
+        "account_id": account.name,  # grouping key is the account name
         "account_name": account.name,
         "earliest_csv_date": earliest_csv,
         "continuous_start": continuous_start,
@@ -189,7 +189,7 @@ def all_accounts_gap_analysis():
     """Return gap analysis for all accounts."""
     results = []
     for account in Account.objects.all():
-        result = account_gap_analysis(account.account_id)
+        result = account_gap_analysis(account.name)
         if result:
             results.append(result)
     return results

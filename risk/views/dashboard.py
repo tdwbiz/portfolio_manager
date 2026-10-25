@@ -107,7 +107,7 @@ def dashboard(request):
     # Annotate account information for display
     from core.models import Account
     account_ids = [score.entity_id for score in account_scores]
-    accounts_dict = {acc.account_id: acc for acc in Account.objects.filter(account_id__in=account_ids)}
+    accounts_dict = {acc.name: acc for acc in Account.objects.filter(name__in=account_ids)}
     for score in account_scores:
         score.account = accounts_dict.get(score.entity_id)
 

@@ -277,20 +277,17 @@ class IntegrationTests(TestCase):
 
         # Create test accounts
         self.account_tom = Account.objects.create(
-            account_id='RRSP_TOM', name='Tom RRSP', broker='RBC',
+            name='Tom RRSP', broker='RBC',
             currency='CAD', category='RRSP', owner='TOM',
-            exclude_from_risk=False,
-        )
+            exclude_from_risk=False)
         self.account_taxable = Account.objects.create(
-            account_id='TAXABLE_TOM', name='Tom Taxable', broker='RBC',
+            name='Tom Taxable', broker='RBC',
             currency='CAD', category='TAXABLE', owner='TOM',
-            exclude_from_risk=False,
-        )
+            exclude_from_risk=False)
         self.account_taxable_car = Account.objects.create(
-            account_id='TAXABLE_CAR', name='Car Fund', broker='RBC',
+            name='Car Fund', broker='RBC',
             currency='CAD', category='TAXABLE', owner='TOM',
-            exclude_from_risk=True,
-        )
+            exclude_from_risk=True)
 
         # Set tax threshold config
         ScoringConfig.objects.get_or_create(
@@ -314,7 +311,7 @@ class IntegrationTests(TestCase):
             symbol__in=['VFV', 'SPY', 'VDY', 'GOOG']
         ).delete()
         Account.objects.filter(
-            account_id__in=['RRSP_TOM', 'TAXABLE_TOM', 'TAXABLE_CAR']
+            name__in=['RRSP_TOM', 'TAXABLE_TOM', 'TAXABLE_CAR']
         ).delete()
 
     def _create_mock_positions(self, account_id: str, symbol: str, quantity: float,

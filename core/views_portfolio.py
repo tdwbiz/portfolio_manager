@@ -252,9 +252,9 @@ def realised_pnl(request):
         except ValueError:
             validated_date_to = None
 
-    # Internal grouping key stays account_id (plan step 9); unknown pk matches nothing.
+    # Internal grouping key is the account name; an unknown value matches nothing.
     if resolved_account:
-        filter_account_id = resolved_account.account_id
+        filter_account_id = resolved_account.name
     elif account_param:
         filter_account_id = account_param
     else:
@@ -293,7 +293,7 @@ def realised_pnl(request):
     )
 
     # Get all accounts for filter dropdown
-    accounts = Account.objects.all().order_by("account_id")
+    accounts = Account.objects.all().order_by("name")
 
     group_by = request.GET.get("group_by", "flat")
 

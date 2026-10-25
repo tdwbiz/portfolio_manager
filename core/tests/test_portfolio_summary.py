@@ -10,9 +10,8 @@ from django.contrib.auth.models import User
 class PortfolioSummaryTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='PORT001', name='Portfolio Test', broker='IB', currency='USD',
-            starting_balance=Decimal('0'),
-        )
+            name='Portfolio Test', broker='IB', currency='USD',
+            starting_balance=Decimal('0'))
         self.statement = BrokerStatement.objects.create(
             source='IB',
             file_date='2024-01-01',
@@ -81,10 +80,9 @@ class PortfolioSummaryTests(TestCase):
         BrokerStatement.objects.all().delete()
 
         rrsp_account = Account.objects.create(
-            account_id='RRSP001', name='RRSP Test', broker='IB', currency='USD',
+            name='RRSP Test', broker='IB', currency='USD',
             category='RRSP', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         rrsp_stmt = BrokerStatement.objects.create(
             source='IB', file_date='2024-06-01', raw_filename='rrsp.csv',
         )
@@ -110,15 +108,13 @@ class PortfolioSummaryTests(TestCase):
         BrokerStatement.objects.all().delete()
 
         acct1 = Account.objects.create(
-            account_id='ACCT1', name='Account 1', broker='IB', currency='CAD',
+            name='Account 1', broker='IB', currency='CAD',
             category='TAXABLE', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         acct2 = Account.objects.create(
-            account_id='ACCT2', name='Account 2', broker='IB', currency='CAD',
+            name='Account 2', broker='IB', currency='CAD',
             category='TFSA', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         stmt = BrokerStatement.objects.create(
             source='IB', file_date='2024-07-01', raw_filename='sub.csv',
         )
@@ -158,15 +154,13 @@ class PortfolioSummaryTests(TestCase):
         BrokerStatement.objects.all().delete()
 
         taxable_acct = Account.objects.create(
-            account_id='TAX001', name='Taxable', broker='IB', currency='CAD',
+            name='Taxable', broker='IB', currency='CAD',
             category='TAXABLE', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         rrsp_acct = Account.objects.create(
-            account_id='RRSP002', name='RRSP', broker='IB', currency='CAD',
+            name='RRSP', broker='IB', currency='CAD',
             category='RRSP', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         stmt = BrokerStatement.objects.create(
             source='IB', file_date='2024-08-01', raw_filename='ord.csv',
         )
@@ -216,10 +210,9 @@ class PortfolioSummaryTests(TestCase):
 
         # Create two positions in the same account
         acct = Account.objects.create(
-            account_id='ALLOC001', name='Allocation Test', broker='IB', currency='CAD',
+            name='Allocation Test', broker='IB', currency='CAD',
             category='TAXABLE', owner='Tom',
-            starting_balance=Decimal('0'),
-        )
+            starting_balance=Decimal('0'))
         stmt = BrokerStatement.objects.create(
             source='IB', file_date='2024-09-01', raw_filename='alloc.csv',
         )

@@ -19,8 +19,8 @@
                 <select name="account" id="account" class="form-select">
                     <option value="">— Select account —</option>
                     {% for acct in accounts %}
-                    <option value="{{ acct.account_id }}" {% if acct.account_id == selected_account %}selected{% endif %}>
-                        {{ acct.account_id }} — {{ acct.name }}
+                    <option value="{{ acct.name }}" {% if acct.name == selected_account %}selected{% endif %}>
+                        {{ acct.name }}
                     </option>
                     {% endfor %}
                 </select>
@@ -66,7 +66,7 @@
                 <tbody>
                     {% for rec in reconciliations %}
                     <tr>
-                        <td>{{ rec.account.account_id }}</td>
+                        <td>{{ rec.account.name }}</td>
                         <td>{{ rec.period_start|date:"Y-m-d" }} &mdash; {{ rec.period_end|date:"Y-m-d" }}</td>
                         <td>{{ rec.get_reconciliation_type_display }}</td>
                         <td>{{ rec.csv_ending_value|default:"&mdash;" }}</td>

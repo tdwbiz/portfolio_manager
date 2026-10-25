@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 @login_required
-def ledger_month_view(request, account_id, year, month):
+def ledger_month_view(request, account_name, year, month):
     """Show a ledger month report: opening balance, all entries, closing balance.
 
-    URL pattern: /ledger/<account_id>/<year>/<month>/
+    URL pattern: /ledger/<account_name>/<year>/<month>/ (name = Account.name)
     """
-    account = get_object_or_404(Account, account_id=account_id)
+    account = get_object_or_404(Account, name=account_name)
     stmt_month = date.fromisoformat(f"{year}-{month}-01")
 
     # All ledger accounts for this account

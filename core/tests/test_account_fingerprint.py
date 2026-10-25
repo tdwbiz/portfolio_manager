@@ -84,12 +84,10 @@ class Last4Tests(TestCase):
 class LookupAccountTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="ACCOUNT_C",
             name="ACCOUNT_C",
             broker="RBC",
             fingerprint=fingerprint_account_number("90000003"),
-            last_4="0003",
-        )
+            last_4="0003")
 
     def test_found_by_canonical_number(self):
         self.assertEqual(lookup_account("90000003"), self.account)
@@ -131,19 +129,15 @@ class WrapTxHashTests(TestCase):
 class ScrubTextTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="ACCOUNT_C",
             name="ACCOUNT_C",
             broker="RBC",
             fingerprint=fingerprint_account_number("90000003"),
-            last_4="0003",
-        )
+            last_4="0003")
         self.ib = Account.objects.create(
-            account_id="ACCOUNT_IB",
             name="ACCOUNT_IB",
             broker="IB",
             fingerprint=fingerprint_account_number("U12345678"),
-            last_4="5678",
-        )
+            last_4="5678")
 
     def test_dashed_number_replaced_with_name(self):
         cleaned, matched, replaced, unmatched = scrub_text(

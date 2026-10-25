@@ -22,12 +22,10 @@ from core.utils.account_fingerprint import fingerprint_account_number
 class ScrubAccountNumbersTests(TestCase):
     def setUp(self) -> None:
         self.account = Account.objects.create(
-            account_id="ACCOUNT_A",
             name="ACCOUNT_A",
             broker="RBC",
             fingerprint=fingerprint_account_number("90000001"),
-            last_4="0001",
-        )
+            last_4="0001")
         self.statement = BrokerStatement.objects.create(
             source="RBC",
             file_date=date(2024, 1, 15),

@@ -25,7 +25,7 @@ def run_command(number1="900-00003-1-8", number2=None, name="TOM_TFSA"):
 
 class SetAccountFingerprintTests(TestCase):
     def test_stores_fingerprint_and_last4(self):
-        Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
+        Account.objects.create(name="TOM_TFSA", broker="RBC")
         out, _ = run_command()
         account = Account.objects.get(name="TOM_TFSA")
         self.assertEqual(account.fingerprint, fingerprint_account_number("900-00003-1-8"))
@@ -38,7 +38,7 @@ class SetAccountFingerprintTests(TestCase):
         self.assertIn("0003", joined)
 
     def test_updates_existing_account_by_name(self):
-        account = Account.objects.create(account_id="EXISTING", name="SUSAN IB", broker="RBC")
+        account = Account.objects.create(name="SUSAN IB", broker="RBC")
         run_command(name="SUSAN IB")
         account.refresh_from_db()
         self.assertEqual(account.fingerprint, fingerprint_account_number("900-00003-1-8"))
@@ -59,8 +59,8 @@ class SetAccountFingerprintTests(TestCase):
         self.assertNotIn("900", msg)
 
     def test_duplicate_name_rejected(self):
-        a1 = Account.objects.create(account_id="DUP1", name="TOM_TFSA", broker="RBC")
-        a2 = Account.objects.create(account_id="DUP2", name="TOM_TFSA", broker="RBC")
+        a1 = Account.objects.create(name="TOM_TFSA", broker="RBC")
+        a2 = Account.objects.create(name="TOM_TFSA", broker="RBC")
         with self.assertRaises(CommandError) as ctx:
             run_command()
         self.assertEqual(Account.objects.count(), 2)
@@ -75,14 +75,14 @@ class SetAccountFingerprintTests(TestCase):
         self.assertNotIn("900", msg)
 
     def test_equivalent_formats_accepted(self):
-        Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
+        Account.objects.create(name="TOM_TFSA", broker="RBC")
         run_command(number1="900-00003-1-8", number2="9000000318")
         account = Account.objects.get(name="TOM_TFSA")
         self.assertEqual(account.fingerprint, fingerprint_account_number("90000003"))
         self.assertEqual(account.last_4, "0003")
 
     def test_mismatched_entries_store_nothing(self):
-        account = Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
+        account = Account.objects.create(name="TOM_TFSA", broker="RBC")
         with self.assertRaises(CommandError):
             run_command(number1="90000003", number2="90000004")
         account.refresh_from_db()
@@ -91,12 +91,10 @@ class SetAccountFingerprintTests(TestCase):
 
     def test_refuses_overwrite_without_replace(self):
         account = Account.objects.create(
-            account_id="TOM_TFSA",
             name="TOM_TFSA",
             broker="RBC",
             fingerprint=fingerprint_account_number("90000001"),
-            last_4="0001",
-        )
+            last_4="0001")
         with self.assertRaises(CommandError):
             run_command()
         account.refresh_from_db()
@@ -104,12 +102,10 @@ class SetAccountFingerprintTests(TestCase):
 
     def test_replace_overwrites(self):
         Account.objects.create(
-            account_id="TOM_TFSA",
             name="TOM_TFSA",
             broker="RBC",
             fingerprint=fingerprint_account_number("90000001"),
-            last_4="0001",
-        )
+            last_4="0001")
         with mock.patch(
             "core.management.commands.set_account_fingerprint.getpass.getpass",
             side_effect=["900-00003-1-8", "900-00003-1-8"],
@@ -123,7 +119,7 @@ class SetAccountFingerprintTests(TestCase):
         self.assertEqual(account.last_4, "0003")
 
     def test_empty_number_stores_nothing(self):
-        account = Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
+        account = Account.objects.create(name="TOM_TFSA", broker="RBC")
         with self.assertRaises(CommandError):
             run_command(number1="", number2="")
         account.refresh_from_db()

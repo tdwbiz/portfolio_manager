@@ -16,12 +16,12 @@ def account_summary(request, account_id: str):
     Per-account risk summary page.
     """
     calc_date = get_latest_calc_date()
-    account = get_object_or_404(Account, account_id=account_id)
+    account = get_object_or_404(Account, name=account_id)  # URL carries the account name
 
     if not calc_date:
         context = {
             'calc_date': None,
-            'account_id': account.account_id,
+            'account_id': account.name,  # display label (the old column is gone)
             'account': account,
             'account_score': None,
             'account_metrics': None,
@@ -73,7 +73,7 @@ def account_summary(request, account_id: str):
 
     context = {
         'calc_date':         calc_date,
-        'account_id':        account.account_id,
+        'account_id':        account.name,  # display label (the old column is gone)
         'account':           account,
         'account_score':     account_score,
         'account_metrics':   account_metrics,

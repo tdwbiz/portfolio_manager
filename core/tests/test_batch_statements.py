@@ -25,11 +25,9 @@ class BatchGenerationTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='BATCH001',
             name='Batch Test Account',
             broker='RBC',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         self.statement = BrokerStatement.objects.create(
             source='RBC',
             file_date=datetime.date(2024, 1, 1),
@@ -145,11 +143,9 @@ class BatchStatementsViewTests(TestCase):
         self.client.login(username='testuser', password='testpass123')
 
         self.account = Account.objects.create(
-            account_id='VIEW001',
             name='View Test Account',
             broker='RBC',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         AccountCurrency.objects.create(
             account=self.account,
             currency='CAD',

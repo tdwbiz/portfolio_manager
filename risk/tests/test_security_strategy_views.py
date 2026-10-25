@@ -35,10 +35,9 @@ class SecurityDetailViewTest(TestCase):
     def setUpTestData(cls):
         """Set up test data shared across all tests."""
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.user = User.objects.create_user('admin', 'admin@test.com', 'password')
         cls.client = Client()
         cls.client.login(username='admin', password='password')
@@ -136,10 +135,9 @@ class StrategyReportViewTest(TestCase):
     def setUpTestData(cls):
         """Set up test data shared across all tests."""
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.user = User.objects.create_user('admin', 'admin@test.com', 'password')
         cls.client = Client()
         cls.client.login(username='admin', password='password')
@@ -325,10 +323,9 @@ class AlternativePortfolioViewsTest(TestCase):
     def setUpTestData(cls):
         """Set up test data shared across all tests."""
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.user = User.objects.create_user('admin', 'admin@test.com', 'password')
         cls.client = Client()
         cls.client.login(username='admin', password='password')
@@ -368,7 +365,7 @@ class AlternativePortfolioViewsTest(TestCase):
     def test_alternatives_account_view(self):
         """Test that the alternatives account view returns HTTP 200."""
         response = self.client.get(
-            f'/risk/alternatives/{self.account.account_id}/'
+            f'/risk/alternatives/{self.account.name}/'
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Conservative Alternative')
@@ -394,10 +391,9 @@ class PortfolioCompareViewTest(TestCase):
     def setUpTestData(cls):
         """Set up test data shared across all tests."""
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.user = User.objects.create_user('admin', 'admin@test.com', 'password')
         cls.client = Client()
         cls.client.login(username='admin', password='password')
@@ -475,10 +471,9 @@ class StressTestViewTest(TestCase):
     def setUpTestData(cls):
         """Set up test data shared across all tests."""
         cls.account = Account.objects.create(
-            account_id='RRSP_TOM',
+            name='RRSP_TOM',
             owner='TOM',
-            category='RRSP',
-        )
+            category='RRSP')
         cls.user = User.objects.create_user('admin', 'admin@test.com', 'password')
         cls.client = Client()
         cls.client.login(username='admin', password='password')

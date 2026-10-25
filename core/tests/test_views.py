@@ -100,7 +100,6 @@ class TransactionListTests(TestCase):
 class AccountsPageTests(TestCase):
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='TOM IB',
             name='Tom IB',
             broker='IB',
             currency='USD',
@@ -124,7 +123,6 @@ class TransactionListFilterByAccountTests(TestCase):
     def setUp(self):
         self.statement = BrokerStatement.objects.create(source='IB', file_date='2023-01-01', raw_filename='test.csv')
         self.account = Account.objects.create(
-            account_id='TOM IB',
             name='Tom IB',
             broker='IB'
         )
@@ -151,6 +149,6 @@ class TransactionListFilterByAccountTests(TestCase):
         response = self.client.get(reverse('transaction_list'), {'account': str(self.account.pk)})
         self.assertContains(response, 'AAPL')
 
-        other = Account.objects.create(account_id='OTHERACC', name='Other Account', broker='IB')
+        other = Account.objects.create(name='Other Account', broker='IB')
         response = self.client.get(reverse('transaction_list'), {'account': str(other.pk)})
         self.assertNotContains(response, 'AAPL')

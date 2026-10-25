@@ -25,5 +25,5 @@ def get_show_excluded(request) -> bool:
 def get_excluded_account_ids() -> list:
     """Return list of account_ids where exclude_from_risk=True."""
     return list(
-        Account.objects.filter(exclude_from_risk=True).values_list('account_id', flat=True)
+        Account.objects.filter(exclude_from_risk=True).values_list('name', flat=True)
     )

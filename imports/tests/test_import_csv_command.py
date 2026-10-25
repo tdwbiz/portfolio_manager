@@ -53,9 +53,8 @@ class ImportCsvCommandTest(TestCase):
         # Fake account 90000001 (ACCOUNT_A) with a stored fingerprint — the
         # importer resolves rows by fingerprint, never by the raw number.
         self.account = Account.objects.create(
-            account_id="ACCOUNT_A", name="ACCOUNT_A", broker="RBC",
-            fingerprint=fingerprint_account_number("90000001"), last_4="0001",
-        )
+            name="ACCOUNT_A", broker="RBC",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001")
 
         # RBC file
         self.rbc_file = os.path.join(self.inbox_dir, 'rbc_test.csv')

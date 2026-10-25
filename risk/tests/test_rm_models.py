@@ -9,11 +9,9 @@ class AlternativePortfolioWeightTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id="TEST_ACC",
             name="Test Account",
             owner="TOM",
-            currency="CAD",
-        )
+            currency="CAD")
         self.portfolio = AlternativePortfolio.objects.create(
             owner="TOM",
             account=self.account,

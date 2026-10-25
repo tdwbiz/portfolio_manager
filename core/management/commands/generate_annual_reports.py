@@ -46,7 +46,7 @@ class Command(BaseCommand):
         to_year = options["to_year"]
 
         if account_id:
-            accounts = Account.objects.filter(account_id=account_id)
+            accounts = Account.objects.filter(name=account_id)
             if not accounts.exists():
                 raise CommandError(f"Account {account_id} not found")
         elif all_accounts:

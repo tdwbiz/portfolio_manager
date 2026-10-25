@@ -45,11 +45,9 @@ class ReverseStatementGenerationTests(TestCase):
 
     def setUp(self):
         self.account = Account.objects.create(
-            account_id='REV001',
             name='Reverse Test Account',
             broker='IB',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         self.statement = BrokerStatement.objects.create(
             source='IB',
             file_date=datetime.date(2024, 1, 1),
@@ -277,11 +275,9 @@ class ReverseStatementViewTests(TestCase):
         self.user = User.objects.create_user(username='testuser', password='testpass123')
         self.client.login(username='testuser', password='testpass123')
         self.account = Account.objects.create(
-            account_id='REVVIEW',
             name='Reverse View Account',
             broker='IB',
-            category='TAXABLE',
-        )
+            category='TAXABLE')
         AccountCurrency.objects.create(
             account=self.account, currency='CAD',
             starting_balance=Decimal('10000'),

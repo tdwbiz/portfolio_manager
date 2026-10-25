@@ -22,7 +22,7 @@
             <option value="">None</option>
             {% for alt in all_alternatives %}
             <option value="{{ alt.id }}" {% if alt.id|add:"0" == alt_portfolio_id|add:"0" %}selected{% endif %}>
-              {{ alt.account.account_id }} - {{ alt.name }}
+              {{ alt.account.name }} - {{ alt.name }}
             </option>
             {% endfor %}
           </select>
@@ -105,7 +105,7 @@
   <!-- Alternative Portfolio -->
   {% if alt_portfolio %}
   <div class="card mb-4">
-    <div class="card-header">{{ alt_portfolio.name }} ({{ alt_portfolio.account.account_id }})</div>
+    <div class="card-header">{{ alt_portfolio.name }} ({{ alt_portfolio.account.name }})</div>
     <div class="card-body">
       {% if alt_risk_preview %}
       <div class="row g-3">

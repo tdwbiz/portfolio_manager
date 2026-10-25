@@ -1,6 +1,7 @@
 """Tests for core/log_filter.py (phase 2 step 11, plan steps 2–3)."""
 
 import logging
+import sys
 from unittest import mock
 
 from django.test import TestCase, override_settings
@@ -88,6 +89,28 @@ class ScrubFilterTests(TestCase):
         record = _make_record("%d", ("not-an-int",))
         self.assertTrue(ScrubFilter().filter(record))  # no exception
         self.assertEqual(record.msg, "%d")  # left untouched
+
+    def test_exception_traceback_is_scrubbed(self):
+        """logger.exception / exc_info tracebacks must be scrubbed too —
+        handlers emit record.exc_text verbatim when it is pre-set."""
+        record = _make_record("import failed for 90000001")
+        try:
+            raise ValueError("statement 90000001 missing")
+        except ValueError:
+            record.exc_info = sys.exc_info()
+        self.assertTrue(ScrubFilter().filter(record))  # must never raise
+        self.assertEqual(record.getMessage(), "import failed for ACCOUNT_A")
+        self.assertIsNotNone(record.exc_text)
+        self.assertNotIn("90000001", record.exc_text)
+        self.assertIn("ACCOUNT_A", record.exc_text)  # the exception message line
+
+    def test_stack_info_is_scrubbed(self):
+        record = _make_record("with stack")
+        record.stack_info = "File x.py, line 1\n    ref 90000001 end"
+        self.assertTrue(ScrubFilter().filter(record))
+        self.assertEqual(
+            record.stack_info, "File x.py, line 1\n    ref ACCOUNT_A end"
+        )
 
 
 class FallbackScrubTests(TestCase):

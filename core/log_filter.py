@@ -46,7 +46,13 @@ def fallback_scrub(text: str) -> str:
 
 
 class ScrubFilter(logging.Filter):
-    """logging.Filter that rewrites account numbers out of record messages."""
+    """logging.Filter that rewrites account numbers out of log records.
+
+    Besides the message, tracebacks (``record.exc_info`` — ``logger.exception``
+    / ``exc_info=True``) and ``record.stack_info`` are scrubbed: handlers
+    format those themselves, so the scrubbed text is stored in
+    ``record.exc_text`` / ``record.stack_info`` for them to emit verbatim.
+    """
 
     # Class-level cache shared by every filter instance: {'ts': float, 'map': dict | None}
     _cache: dict = {}
@@ -97,6 +103,15 @@ class ScrubFilter(logging.Filter):
             if cleaned != msg:
                 record.msg = cleaned
                 record.args = None
+            # Tracebacks and stack dumps never pass through getMessage() —
+            # the handler's Formatter builds them from exc_info/stack_info.
+            # Scrub them here and store the result so the handler emits the
+            # scrubbed text (a pre-set exc_text is used verbatim).
+            if record.exc_info is not None:
+                exc_text = logging.Formatter().formatException(record.exc_info)
+                record.exc_text = self._scrub(exc_text)
+            if record.stack_info:
+                record.stack_info = self._scrub(str(record.stack_info))
         except Exception:
             # Never raise inside logging; worst case the record passes through.
             pass

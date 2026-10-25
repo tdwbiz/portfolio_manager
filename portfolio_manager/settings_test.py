@@ -25,6 +25,9 @@ RBC_ACCOUNTS = {
 }
 RBC_DEFAULT_ACCOUNT = "90000001"
 
+# Fixed test key for account fingerprints (>= 32 chars; never a real key).
+ACCOUNT_FINGERPRINT_KEY = "test-fingerprint-key-0123456789ab"
+
 # Amibroker export watch folder (temp dir for tests)
 AMIBROKER_WATCH_FOLDER = tempfile.mkdtemp(prefix="amibroker_")
 

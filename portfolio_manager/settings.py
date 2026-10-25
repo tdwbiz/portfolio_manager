@@ -252,6 +252,11 @@ def _parse_rbc_accounts(raw: str) -> dict[str, str]:
 RBC_ACCOUNTS = _parse_rbc_accounts(os.getenv("RBC_ACCOUNTS", ""))
 RBC_DEFAULT_ACCOUNT = os.getenv("RBC_DEFAULT_ACCOUNT", "").strip()
 
+# Account fingerprint key: HMAC-SHA256 key for Account.fingerprint.
+# Must be at least 32 characters when set; with an empty/short key the
+# fingerprint code fails loudly at the point of use (see core/utils/account_fingerprint.py).
+ACCOUNT_FINGERPRINT_KEY = os.getenv("ACCOUNT_FINGERPRINT_KEY", "").strip()
+
 # Vision-language (VL) model settings (via .env, like RBC_ACCOUNTS)
 VL_MODEL_BASE_URL = os.getenv("VL_MODEL_BASE_URL", "http://127.0.0.1:11435/v1").strip()
 VL_MODEL_NAME = os.getenv("VL_MODEL_NAME", "halogen-qwen3.8-flash-next").strip()

@@ -273,9 +273,11 @@ class Command(BaseCommand):
 
         if dry_run:
             currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
+            acct = lookup_account(parsed.get('account_number'))
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'  [DRY-RUN] Would import annual: {parsed.get("account_number")} '
+                    f'  [DRY-RUN] Would import annual: '
+                    f'{acct.name if acct else "UNKNOWN_ACCOUNT"} '
                     f'year={parsed["report_year"]} currencies={currencies}'
                 )
             )
@@ -400,10 +402,11 @@ class Command(BaseCommand):
             json_sections.append(parsed)
 
             if dry_run:
+                acct = lookup_account(account_number) if account_number else None
                 self.stdout.write(
                     self.style.SUCCESS(
                         f'  [DRY-RUN] Would import monthly [{currency}]: '
-                        f'{account_number} {statement_date} '
+                        f'{acct.name if acct else "UNKNOWN_ACCOUNT"} {statement_date} '
                         f'\u2014 {len(parsed.get("transactions", []))} txns, '
                         f'{len(parsed.get("holdings", []))} holdings, '
                         f'{len(parsed.get("balances", []))} balances'
@@ -421,7 +424,7 @@ class Command(BaseCommand):
             if account is None:
                 account = _get_or_create_account(account_number, '')
                 if account is None:
-                    msg = f'Cannot resolve account for account_number={account_number!r}'
+                    msg = 'Cannot resolve account for the parsed account number (UNKNOWN_ACCOUNT)'
                     file_errors.append({'currency': currency, 'error': msg})
                     self.stderr.write(self.style.ERROR(f'  Skipping [{currency}]: {msg}'))
                     continue
@@ -511,7 +514,7 @@ class Command(BaseCommand):
             stmts_created += 1
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'  Imported monthly [{currency}]: {account_number} {statement_date} '
+                    f'  Imported monthly [{currency}]: {account.name} {statement_date} '
                     f'\u2014 {len(txs_to_create)} txns, '
                     f'{len(holdings_to_create)} holdings, '
                     f'{len(balances_to_create)} balances'

@@ -200,14 +200,14 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     row_num = trade.get('row_number', '')
                     # Write duplicate detail to dedicated logfile
                     dup_logger.info(
-                        f'{os.path.basename(file_path)},Line {row_num},{normalized_id},'  
+                        f'{os.path.basename(file_path)},Line {row_num},{account.name}'  
                         f'{trade["date"]},{trade["symbol"]},{trade["type"]},'  
                         f'{trade["quantity"]},{trade["price"]},{trade["amount"]},'  
                         f'{trade.get("currency", "USD")},{trade.get("notes", "")}'
                     )
                     failed_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': normalized_id,
+                        'account': account.name,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],
@@ -246,7 +246,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     imported_count += 1
                     imported_trades.append({
                         'Source_File': os.path.basename(file_path),
-                        'account': normalized_id,
+                        'account': account.name,
                         'date': str(trade['date']),
                         'symbol': trade['symbol'],
                         'type': trade['type'],

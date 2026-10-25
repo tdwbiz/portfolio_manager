@@ -24,7 +24,8 @@ def run_command(number1="900-00003-1-8", number2=None, name="TOM_TFSA"):
 
 
 class SetAccountFingerprintTests(TestCase):
-    def test_stores_fingerprint_and_last4_for_new_account(self):
+    def test_stores_fingerprint_and_last4(self):
+        Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
         out, _ = run_command()
         account = Account.objects.get(name="TOM_TFSA")
         self.assertEqual(account.fingerprint, fingerprint_account_number("900-00003-1-8"))
@@ -43,10 +44,50 @@ class SetAccountFingerprintTests(TestCase):
         self.assertEqual(account.fingerprint, fingerprint_account_number("900-00003-1-8"))
         self.assertEqual(account.last_4, "0003")
 
+    def test_unknown_name_rejected_no_row_created(self):
+        # Empty Account table: the command must error before asking for the number.
+        with mock.patch("builtins.input", return_value="TOM_TFSA"), mock.patch(
+            "core.management.commands.set_account_fingerprint.getpass.getpass"
+        ) as gp:
+            with self.assertRaises(CommandError) as ctx:
+                call_command("set_account_fingerprint")
+        gp.assert_not_called()
+        self.assertEqual(Account.objects.count(), 0)
+        # Error message must not list names or number digits.
+        msg = str(ctx.exception)
+        self.assertNotIn("TOM_TFSA", msg)
+        self.assertNotIn("900", msg)
+
+    def test_duplicate_name_rejected(self):
+        a1 = Account.objects.create(account_id="DUP1", name="TOM_TFSA", broker="RBC")
+        a2 = Account.objects.create(account_id="DUP2", name="TOM_TFSA", broker="RBC")
+        with self.assertRaises(CommandError) as ctx:
+            run_command()
+        self.assertEqual(Account.objects.count(), 2)
+        a1.refresh_from_db()
+        a2.refresh_from_db()
+        self.assertFalse(a1.fingerprint)
+        self.assertFalse(a2.fingerprint)
+        # Error message must not list names or number digits.
+        msg = str(ctx.exception)
+        self.assertNotIn("TOM_TFSA", msg)
+        self.assertNotIn("DUP", msg)
+        self.assertNotIn("900", msg)
+
+    def test_equivalent_formats_accepted(self):
+        Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
+        run_command(number1="900-00003-1-8", number2="9000000318")
+        account = Account.objects.get(name="TOM_TFSA")
+        self.assertEqual(account.fingerprint, fingerprint_account_number("90000003"))
+        self.assertEqual(account.last_4, "0003")
+
     def test_mismatched_entries_store_nothing(self):
+        account = Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
         with self.assertRaises(CommandError):
             run_command(number1="90000003", number2="90000004")
-        self.assertFalse(Account.objects.exists())
+        account.refresh_from_db()
+        self.assertFalse(account.fingerprint)
+        self.assertEqual(Account.objects.count(), 1)
 
     def test_refuses_overwrite_without_replace(self):
         account = Account.objects.create(
@@ -82,9 +123,12 @@ class SetAccountFingerprintTests(TestCase):
         self.assertEqual(account.last_4, "0003")
 
     def test_empty_number_stores_nothing(self):
+        account = Account.objects.create(account_id="TOM_TFSA", name="TOM_TFSA", broker="RBC")
         with self.assertRaises(CommandError):
             run_command(number1="", number2="")
-        self.assertFalse(Account.objects.exists())
+        account.refresh_from_db()
+        self.assertFalse(account.fingerprint)
+        self.assertEqual(Account.objects.count(), 1)
 
     @override_settings(ACCOUNT_FINGERPRINT_KEY="")
     def test_refuses_without_key(self):

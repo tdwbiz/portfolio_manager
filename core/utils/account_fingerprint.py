@@ -121,23 +121,38 @@ def scrub_text(text: str, name_map: dict[str, str]) -> tuple:
     that forgets it fails in tests instead of querying per call. No query
     is issued while scrubbing.
 
-    Returns ``(cleaned, matched, replaced, unmatched)`` where ``matched`` is
-    the number of candidates that matched a stored fingerprint, ``replaced``
-    the number of spans rewritten and ``unmatched`` the number of
-    look-alike candidates left untouched. Only an exact fingerprint match is
-    replaced, so dates (``2026-10-21``), amounts and other look-alikes stay.
-    Never returns or prints the original number. Raises ``ValueError`` if
-    the fingerprint key is empty or too short.
+    Returns ``(cleaned, matched, replaced, unmatched, bank)`` where
+    ``matched`` is the number of candidates that matched a stored
+    fingerprint, ``replaced`` the number of spans rewritten and ``unmatched``
+    the number of look-alike candidates left untouched. A contiguous
+    pure-digit run of exactly 15 digits (an outside bank account: institution
+    + transit + account) is replaced with the fixed label ``BANK_ACCOUNT``
+    with no fingerprint lookup; it counts in ``bank`` and ``replaced``, not
+    in ``matched`` or ``unmatched``. Only an exact fingerprint match of any
+    other candidate is replaced, so dates (``2026-10-21``), amounts and
+    other look-alikes stay. Never returns or prints the original number.
+    Raises ``ValueError`` if the fingerprint key is empty or too short.
     """
     if not text:
-        return (text or "", 0, 0, 0)
+        return (text or "", 0, 0, 0, 0)
 
-    matched = replaced = unmatched = 0
+    matched = replaced = unmatched = bank = 0
     out = []
     pos = 0
     for m in _SCRUB_CANDIDATE_RE.finditer(text):
         candidate = m.group(0)
         if not _is_scrub_candidate(candidate):
+            continue
+        # Outside bank account (15 contiguous digits): fixed label, no
+        # fingerprint lookup. The greedy \d[\d-]* alternative already
+        # captures the whole digit run, so 14/16-digit runs fall through
+        # to the fingerprint path below.
+        if candidate.isdigit() and len(candidate) == 15:
+            bank += 1
+            replaced += 1
+            out.append(text[pos:m.start()])
+            out.append("BANK_ACCOUNT")
+            pos = m.end()
             continue
         name = name_map.get(fingerprint_account_number(candidate))
         if name is None:
@@ -149,4 +164,4 @@ def scrub_text(text: str, name_map: dict[str, str]) -> tuple:
         out.append(name)
         pos = m.end()
     out.append(text[pos:])
-    return ("".join(out), matched, replaced, unmatched)
+    return ("".join(out), matched, replaced, unmatched, bank)

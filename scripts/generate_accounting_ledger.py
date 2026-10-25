@@ -28,7 +28,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 sys.path.insert(0, r'C:\AI-DevTeam\projects\portfolio_manager')
 django.setup()
 
-from django.conf import settings
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -40,9 +39,6 @@ from core.models import (
 )
 
 OUTPUT_DIR = r'C:\AI-DevTeam\projects\portfolio_manager\docs\reconciliation'
-
-# Only RBC accounts with holdings data — from settings (env var RBC_ACCOUNTS)
-RBC_ACCOUNT_IDS = list(settings.RBC_ACCOUNTS)
 
 
 def get_months_for_account(account):
@@ -300,7 +296,7 @@ def generate_ledger_for_account(account):
 def main():
     logger.info("Generating monthly accounting ledgers...")
     
-    for account in Account.objects.filter(account_id__in=RBC_ACCOUNT_IDS):
+    for account in Account.objects.filter(broker='RBC'):
         try:
             generate_ledger_for_account(account)
         except Exception as e:

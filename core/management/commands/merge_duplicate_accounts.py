@@ -1,6 +1,5 @@
 """One-time management command to merge auto-created duplicate RBC accounts
-into the canonical accounts listed in settings.RBC_ACCOUNTS (env var
-RBC_ACCOUNTS in .env).
+into the canonical accounts given via --canonical (comma list of account pks).
 
 Safe to run multiple times — skips accounts that are already canonical or
 have no linked data.
@@ -8,16 +7,12 @@ have no linked data.
 import re
 import logging
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.models import Account, RbcMonthly, RbcAnnual
 
 logger = logging.getLogger(__name__)
-
-# The canonical account_ids (digits only, no dashes) — from settings.
-CANONICAL_IDS = set(settings.RBC_ACCOUNTS)
 
 
 def _normalize(raw: str) -> str:
@@ -54,7 +49,7 @@ def _find_target(dupe: Account, canonical_map: dict) -> Account | None:
 
 
 class Command(BaseCommand):
-    help = 'Merge auto-created duplicate RBC accounts into the canonical accounts (settings.RBC_ACCOUNTS).'
+    help = 'Merge auto-created duplicate RBC accounts into the canonical accounts given via --canonical.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -62,29 +57,45 @@ class Command(BaseCommand):
             action='store_true',
             help='Show what would be done without making any DB changes.',
         )
+        parser.add_argument(
+            '--canonical',
+            required=True,
+            help='Comma-separated list of canonical account pks (core_account.id).',
+        )
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN — no changes will be made.\n'))
 
-        canonical_map = {
-            a.account_id: a
-            for a in Account.objects.filter(account_id__in=CANONICAL_IDS)
-        }
-        if len(canonical_map) != len(CANONICAL_IDS):
-            found = set(canonical_map.keys())
-            missing = CANONICAL_IDS - found
+        try:
+            canonical_pks = [
+                int(p.strip()) for p in options['canonical'].split(',') if p.strip()
+            ]
+        except ValueError:
+            self.stderr.write(self.style.ERROR('--canonical must be a comma list of account pks.'))
+            return
+        if not canonical_pks:
+            self.stderr.write(self.style.ERROR('--canonical is empty.'))
+            return
+
+        canonical_accounts = list(Account.objects.filter(pk__in=canonical_pks))
+        found_pks = {a.pk for a in canonical_accounts}
+        missing = set(canonical_pks) - found_pks
+        if missing:
             self.stderr.write(self.style.ERROR(
-                f'Only found {len(canonical_map)}/{len(CANONICAL_IDS)} canonical accounts. Missing: {missing}'
+                f'Only found {len(found_pks)}/{len(canonical_pks)} canonical accounts. Missing pks: {sorted(missing)}'
             ))
             return
+
+        # Keyed by account_id so _find_target can match normalised numbers.
+        canonical_map = {a.account_id: a for a in canonical_accounts}
 
         self.stdout.write(f'Canonical accounts: {len(canonical_map)}\n')
 
         duplicates = Account.objects.filter(
             broker='RBC',
-        ).exclude(account_id__in=CANONICAL_IDS)
+        ).exclude(pk__in=canonical_pks)
 
         self.stdout.write(f'Duplicate accounts to process: {duplicates.count()}\n\n')
 

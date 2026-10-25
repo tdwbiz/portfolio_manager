@@ -40,7 +40,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 
 import django
 django.setup()
-from django.conf import settings
 
 from core.models import Account, RbcMonthly
 
@@ -196,7 +195,7 @@ def compute_cash_flow(stmt, all_symbols):
 
 def main():
     parser = argparse.ArgumentParser(description='Ledger report for high-change months')
-    parser.add_argument('--account', default=settings.RBC_DEFAULT_ACCOUNT, help='Account ID')
+    parser.add_argument('--account', required=True, help='Account ID (required — no default)')
     parser.add_argument('--currency', default='CAD', help='Currency')
     parser.add_argument('--start-date', default=None, help='Start date filter (YYYY-MM-DD)')
     parser.add_argument('--threshold', type=float, default=5.0, help='Min price change %% of opening to include')

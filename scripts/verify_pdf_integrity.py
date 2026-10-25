@@ -30,7 +30,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'portfolio_manager.settings')
 
 import django
 django.setup()
-from django.conf import settings
 
 from core.models import (
     Account, RbcMonthly, RbcAnnual,
@@ -52,7 +51,7 @@ def month_label(d):
 
 def main():
     parser = argparse.ArgumentParser(description='Verify RBC PDF data integrity')
-    parser.add_argument('--account', default=settings.RBC_DEFAULT_ACCOUNT, help='Account ID')
+    parser.add_argument('--account', required=True, help='Account ID (required — no default)')
     parser.add_argument('--currency', default='CAD', help='Currency')
     parser.add_argument('--start-date', default=None, help='Start date for analysis (YYYY-MM-DD). Statements before this date are excluded.')
     parser.add_argument('--start-balance', default=None, type=Decimal, help='Known starting balance as of start-date. Used to validate first statement\'s begin balance.')

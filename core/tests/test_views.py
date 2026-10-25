@@ -114,8 +114,10 @@ class AccountsPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_accounts_page_shows_accounts(self):
+        # The accounts page shows the name and last-4, never account_id
         response = self.client.get(reverse('accounts_list'))
-        self.assertContains(response, 'TOM IB')
+        self.assertContains(response, 'Tom IB')
+        self.assertNotContains(response, 'TOM IB')
 
 
 class TransactionListFilterByAccountTests(TestCase):

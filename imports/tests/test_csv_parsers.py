@@ -383,6 +383,24 @@ class RbcCsvParserTests(TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['amount'], Decimal('0'))
 
+    def test_unknown_account_number_rejected(self):
+        """A row whose number has no stored fingerprint is rejected."""
+        path = _write_csv([
+            ['Exchange Rate: 1 USD = 1.37 CAD'],
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000099',
+             '-1666.20', 'CAD'],
+        ])
+
+        rejections = []
+        trades, _rate = parse_rbc_csv(path, rejections)
+        self.assertEqual(len(trades), 0)
+        self.assertEqual(len(rejections), 1)
+        self.assertIn('Unknown account', rejections[0]['Reason Rejected'])
+
     def test_empty_file_returns_no_trades(self):
         """Empty file should return no trades."""
         path = _write_csv([

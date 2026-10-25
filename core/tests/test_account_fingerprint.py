@@ -198,3 +198,36 @@ class ScrubTextTests(TestCase):
 
     def test_empty_text(self):
         self.assertEqual(scrub_text("", self.name_map), ("", 0, 0, 0))
+
+
+class FingerprintNameMapTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(
+            name="ACCOUNT_C",
+            broker="RBC",
+            fingerprint=fingerprint_account_number("90000003"),
+            last_4="0003")
+
+    def test_build_fingerprint_name_map_one_query_and_contents(self):
+        with self.assertNumQueries(1):
+            name_map = build_fingerprint_name_map()
+        self.assertEqual(
+            name_map, {fingerprint_account_number("90000003"): "ACCOUNT_C"}
+        )
+
+    def test_build_fingerprint_name_map_skips_empty_fingerprint(self):
+        Account.objects.create(name="ACCOUNT_D", broker="RBC")
+        with self.assertNumQueries(1):
+            name_map = build_fingerprint_name_map()
+        self.assertEqual(
+            name_map, {fingerprint_account_number("90000003"): "ACCOUNT_C"}
+        )
+
+    def test_scrub_text_with_given_map_makes_no_queries(self):
+        name_map = build_fingerprint_name_map()
+        with self.assertNumQueries(0):
+            cleaned, matched, replaced, unmatched = scrub_text(
+                "Buy on 900-00003-1-8 today", name_map
+            )
+        self.assertEqual(cleaned, "Buy on ACCOUNT_C today")
+        self.assertEqual((matched, replaced, unmatched), (1, 1, 0))

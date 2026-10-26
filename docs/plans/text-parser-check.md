@@ -61,6 +61,13 @@ Nothing else. No code, no tests, no migrations touched.
   number of holdings, symbols, cash per currency, total market value** → print `MATCH`,
   `DIFFER` or `MISSING` (+ which side is missing). Numeric comparisons (holdings count, cash
   presence, total-MV presence) are done in-process; only the verdict word is printed.
+- **Holdings in the raw text layer** (per tdw's decision on open question 1): for each PDF,
+  from the extracted raw text (not `parse_rbc_pdf`'s output), locate the holdings table
+  (the "Asset Review" section with the SECURITY/SYMBOL … QUANTITY/SEGREGATED header) and count
+  the holding rows found in the extracted text; compare that count against VL's total holdings
+  count. Also report whether the symbol column and the quantity column are recognisable in the
+  extracted text. Reported as **counts and yes/no only** — no values. This is the evidence for
+  whether step 12b should add holdings to the text parser, with VL as the fallback.
 - Also record, per file, whether the text parser found each expected section
   (Asset Summary / Cash Balance / Income Summary / Account Activity) — section names only. This
   is the evidence for old-vs-recent layout differences, together with whether the VL parser had
@@ -82,14 +89,20 @@ Nothing else. No code, no tests, no migrations touched.
 
 3. **Run both parsers and the comparison** (VL on Halogen, ~90 s per PDF):
    `/opt/pm-venv/bin/python pm-logs/text_parser_check.py`.
-   Check: exit code 0 and six verdict lines (6 fields × 2 files) plus two timings per file.
-   If Halogen (port 11435) is unreachable: stop (see Stop conditions).
+   Check: exit code 0 and six verdict lines (6 fields × 2 files) plus two timings per file,
+   and per file the holdings readability lines (holding rows found in extracted text vs VL
+   holdings count, symbol column yes/no, quantity column yes/no). If Halogen (port 11435)
+   is unreachable — i.e. the VL regex fallback was used: stop (see Stop conditions).
 
 4. **Write `docs/audit/05-text-parser-check.md`** with: what the text parser extracts and what
    it misses (field list, incl. the empty-symbol finding at L661); the comparison table (rows =
    the six fields, columns = check-1 / check-2, cells = match/differ/missing); timings per
    parser per file; the layout difference between the old and the recent statement (which
-   sections each parser could find); and the recommendation.
+   sections each parser could find); the holdings-in-text-layer finding per PDF (holding rows
+   found in extracted text vs VL holdings count, symbol column recognisable yes/no, quantity
+   column recognisable yes/no — counts and yes/no only); the verdict on whether step 12b should
+   add holdings to the text parser with VL as the fallback; and the overall recommendation
+   (text-first or not — decided by this run, per tdw).
    Check: `grep -nE '[0-9]{8}|\$' docs/audit/05-text-parser-check.md` returns nothing;
    `git status --short` shows only this one new file. Commit:
    `docs: text-parser vs VL check on two RBC statements (step 12a)`.
@@ -120,16 +133,14 @@ Run once, at the end of step 5 only:
 
 No new tests (check only, no code change).
 
-## Open questions
+## Decisions (tdw, Oct 26)
 
-1. *Text first with VL as the fallback, or not?* — Recommended answer, based on the code read
-   during planning (`parsers_pdf.py` extracts statement date, per-currency cash, asset-category
-   totals and begin/end totals, but **no per-security holdings — `symbol` is hard-coded `''` at
-   L661**): **text-first for statement date, currency sections, cash and total market value,
-   with VL as the fallback for those fields; VL stays required for per-symbol holdings**, because
-   step 14's monthly check needs quantities per security and the text parser cannot supply them.
-   The step-12a run confirms or rejects this; the report states the final verdict.
-2. *Should the report also time the VL regex fallback?* — Recommended answer: **no.** The VL
-   regex fallback (`_parse_rbc_monthly_regex`) is a repair path of the VL parser, not a
-   candidate canonical path; timing it would blur the text-vs-VL question. Note its use (used /
-   not used) in the report without timings.
+1. *Text first with VL as the fallback, or not?* — **Decide nothing yet; the run gives the
+   verdict.** The report states it based on the step-12a evidence. In addition to the six-field
+   comparison, the check also tests whether the holdings section is readable from the text
+   layer: per PDF, the number of holding rows found in the extracted text versus VL's holdings
+   count, and whether the symbol and quantity columns are recognisable — reported as counts
+   and yes/no only, no values. The report then says whether step 12b should add holdings to the
+   text parser, with VL as the fallback.
+2. *Should the report also time the VL regex fallback?* — **Agreed: no.** No timing of the
+   regex fallback; the report notes only whether it was used or not used.

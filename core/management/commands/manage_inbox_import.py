@@ -48,6 +48,7 @@ from core.utils.safe_names import ANNUAL, MONTHLY, UNKNOWN, hash8_of, safe_file_
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
+from imports.parsers_pdf import parse_rbc_pdf_multi, self_check_sections
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ class Command(BaseCommand):
 
             elif doc_type == 'monthly':
                 classified_monthly += 1
-                stmts, txns, bals, holdings, errs, json_sections, err_msgs, safe_name = (
+                (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
+                 safe_name, parser_used, self_check_reasons) = (
                     self._process_monthly(pdf_file, dry_run, name_map, h8)
                 )
                 imported_monthly_stmts += stmts
@@ -181,6 +183,8 @@ class Command(BaseCommand):
                     'type': 'monthly',
                     'filename': safe_name,
                     'processed_at': timezone.now().isoformat(),
+                    'parser': parser_used,
+                    'self_check_reasons': self_check_reasons,
                     'errors': errs,
                     'error_messages': err_msgs,
                     'sections': json_sections,
@@ -384,25 +388,61 @@ class Command(BaseCommand):
 
         Returns (statements_created, transactions_imported, balances_recorded,
                  holdings_recorded, error_count, json_sections, error_messages,
-                 safe_name). ``safe_name`` is None in dry-run mode.
+                 safe_name, parser_used, self_check_reasons). ``safe_name`` is
+                 None in dry-run mode.
         """
-        try:
-            parsed_list = parse_rbc_monthly_vl(str(pdf_file))
-        except Exception as exc:
-            self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
-            if not dry_run:
-                safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                self._log_import(safe_name, 0, 'error', str(exc))
-                return 0, 0, 0, 0, 1, [], [str(exc)], safe_name
-            return 0, 0, 0, 0, 1, [], [str(exc)], None
+        parsed_list = None
+        parser_used = 'text'
+        self_check_reasons: list[str] = []
 
-        if parsed_list is None:
-            empty_msg = 'Parser returned no sections (possible unsupported statement format)'
-            if dry_run:
-                self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
-                return 0, 0, 0, 0, 1, [], [empty_msg], None
-            safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-            return 0, 0, 0, 0, 1, [], [empty_msg], safe_name
+        # Text-first (step 12b): deterministic text parser, then self-check;
+        # any reason (or a text-parser error) falls back to the VL parser,
+        # whose behaviour is unchanged.
+        try:
+            text_sections = parse_rbc_pdf_multi(str(pdf_file))
+            self_check_reasons = self_check_sections(text_sections)
+        except Exception as exc:
+            logger.warning("text parser failed for %s — falling back to VL: %s", hash8, exc)
+            text_sections = None
+
+        if text_sections and not self_check_reasons:
+            parsed_list = text_sections
+            # Scope (tdw, Oct 21): the text path stores no PDF transactions —
+            # holdings, cash and totals only; CSV Activity is the master.
+            for sec in parsed_list:
+                sec['transactions'] = []
+            self.stdout.write(self.style.SUCCESS('  Parser: text (self-check passed)'))
+        else:
+            parser_used = 'vl'
+            if self_check_reasons:
+                # Reasons name only fields, currencies and symbols — no values.
+                self.stdout.write(
+                    self.style.WARNING(
+                        '  Self-check failed, falling back to VL: '
+                        + '; '.join(self_check_reasons)
+                    )
+                )
+            try:
+                parsed_list = parse_rbc_monthly_vl(str(pdf_file))
+            except Exception as exc:
+                self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
+                if not dry_run:
+                    safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+                    self._log_import(safe_name, 0, 'error', str(exc))
+                    return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
+                            parser_used, self_check_reasons)
+                return (0, 0, 0, 0, 1, [], [str(exc)], None,
+                        parser_used, self_check_reasons)
+
+            if parsed_list is None:
+                empty_msg = 'Parser returned no sections (possible unsupported statement format)'
+                if dry_run:
+                    self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
+                    return (0, 0, 0, 0, 1, [], [empty_msg], None,
+                            parser_used, self_check_reasons)
+                safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+                return (0, 0, 0, 0, 1, [], [empty_msg], safe_name,
+                        parser_used, self_check_reasons)
 
         # parsed_list is a list of dicts, one per currency section (CAD, USD, etc.)
         account = None
@@ -553,7 +593,8 @@ class Command(BaseCommand):
             )
 
         if dry_run:
-            return stmts_created, 0, 0, 0, 0, [], [], None
+            return (stmts_created, 0, 0, 0, 0, [], [], None,
+                    parser_used, self_check_reasons)
 
         # No section could be attributed to an account (or had a date).
         if safe_name is None:
@@ -567,7 +608,9 @@ class Command(BaseCommand):
                 '',
             )
 
-        return stmts_created, txns_imported, bals_imported, holdings_imported, len(file_errors), json_sections, [e['error'] for e in file_errors], safe_name
+        return (stmts_created, txns_imported, bals_imported, holdings_imported,
+                len(file_errors), json_sections, [e['error'] for e in file_errors],
+                safe_name, parser_used, self_check_reasons)
 
     # ------------------------------------------------------------------
     # Helpers

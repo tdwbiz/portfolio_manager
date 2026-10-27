@@ -93,6 +93,72 @@ def _vl_section(currency='CAD', credit='10.00'):
 
 class MonthlyTxnReconcileTests(TestCase):
 
+    def _run_two_files(self, tmpdir, dry_run=False):
+        """Two inbox PDFs (different content); classify_pdf raises on the
+        first and classifies the second as monthly. Returns
+        (inbox_dir, processed_dir, out, err)."""
+        inbox_dir = os.path.join(tmpdir, 'inbox')
+        processed_dir = os.path.join(tmpdir, 'processed')
+        os.makedirs(inbox_dir)
+        for label, content in (('A', b'%PDF-1.4\nfirst file content\n'),
+                               ('B', b'%PDF-1.4\nsecond file content\n')):
+            with open(os.path.join(inbox_dir,
+                                   f'RBC Monthly Statement {FAKE_NUMBER} {label}.pdf'),
+                      'wb') as fh:
+                fh.write(content)
+
+        args = ['--inbox-dir', inbox_dir]
+        if dry_run:
+            args.append('--dry-run')
+        out, err = io.StringIO(), io.StringIO()
+        with patch(
+            'core.management.commands.manage_inbox_import.classify_pdf',
+            side_effect=[RuntimeError('classifier blew up'), 'monthly'],
+        ), patch(
+            'core.management.commands.manage_inbox_import.parse_rbc_pdf_multi',
+            return_value=[_text_section()],
+        ), patch(
+            'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl',
+            return_value=[_vl_section()],
+        ):
+            with override_settings(
+                IMPORT_PROCESSED_DIR=processed_dir,
+                IMPORT_JSON_DIR=os.path.join(processed_dir, 'json_logs'),
+            ):
+                call_command('manage_inbox_import', *args, stdout=out, stderr=err)
+        return inbox_dir, processed_dir, out.getvalue(), err.getvalue()
+
+    def test_unexpected_error_on_first_file_does_not_stop_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _inbox_dir, processed_dir, out, _err = self._run_two_files(tmpdir)
+
+            # The first file was parked in errors/ with a FileImportLog row…
+            moved = os.listdir(os.path.join(processed_dir, 'errors'))
+            self.assertEqual(len(moved), 1)
+            logs = list(FileImportLog.objects.all())
+            self.assertEqual([l.status for l in sorted(logs, key=lambda l: l.pk)],
+                             ['error', 'success'])
+            # …the second file imported normally…
+            self.assertEqual(RbcMonthly.objects.count(), 1)
+            # …and the run reached the summary with exactly one error.
+            self.assertIn('Inbox Import Summary', out)
+            self.assertRegex(out, r'Errors:\s+1\b')
+
+    def test_unexpected_error_dry_run_reports_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir, processed_dir, out, _err = self._run_two_files(
+                tmpdir, dry_run=True,
+            )
+
+            self.assertIn('verdict=error', out)
+            self.assertIn('Inbox Import Summary', out)
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            self.assertEqual(FileImportLog.objects.count(), 0)
+            json_dir = os.path.join(processed_dir, 'json_logs')
+            self.assertEqual(os.listdir(json_dir) if os.path.isdir(json_dir) else [], [])
+            # Neither file was moved.
+            self.assertEqual(len(os.listdir(inbox_dir)), 2)
+
     def setUp(self):
         from core.models import Account
 

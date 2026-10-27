@@ -166,171 +166,193 @@ class Command(BaseCommand):
             h8 = full_hash[:8]
             self.stdout.write(f'\n[{i}/{total}] {h8}.pdf')
 
-            # ── Step 0: file-level duplicate check (step 13b) ────────────
-            # The same content already imported successfully → skip before
-            # classify: no VL call, nothing stored. A PDF counts as imported
-            # only while RbcMonthly/RbcAnnual rows with its content_hash
-            # exist (not because of a FileImportLog row): deleting the file's
-            # rows lets it be imported again. The PDF moves to processed/
-            # under a uniquified safe name; the JSON log carries verdict
-            # "duplicate" and a FileImportLog row is written.
-            if is_pdf_content_stored(full_hash):
-                if dry_run:
-                    # Report the real verdict, write nothing (no log rows,
-                    # no JSON log, no move).
-                    self.stdout.write(self.style.WARNING(
-                        '  [DRY-RUN] verdict=duplicate — content already '
-                        'imported; would skip (no classify, no VL call)'
-                    ))
-                    duplicates += 1
-                    continue
-                stored_rows = (
-                    list(RbcMonthly.objects.filter(content_hash=full_hash))
-                    + list(RbcAnnual.objects.filter(content_hash=full_hash))
-                )
-                base_name = next(
-                    (row.file_name for row in stored_rows
-                     if is_safe_file_name(row.file_name)),
-                    _unattributable_safe_name(pdf_file.name, h8),
-                )
-                safe_name = _unique_destination(processed_dir, base_name).name
-                self.stdout.write(self.style.SUCCESS(
-                    f'  Duplicate content — already imported as {base_name}; '
-                    'skipping (no classify, no VL call)'
-                ))
-                self._log_import(safe_name, 0, 'duplicate',
-                                 'Content already imported',
-                                 content_hash=full_hash)
-                json_data = {
-                    'type': 'duplicate',
-                    'filename': safe_name,
-                    'processed_at': timezone.now().isoformat(),
-                    'verdict': 'duplicate',
-                    'errors': 0,
-                    'error_messages': [],
-                }
-                json_path = _json_log_path(json_dir, safe_name, has_error=False)
-                try:
-                    with open(json_path, 'w', encoding='utf-8') as fh:
-                        fh.write(_scrubbed_json(json_data, name_map))
-                except OSError as exc:
-                    logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
-                _move_file(pdf_file, processed_dir / safe_name, h8)
-                duplicates += 1
-                continue
-
-            # ── Step 1: classify ──────────────────────────────────────────
-            self.stdout.write('  Classifying...')
-            doc_type = classify_pdf(str(pdf_file))
-            self.stdout.write(f'  -> {doc_type}')
-
-            # ── Step 2: parse + import + log ──────────────────────────────
-            if doc_type == 'annual':
-                classified_annual += 1
-                (rec, errs, err_msg, annual_data, safe_name,
-                 verdict) = self._process_annual(pdf_file, dry_run, h8, full_hash)
-                imported_annual += rec
-                errors += errs
-                if verdict == 'duplicate':
-                    duplicates += 1
-
-                json_data = {'type': 'annual', 'filename': safe_name,
-                             'processed_at': timezone.now().isoformat(),
-                             'verdict': verdict,
-                             'records_created': rec, 'errors': errs,
-                             'error_messages': [err_msg] if err_msg else [],
-                             'data': annual_data}
-
-            elif doc_type == 'monthly':
-                classified_monthly += 1
-                (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
-                 safe_name, parsers, self_check_reasons, verdict) = (
-                    self._process_monthly(pdf_file, dry_run, name_map, h8, full_hash)
-                )
-                imported_monthly_stmts += stmts
-                imported_transactions += txns
-                imported_balances += bals
-                imported_holdings += holdings
-                errors += errs
-                if verdict == 'duplicate':
-                    duplicates += 1
-
-                json_data = {
-                    'type': 'monthly',
-                    'filename': safe_name,
-                    'processed_at': timezone.now().isoformat(),
-                    # Step 13c-b: holdings and transactions may come from
-                    # different parsers (text path: text / vl).
-                    'parser_holdings': parsers['holdings'],
-                    'parser_transactions': parsers['transactions'],
-                    'self_check_reasons': self_check_reasons,
-                    'verdict': verdict,
-                    'errors': errs,
-                    'error_messages': err_msgs,
-                    'sections': json_sections,
-                }
-
-            else:
-                classified_unknown += 1
-                errors += 1
-                # Cannot be attributed to an account (or even a type):
-                # safe name with UNKNOWN_ACCOUNT and today's date.
-                safe_name = None if dry_run else safe_file_name(
-                    pdf_file.name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=h8
-                )
-                self.stderr.write(
-                    self.style.ERROR(
-                        f'  Cannot classify {h8}.pdf — moving to errors/'
+            try:
+                # ── Step 0: file-level duplicate check (step 13b) ────────────
+                # The same content already imported successfully → skip before
+                # classify: no VL call, nothing stored. A PDF counts as imported
+                # only while RbcMonthly/RbcAnnual rows with its content_hash
+                # exist (not because of a FileImportLog row): deleting the file's
+                # rows lets it be imported again. The PDF moves to processed/
+                # under a uniquified safe name; the JSON log carries verdict
+                # "duplicate" and a FileImportLog row is written.
+                if is_pdf_content_stored(full_hash):
+                    if dry_run:
+                        # Report the real verdict, write nothing (no log rows,
+                        # no JSON log, no move).
+                        self.stdout.write(self.style.WARNING(
+                            '  [DRY-RUN] verdict=duplicate — content already '
+                            'imported; would skip (no classify, no VL call)'
+                        ))
+                        duplicates += 1
+                        continue
+                    stored_rows = (
+                        list(RbcMonthly.objects.filter(content_hash=full_hash))
+                        + list(RbcAnnual.objects.filter(content_hash=full_hash))
                     )
-                )
-                if not dry_run:
-                    self._log_import(safe_name, 0, 'error', 'Document type unknown',
+                    base_name = next(
+                        (row.file_name for row in stored_rows
+                         if is_safe_file_name(row.file_name)),
+                        _unattributable_safe_name(pdf_file.name, h8),
+                    )
+                    safe_name = _unique_destination(processed_dir, base_name).name
+                    self.stdout.write(self.style.SUCCESS(
+                        f'  Duplicate content — already imported as {base_name}; '
+                        'skipping (no classify, no VL call)'
+                    ))
+                    self._log_import(safe_name, 0, 'duplicate',
+                                     'Content already imported',
                                      content_hash=full_hash)
                     json_data = {
-                        'type': 'unknown',
+                        'type': 'duplicate',
                         'filename': safe_name,
                         'processed_at': timezone.now().isoformat(),
-                        'verdict': 'error',
-                        'errors': 1,
-                        'error_messages': (
-                            'VL classifier could not identify document type. '
-                            'Page 1 did not match RBC monthly statement or annual report. '
-                            'Possible causes: different statement format, non-RBC document, '
-                            'scanned image quality, or cover page before statement.',
-                        ),
+                        'verdict': 'duplicate',
+                        'errors': 0,
+                        'error_messages': [],
                     }
-                    json_path = _json_log_path(json_dir, safe_name, has_error=True)
+                    json_path = _json_log_path(json_dir, safe_name, has_error=False)
                     try:
                         with open(json_path, 'w', encoding='utf-8') as fh:
                             fh.write(_scrubbed_json(json_data, name_map))
                     except OSError as exc:
                         logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
-                    dest = errors_dir / safe_name
-                    _move_file(pdf_file, dest, h8)
-                continue
+                    _move_file(pdf_file, processed_dir / safe_name, h8)
+                    duplicates += 1
+                    continue
 
-            # ── Step 3: save JSON log (always) ──────────────────────────
-            if not dry_run:
-                json_path = _json_log_path(json_dir, safe_name, has_error=errs > 0)
-                try:
-                    with open(json_path, 'w', encoding='utf-8') as fh:
-                        fh.write(_scrubbed_json(json_data, name_map))
-                except OSError as exc:
-                    logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+                # ── Step 1: classify ──────────────────────────────────────────
+                self.stdout.write('  Classifying...')
+                doc_type = classify_pdf(str(pdf_file))
+                self.stdout.write(f'  -> {doc_type}')
 
-            # ── Step 4: move PDF ──────────────────────────────────────────
-            if not dry_run:
-                had_error = errs > 0
-                dest_dir = errors_dir if had_error else processed_dir
-                dest = dest_dir / safe_name
-                moved = _move_file(pdf_file, dest, h8)
-                if moved:
-                    label = 'errors/' if had_error else 'processed/'
-                    line = f'  Moved to {label}: {safe_name}'
-                    if had_error:
-                        self.stdout.write(self.style.WARNING(line))
-                    else:
-                        self.stdout.write(self.style.SUCCESS(line))
+                # ── Step 2: parse + import + log ──────────────────────────────
+                if doc_type == 'annual':
+                    classified_annual += 1
+                    (rec, errs, err_msg, annual_data, safe_name,
+                     verdict) = self._process_annual(pdf_file, dry_run, h8, full_hash)
+                    imported_annual += rec
+                    errors += errs
+                    if verdict == 'duplicate':
+                        duplicates += 1
+
+                    json_data = {'type': 'annual', 'filename': safe_name,
+                                 'processed_at': timezone.now().isoformat(),
+                                 'verdict': verdict,
+                                 'records_created': rec, 'errors': errs,
+                                 'error_messages': [err_msg] if err_msg else [],
+                                 'data': annual_data}
+
+                elif doc_type == 'monthly':
+                    classified_monthly += 1
+                    (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
+                     safe_name, parsers, self_check_reasons, verdict) = (
+                        self._process_monthly(pdf_file, dry_run, name_map, h8, full_hash)
+                    )
+                    imported_monthly_stmts += stmts
+                    imported_transactions += txns
+                    imported_balances += bals
+                    imported_holdings += holdings
+                    errors += errs
+                    if verdict == 'duplicate':
+                        duplicates += 1
+
+                    json_data = {
+                        'type': 'monthly',
+                        'filename': safe_name,
+                        'processed_at': timezone.now().isoformat(),
+                        # Step 13c-b: holdings and transactions may come from
+                        # different parsers (text path: text / vl).
+                        'parser_holdings': parsers['holdings'],
+                        'parser_transactions': parsers['transactions'],
+                        'self_check_reasons': self_check_reasons,
+                        'verdict': verdict,
+                        'errors': errs,
+                        'error_messages': err_msgs,
+                        'sections': json_sections,
+                    }
+
+                else:
+                    classified_unknown += 1
+                    errors += 1
+                    # Cannot be attributed to an account (or even a type):
+                    # safe name with UNKNOWN_ACCOUNT and today's date.
+                    safe_name = None if dry_run else safe_file_name(
+                        pdf_file.name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=h8
+                    )
+                    self.stderr.write(
+                        self.style.ERROR(
+                            f'  Cannot classify {h8}.pdf — moving to errors/'
+                        )
+                    )
+                    if not dry_run:
+                        self._log_import(safe_name, 0, 'error', 'Document type unknown',
+                                         content_hash=full_hash)
+                        json_data = {
+                            'type': 'unknown',
+                            'filename': safe_name,
+                            'processed_at': timezone.now().isoformat(),
+                            'verdict': 'error',
+                            'errors': 1,
+                            'error_messages': (
+                                'VL classifier could not identify document type. '
+                                'Page 1 did not match RBC monthly statement or annual report. '
+                                'Possible causes: different statement format, non-RBC document, '
+                                'scanned image quality, or cover page before statement.',
+                            ),
+                        }
+                        json_path = _json_log_path(json_dir, safe_name, has_error=True)
+                        try:
+                            with open(json_path, 'w', encoding='utf-8') as fh:
+                                fh.write(_scrubbed_json(json_data, name_map))
+                        except OSError as exc:
+                            logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+                        dest = errors_dir / safe_name
+                        _move_file(pdf_file, dest, h8)
+                    continue
+
+                # ── Step 3: save JSON log (always) ──────────────────────────
+                if not dry_run:
+                    json_path = _json_log_path(json_dir, safe_name, has_error=errs > 0)
+                    try:
+                        with open(json_path, 'w', encoding='utf-8') as fh:
+                            fh.write(_scrubbed_json(json_data, name_map))
+                    except OSError as exc:
+                        logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+
+                # ── Step 4: move PDF ──────────────────────────────────────────
+                if not dry_run:
+                    had_error = errs > 0
+                    dest_dir = errors_dir if had_error else processed_dir
+                    dest = dest_dir / safe_name
+                    moved = _move_file(pdf_file, dest, h8)
+                    if moved:
+                        label = 'errors/' if had_error else 'processed/'
+                        line = f'  Moved to {label}: {safe_name}'
+                        if had_error:
+                            self.stdout.write(self.style.WARNING(line))
+                        else:
+                            self.stdout.write(self.style.SUCCESS(line))
+            except Exception as exc:
+                # An unexpected error while processing one file must not stop
+                # the run: record a scrubbed reason, park the file in errors/
+                # and continue with the next one.
+                reason = scrub_text(str(exc), name_map)[0]
+                logger.error("Unexpected error while processing %s: %s", h8, reason)
+                errors += 1
+                if dry_run:
+                    self.stdout.write(self.style.ERROR(
+                        f'  [DRY-RUN] verdict=error — {reason} '
+                        '(nothing written; the file would move to errors/)'
+                    ))
+                    continue
+                self.stderr.write(self.style.ERROR(
+                    f'  Unexpected error — {reason}; moving to errors/'
+                ))
+                safe_name = _unattributable_safe_name(pdf_file.name, h8)
+                self._log_import(safe_name, 0, 'error', reason,
+                                 content_hash=full_hash)
+                dest = errors_dir / safe_name
+                _move_file(pdf_file, dest, h8)
 
         # ── Final summary ──────────────────────────────────────────────────
         self.stdout.write(self.style.SUCCESS(

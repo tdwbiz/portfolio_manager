@@ -172,7 +172,16 @@ class Command(BaseCommand):
             # rows lets it be imported again. The PDF moves to processed/
             # under a uniquified safe name; the JSON log carries verdict
             # "duplicate" and a FileImportLog row is written.
-            if not dry_run and is_pdf_content_stored(full_hash):
+            if is_pdf_content_stored(full_hash):
+                if dry_run:
+                    # Report the real verdict, write nothing (no log rows,
+                    # no JSON log, no move).
+                    self.stdout.write(self.style.WARNING(
+                        '  [DRY-RUN] verdict=duplicate — content already '
+                        'imported; would skip (no classify, no VL call)'
+                    ))
+                    duplicates += 1
+                    continue
                 stored_rows = (
                     list(RbcMonthly.objects.filter(content_hash=full_hash))
                     + list(RbcAnnual.objects.filter(content_hash=full_hash))
@@ -358,18 +367,6 @@ class Command(BaseCommand):
                 return 0, 1, str(exc), {}, safe_name, 'error'
             return 0, 1, str(exc), {}, None, 'error'
 
-        if dry_run:
-            currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
-            acct = lookup_account(parsed.get('account_number'))
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f'  [DRY-RUN] Would import annual: '
-                    f'{acct.name if acct else "UNKNOWN_ACCOUNT"} '
-                    f'year={parsed["report_year"]} currencies={currencies}'
-                )
-            )
-            return len(currencies), 0, '', parsed, None, 'imported'
-
         account = _get_or_create_account(
             parsed['account_number'],
             parsed.get('account_type_code', ''),
@@ -395,7 +392,8 @@ class Command(BaseCommand):
         if problems:
             msg = '; '.join(f'report_period_end {p}' for p in problems)
             self.stderr.write(self.style.ERROR(f'  {msg}'))
-            self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            if not dry_run:
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
             return 0, 1, msg, parsed, safe_name, 'date_error'
 
         # ── Pass 1: duplicate/conflict per currency section (all-or-nothing) ──
@@ -433,8 +431,25 @@ class Command(BaseCommand):
         # A conflict rejects the whole file: nothing from it is stored.
         if conflict_msgs:
             msg = '; '.join(conflict_msgs)
-            self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            if not dry_run:
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
             return 0, 1, msg, parsed, safe_name, 'conflict'
+
+        # Dry run: report the real verdict and write nothing (no rows, no
+        # FileImportLog, no JSON log, no move).
+        if dry_run:
+            would_create = sum(1 for p in plans if p[2] == 'import')
+            if plans and all(p[2] == 'duplicate' for p in plans):
+                verdict = 'duplicate'
+            elif would_create:
+                verdict = 'imported'
+            else:
+                verdict = 'error'
+            self.stdout.write(self.style.SUCCESS(
+                f'  [DRY-RUN] verdict={verdict} (would create '
+                f'{would_create} record(s), year={parsed["report_year"]})'
+            ))
+            return would_create, 0, '', parsed, safe_name, verdict
 
         # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
         # A failure while storing rolls the whole file back: nothing from
@@ -504,8 +519,9 @@ class Command(BaseCommand):
 
         Returns (statements_created, transactions_imported, balances_recorded,
                  holdings_recorded, error_count, json_sections, error_messages,
-                 safe_name, parser_used, self_check_reasons). ``safe_name`` is
-                 None in dry-run mode.
+                 safe_name, parser_used, self_check_reasons, verdict). In
+                 dry-run mode the real verdict is computed and reported but
+                 nothing is written.
         """
         parsed_list = None
         parser_used = 'text'
@@ -589,20 +605,6 @@ class Command(BaseCommand):
             # Always capture parsed data for JSON log
             json_sections.append(parsed)
 
-            if dry_run:
-                acct = lookup_account(account_number) if account_number else None
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f'  [DRY-RUN] Would import monthly [{currency}]: '
-                        f'{acct.name if acct else "UNKNOWN_ACCOUNT"} {statement_date} '
-                        f'\u2014 {len(parsed.get("transactions", []))} txns, '
-                        f'{len(parsed.get("holdings", []))} holdings, '
-                        f'{len(parsed.get("balances", []))} balances'
-                    )
-                )
-                stmts_created += 1
-                continue
-
             if statement_date is None:
                 # No usable date: the section cannot be stored and must not
                 # reach safe_file_name (which would raise and stop the whole
@@ -669,9 +671,37 @@ class Command(BaseCommand):
                           'statement_date': statement_date,
                           'action': 'import'})
 
+        # Dry run: report the real verdict and write nothing (no rows, no
+        # FileImportLog, no JSON log, no move).
         if dry_run:
-            return (stmts_created, 0, 0, 0, 0, [], [], None,
-                    parser_used, self_check_reasons, 'imported')
+            would_import = sum(1 for p in plans if p['action'] == 'import')
+            if conflict_msgs or date_msgs:
+                verdict = 'conflict' if conflict_msgs else 'date_error'
+            elif file_errors:
+                verdict = 'error'
+            elif plans and all(p['action'] == 'duplicate' for p in plans):
+                verdict = 'duplicate'
+            elif would_import:
+                verdict = 'imported'
+            else:
+                verdict = 'error'
+            for plan in plans:
+                if plan['action'] == 'import':
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  [DRY-RUN] Would import monthly "
+                        f"[{plan['currency']}]: {plan['statement_date']}"
+                    ))
+                else:
+                    self.stdout.write(self.style.WARNING(
+                        f"  [DRY-RUN] Duplicate monthly "
+                        f"[{plan['currency']}]: {plan['statement_date']}"
+                    ))
+            self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
+            return (would_import, 0, 0, 0,
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
+                    json_sections,
+                    [e['error'] for e in file_errors] + conflict_msgs + date_msgs,
+                    safe_name, parser_used, self_check_reasons, verdict)
 
         # A conflict or a date failure rejects the whole file: nothing from
         # it is stored (all-or-nothing, tdw Oct 27).
@@ -781,10 +811,6 @@ class Command(BaseCommand):
                         f'{len(balances_to_create)} balances'
                     )
                 )
-
-        if dry_run:
-            return (stmts_created, 0, 0, 0, 0, [], [], None,
-                    parser_used, self_check_reasons)
 
         # No section could be attributed to an account (or had a date).
         if safe_name is None:

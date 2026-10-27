@@ -26,6 +26,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from django.utils import timezone
 
 from core.models import (
@@ -435,41 +436,44 @@ class Command(BaseCommand):
             self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
             return 0, 1, msg, parsed, safe_name, 'conflict'
 
-        # ── Pass 2: store the non-duplicate sections ─────────────────────
-        for currency, cdata, action in plans:
-            if action == 'duplicate':
-                continue
+        # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
+        # A failure while storing rolls the whole file back: nothing from
+        # it is left behind.
+        with transaction.atomic():
+            for currency, cdata, action in plans:
+                if action == 'duplicate':
+                    continue
 
-            RbcAnnual.objects.create(
-                account=account,
-                file_name=safe_name,
-                report_year=parsed['report_year'],
-                report_period_start=parsed['report_period_start'],
-                report_period_end=parsed['report_period_end'],
-                account_type_code=parsed.get('account_type_code', ''),
-                currency=currency,
-                bal_beginning_value=cdata.get('bal_beginning_value', 0),
-                bal_deposits_in=cdata.get('bal_deposits_in', 0),
-                bal_withdrawals_out=cdata.get('bal_withdrawals_out', 0),
-                bal_net_return=cdata.get('bal_net_return', 0),
-                bal_ending_value=cdata.get('bal_ending_value', 0),
-                bal_amount_invested=cdata.get('bal_amount_invested', 0),
-                perf_since_date=cdata.get('perf_since_date'),
-                perf_1yr=cdata.get('perf_1yr'),
-                perf_3yr=cdata.get('perf_3yr'),
-                perf_5yr=cdata.get('perf_5yr'),
-                perf_10yr=cdata.get('perf_10yr'),
-                perf_since=cdata.get('perf_since'),
-                chg_operating=cdata.get('chg_operating', 0),
-                chg_commissions=cdata.get('chg_commissions', 0),
-                chg_total_transaction=cdata.get('chg_total_transaction', 0),
-                chg_total_paid=cdata.get('chg_total_paid', 0),
-                comp_trailing=cdata.get('comp_trailing', 0),
-                comp_other=cdata.get('comp_other', 0),
-                comp_total=cdata.get('comp_total', 0),
-                content_hash=full_hash,
-            )
-            records_created += 1
+                RbcAnnual.objects.create(
+                    account=account,
+                    file_name=safe_name,
+                    report_year=parsed['report_year'],
+                    report_period_start=parsed['report_period_start'],
+                    report_period_end=parsed['report_period_end'],
+                    account_type_code=parsed.get('account_type_code', ''),
+                    currency=currency,
+                    bal_beginning_value=cdata.get('bal_beginning_value', 0),
+                    bal_deposits_in=cdata.get('bal_deposits_in', 0),
+                    bal_withdrawals_out=cdata.get('bal_withdrawals_out', 0),
+                    bal_net_return=cdata.get('bal_net_return', 0),
+                    bal_ending_value=cdata.get('bal_ending_value', 0),
+                    bal_amount_invested=cdata.get('bal_amount_invested', 0),
+                    perf_since_date=cdata.get('perf_since_date'),
+                    perf_1yr=cdata.get('perf_1yr'),
+                    perf_3yr=cdata.get('perf_3yr'),
+                    perf_5yr=cdata.get('perf_5yr'),
+                    perf_10yr=cdata.get('perf_10yr'),
+                    perf_since=cdata.get('perf_since'),
+                    chg_operating=cdata.get('chg_operating', 0),
+                    chg_commissions=cdata.get('chg_commissions', 0),
+                    chg_total_transaction=cdata.get('chg_total_transaction', 0),
+                    chg_total_paid=cdata.get('chg_total_paid', 0),
+                    comp_trailing=cdata.get('comp_trailing', 0),
+                    comp_other=cdata.get('comp_other', 0),
+                    comp_total=cdata.get('comp_total', 0),
+                    content_hash=full_hash,
+                )
+                records_created += 1
 
         if records_created > 0:
             self.stdout.write(
@@ -683,97 +687,100 @@ class Command(BaseCommand):
                     [e['error'] for e in file_errors] + msgs,
                     safe_name, parser_used, self_check_reasons, verdict)
 
-        # ── Pass 2: store the non-duplicate sections ─────────────────────
-        for plan in plans:
-            parsed = plan['parsed']
-            currency = plan['currency']
-            statement_date = plan['statement_date']
+        # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
+        # A failure while storing rolls the whole file back: nothing from
+        # it is left behind.
+        with transaction.atomic():
+            for plan in plans:
+                parsed = plan['parsed']
+                currency = plan['currency']
+                statement_date = plan['statement_date']
 
-            if plan['action'] == 'duplicate':
+                if plan['action'] == 'duplicate':
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'  Duplicate monthly [{currency}]: {safe_name} '
+                            f'(account={account}, date={statement_date})'
+                        )
+                    )
+                    continue
+
+                rbc_monthly = RbcMonthly.objects.create(
+                    account=account,
+                    file_name=safe_name,
+                    statement_date=statement_date,
+                    currency=currency,
+                    last_statement_date=parsed.get('last_statement_date'),
+                    content_hash=full_hash,
+                    begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
+                    end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
+                    fx_rate=parsed.get('fx_rate', Decimal('1.0000')),
+                )
+
+                # Bulk create balances
+                balances_to_create = [
+                    RbcMonthlyBalance(
+                        rbc_monthly=rbc_monthly,
+                        currency=currency,
+                        account_type=bal['account_type'],
+                        opening_balance=bal.get('opening', Decimal('0.00')),
+                        closing_balance=bal.get('closing', Decimal('0.00')),
+                        market_value=bal.get('market_value', Decimal('0.00')),
+                        percentage=bal.get('percentage', Decimal('0.00')),
+                    )
+                    for bal in parsed.get('balances', [])
+                ]
+                if balances_to_create:
+                    RbcMonthlyBalance.objects.bulk_create(balances_to_create)
+                bals_imported += len(balances_to_create)
+
+                # Bulk create holdings
+                holdings_to_create = [
+                    RbcMonthlyHolding(
+                        rbc_monthly=rbc_monthly,
+                        currency=currency,
+                        security=h.get('security', ''),
+                        symbol=h.get('symbol', '')[:200],
+                        quantity=h.get('quantity', Decimal('0.0000')),
+                        book_cost=h.get('book_cost', Decimal('0.00')),
+                        market_price=h.get('market_price', Decimal('0.0000')),
+                        market_value=h.get('market_value', Decimal('0.00')),
+                    )
+                    for h in parsed.get('holdings', [])
+                ]
+                if holdings_to_create:
+                    RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
+                holdings_imported += len(holdings_to_create)
+
+                # Bulk create transactions
+                txs_to_create = [
+                    RbcMonthlyTransaction(
+                        rbc_monthly=rbc_monthly,
+                        date=tx['date'],
+                        activity_type=tx['activity_type'][:100],
+                        description=scrub_text(tx['description'] or '', name_map)[0][:500],
+                        symbol=(tx.get('symbol', '') or '')[:200],
+                        quantity=tx.get('quantity') or Decimal('0.0000'),
+                        price=tx.get('price') or Decimal('0.0000'),
+                        debit=tx.get('debit') or Decimal('0.00'),
+                        credit=tx.get('credit') or Decimal('0.00'),
+                        currency=currency,
+                    )
+                    for tx in parsed.get('transactions', [])
+                ]
+                if txs_to_create:
+                    RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
+                txns_imported += len(txs_to_create)
+
+                stmts_created += 1
                 self.stdout.write(
-                    self.style.WARNING(
-                        f'  Duplicate monthly [{currency}]: {safe_name} '
-                        f'(account={account}, date={statement_date})'
+                    self.style.SUCCESS(
+                        f'  Imported monthly [{currency}]: {account.name} {statement_date} '
+                        f'\u2014 {len(txs_to_create)} txns, '
+                        f'{len(holdings_to_create)} holdings, '
+                        f'{len(balances_to_create)} balances'
                     )
                 )
-                continue
-
-            rbc_monthly = RbcMonthly.objects.create(
-                account=account,
-                file_name=safe_name,
-                statement_date=statement_date,
-                currency=currency,
-                last_statement_date=parsed.get('last_statement_date'),
-                content_hash=full_hash,
-                begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
-                end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
-                fx_rate=parsed.get('fx_rate', Decimal('1.0000')),
-            )
-
-            # Bulk create balances
-            balances_to_create = [
-                RbcMonthlyBalance(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    account_type=bal['account_type'],
-                    opening_balance=bal.get('opening', Decimal('0.00')),
-                    closing_balance=bal.get('closing', Decimal('0.00')),
-                    market_value=bal.get('market_value', Decimal('0.00')),
-                    percentage=bal.get('percentage', Decimal('0.00')),
-                )
-                for bal in parsed.get('balances', [])
-            ]
-            if balances_to_create:
-                RbcMonthlyBalance.objects.bulk_create(balances_to_create)
-            bals_imported += len(balances_to_create)
-
-            # Bulk create holdings
-            holdings_to_create = [
-                RbcMonthlyHolding(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    security=h.get('security', ''),
-                    symbol=h.get('symbol', '')[:200],
-                    quantity=h.get('quantity', Decimal('0.0000')),
-                    book_cost=h.get('book_cost', Decimal('0.00')),
-                    market_price=h.get('market_price', Decimal('0.0000')),
-                    market_value=h.get('market_value', Decimal('0.00')),
-                )
-                for h in parsed.get('holdings', [])
-            ]
-            if holdings_to_create:
-                RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
-            holdings_imported += len(holdings_to_create)
-
-            # Bulk create transactions
-            txs_to_create = [
-                RbcMonthlyTransaction(
-                    rbc_monthly=rbc_monthly,
-                    date=tx['date'],
-                    activity_type=tx['activity_type'][:100],
-                    description=scrub_text(tx['description'] or '', name_map)[0][:500],
-                    symbol=(tx.get('symbol', '') or '')[:200],
-                    quantity=tx.get('quantity') or Decimal('0.0000'),
-                    price=tx.get('price') or Decimal('0.0000'),
-                    debit=tx.get('debit') or Decimal('0.00'),
-                    credit=tx.get('credit') or Decimal('0.00'),
-                    currency=currency,
-                )
-                for tx in parsed.get('transactions', [])
-            ]
-            if txs_to_create:
-                RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
-            txns_imported += len(txs_to_create)
-
-            stmts_created += 1
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f'  Imported monthly [{currency}]: {account.name} {statement_date} '
-                    f'\u2014 {len(txs_to_create)} txns, '
-                    f'{len(holdings_to_create)} holdings, '
-                    f'{len(balances_to_create)} balances'
-                )
-            )
 
         if dry_run:
             return (stmts_created, 0, 0, 0, 0, [], [], None,

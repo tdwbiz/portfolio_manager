@@ -13,6 +13,7 @@ Privacy: nothing here reads or logs account numbers, quantities or prices.
 import hashlib
 import re
 from datetime import date as date_type
+from decimal import Decimal
 from pathlib import Path
 
 _CHUNK_SIZE = 1024 * 1024
@@ -88,6 +89,95 @@ def statement_date_problems(statement_date, *, today, last_known=None) -> list[s
                 "after the Date of Last Statement on the same PDF"
             )
     return problems
+
+
+_CENT = Decimal("0.01")
+
+
+def _section_currency(section: dict) -> str:
+    """The section's currency, upper-cased and stripped (matching key)."""
+    return str(section.get('currency') or 'CAD').upper().strip()
+
+
+def reconcile_section(section: dict) -> list[str]:
+    """Cash-reconciliation reasons for one currency section (step 13c-b).
+
+    Empty list = the section reconciles: opening cash + sum(credits) -
+    sum(debits) == closing cash, to the cent — a naive sum over **all**
+    transactions in the section, no activity type excluded. A section with
+    no transactions must have equal opening and closing cash (same formula,
+    empty sums).
+
+    Cash = the balance rows whose ``account_type`` lowercases to ``cash``
+    (mirrors ``_section_cash`` in imports/parsers_pdf.py); a section with no
+    such row fails. Reasons name only field names and the currency — never
+    amounts, quantities, descriptions or digits beyond the currency code.
+    """
+    cur = _section_currency(section)
+    cash_rows = [
+        b for b in section.get('balances') or []
+        if str(b.get('account_type', '')).strip().lower() == 'cash'
+    ]
+    if not cash_rows:
+        return [f'{cur} balances: no cash row']
+    opening = sum(
+        (Decimal(b.get('opening') or 0) for b in cash_rows), Decimal('0')
+    )
+    closing = sum(
+        (Decimal(b.get('closing') or 0) for b in cash_rows), Decimal('0')
+    )
+    transactions = section.get('transactions') or []
+    credits = sum(
+        (Decimal(tx.get('credit') or 0) for tx in transactions), Decimal('0')
+    )
+    debits = sum(
+        (Decimal(tx.get('debit') or 0) for tx in transactions), Decimal('0')
+    )
+    if (opening + credits - debits).quantize(_CENT) != closing.quantize(_CENT):
+        return [f'{cur} opening + credits - debits != closing']
+    return []
+
+
+def merge_and_reconcile(text_sections, vl_sections):
+    """Match text and VL currency sections; gate the merged result (13c-b).
+
+    Returns ``(merged, reasons)``. ``merged`` is a list of copies of the
+    text sections with ``transactions`` replaced by the matching VL
+    section's transactions (currency matched case-insensitively), or
+    ``None`` when the currencies do not line up one-to-one. ``reasons``
+    lists the currency mismatches (currency names only) and, when the match
+    is one-to-one, the per-section cash-reconciliation reasons of the merged
+    sections (:func:`reconcile_section`). Empty ``reasons`` = gate passed.
+    """
+    def _index(sections):
+        by_cur = {}
+        dupes = set()
+        for sec in sections or []:
+            cur = _section_currency(sec)
+            if cur in by_cur:
+                dupes.add(cur)
+            else:
+                by_cur[cur] = sec
+        return by_cur, sorted(dupes)
+
+    text_by_cur, text_dupes = _index(text_sections)
+    vl_by_cur, vl_dupes = _index(vl_sections)
+    reasons = [f'duplicated currency {c} in text sections' for c in text_dupes]
+    reasons += [f'duplicated currency {c} in VL sections' for c in vl_dupes]
+    for cur in sorted(set(text_by_cur) - set(vl_by_cur)):
+        reasons.append(f'currency {cur} missing from VL sections')
+    for cur in sorted(set(vl_by_cur) - set(text_by_cur)):
+        reasons.append(f'currency {cur} missing from text sections')
+    if reasons:
+        return None, reasons
+
+    merged = []
+    for sec in text_sections or []:
+        copy = dict(sec)
+        copy['transactions'] = list(vl_by_cur[_section_currency(sec)].get('transactions') or [])
+        merged.append(copy)
+    reasons.extend(r for m in merged for r in reconcile_section(m))
+    return merged, reasons
 
 
 def is_content_imported(content_hash: str) -> bool:

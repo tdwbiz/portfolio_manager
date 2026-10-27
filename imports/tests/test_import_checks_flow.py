@@ -25,6 +25,7 @@ import io
 import os
 import tempfile
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -47,6 +48,18 @@ from imports.tests.test_parsers_pdf import (
 # The statement fixtures carry '900-00006-1-8' → 90000006 (ACCOUNT_F).
 FAKE_NUMBER = "90000006"
 FAKE_NAME = "ACCOUNT_F"
+
+
+def _vl_section(currency, credit):
+    """A VL transaction section that reconciles with the statement fixtures'
+    cash (step 13c-b: the text path always calls VL for transactions): the
+    single credit bridges opening -> closing."""
+    return {'currency': currency, 'transactions': [
+        {'date': date(2025, 9, 15), 'activity_type': 'DEPOSIT',
+         'description': 'TEST DEPOSIT', 'symbol': '',
+         'quantity': Decimal('0'), 'price': Decimal('0.0000'),
+         'debit': Decimal('0.00'), 'credit': Decimal(credit)},
+    ]}
 
 
 def _future_dated_statement(today):
@@ -73,7 +86,10 @@ class MonthlyImportChecksTests(TestCase):
             fingerprint=fingerprint_account_number(FAKE_NUMBER), last_4="0006",
         )
 
-    def _run(self, tmpdir, content, dry_run=False):
+    def _run(self, tmpdir, content, dry_run=False, vl_sections=None):
+        if vl_sections is None:
+            # CAD_ONLY_STATEMENT cash: 90.00 opening -> 100.00 closing.
+            vl_sections = [_vl_section('CAD', '10.00')]
         inbox_dir = os.path.join(tmpdir, 'inbox')
         processed_dir = os.path.join(tmpdir, 'processed')
         os.makedirs(inbox_dir, exist_ok=True)
@@ -90,6 +106,10 @@ class MonthlyImportChecksTests(TestCase):
         with patch(
             'core.management.commands.manage_inbox_import.classify_pdf',
             return_value='monthly',
+        ), patch(
+            # Step 13c-b: the text path always calls VL for transactions.
+            'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl',
+            return_value=vl_sections,
         ):
             with override_settings(
                 IMPORT_PROCESSED_DIR=processed_dir,
@@ -156,7 +176,12 @@ class MonthlyImportChecksTests(TestCase):
         # either (all-or-nothing).
         self._stored_conflict_row(currency='USD', content_hash='e' * 64)
         with tempfile.TemporaryDirectory() as tmpdir:
-            processed_dir, _out, err = self._run(tmpdir, MULTI_CURRENCY_STATEMENT)
+            # USD cash: 40.00 opening -> 50.00 closing.
+            processed_dir, _out, err = self._run(
+                tmpdir, MULTI_CURRENCY_STATEMENT,
+                vl_sections=[_vl_section('CAD', '10.00'),
+                             _vl_section('USD', '10.00')],
+            )
 
             self.assertEqual(RbcMonthly.objects.count(), 1)
             self.assertEqual(

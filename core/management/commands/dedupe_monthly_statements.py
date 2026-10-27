@@ -21,6 +21,7 @@ Usage:
 from collections import Counter
 
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.db.models import Count
 
 from core.models import RbcMonthly
@@ -61,6 +62,7 @@ class Command(BaseCommand):
         would_delete = 0
         kept = 0
         not_a_pair = 0
+        deleted = {"rbcmonthly": 0, "holdings": 0, "transactions": 0, "balances": 0}
 
         for group in groups:
             rows = list(
@@ -97,11 +99,25 @@ class Command(BaseCommand):
                     f"{account_name} {group['statement_date']} "
                     f"{group['currency']} ids {low.id}|{high.id} DELETE"
                 )
+                if options["apply"]:
+                    with transaction.atomic():
+                        deleted["holdings"] += high.holdings.count()
+                        deleted["transactions"] += high.transactions.count()
+                        deleted["balances"] += high.balances.count()
+                        high.delete()
+                        deleted["rbcmonthly"] += 1
 
         self.stdout.write(
             f"pairs found: {pairs_found}  would delete: {would_delete}  "
             f"kept: {kept}  not-a-pair: {not_a_pair}"
         )
+        if options["apply"]:
+            self.stdout.write(
+                f"deleted: rbcmonthly {deleted['rbcmonthly']}  "
+                f"holdings {deleted['holdings']}  "
+                f"transactions {deleted['transactions']}  "
+                f"balances {deleted['balances']}"
+            )
 
     def diff_reasons(self, low, high):
         """Field names only, in fixed order; empty list means deletable."""

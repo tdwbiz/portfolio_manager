@@ -26,6 +26,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from django.utils import timezone
 
 from core.models import (
@@ -44,7 +45,18 @@ from core.utils.account_fingerprint import (
     normalize_account_number,
     scrub_text,
 )
-from core.utils.safe_names import ANNUAL, MONTHLY, UNKNOWN, hash8_of, safe_file_name
+from core.utils.import_checks import (
+    content_hash_of,
+    is_pdf_content_stored,
+    statement_date_problems,
+)
+from core.utils.safe_names import (
+    ANNUAL,
+    MONTHLY,
+    UNKNOWN,
+    is_safe_file_name,
+    safe_file_name,
+)
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -148,8 +160,62 @@ class Command(BaseCommand):
         for i, pdf_file in enumerate(pdf_files, 1):
             # Content-based hash: the original file name carries the account
             # number and must never appear in stdout, logs or new names.
-            h8 = hash8_of(pdf_file)
+            full_hash = content_hash_of(pdf_file)
+            h8 = full_hash[:8]
             self.stdout.write(f'\n[{i}/{total}] {h8}.pdf')
+
+            # ── Step 0: file-level duplicate check (step 13b) ────────────
+            # The same content already imported successfully → skip before
+            # classify: no VL call, nothing stored. A PDF counts as imported
+            # only while RbcMonthly/RbcAnnual rows with its content_hash
+            # exist (not because of a FileImportLog row): deleting the file's
+            # rows lets it be imported again. The PDF moves to processed/
+            # under a uniquified safe name; the JSON log carries verdict
+            # "duplicate" and a FileImportLog row is written.
+            if is_pdf_content_stored(full_hash):
+                if dry_run:
+                    # Report the real verdict, write nothing (no log rows,
+                    # no JSON log, no move).
+                    self.stdout.write(self.style.WARNING(
+                        '  [DRY-RUN] verdict=duplicate — content already '
+                        'imported; would skip (no classify, no VL call)'
+                    ))
+                    duplicates += 1
+                    continue
+                stored_rows = (
+                    list(RbcMonthly.objects.filter(content_hash=full_hash))
+                    + list(RbcAnnual.objects.filter(content_hash=full_hash))
+                )
+                base_name = next(
+                    (row.file_name for row in stored_rows
+                     if is_safe_file_name(row.file_name)),
+                    _unattributable_safe_name(pdf_file.name, h8),
+                )
+                safe_name = _unique_destination(processed_dir, base_name).name
+                self.stdout.write(self.style.SUCCESS(
+                    f'  Duplicate content — already imported as {base_name}; '
+                    'skipping (no classify, no VL call)'
+                ))
+                self._log_import(safe_name, 0, 'duplicate',
+                                 'Content already imported',
+                                 content_hash=full_hash)
+                json_data = {
+                    'type': 'duplicate',
+                    'filename': safe_name,
+                    'processed_at': timezone.now().isoformat(),
+                    'verdict': 'duplicate',
+                    'errors': 0,
+                    'error_messages': [],
+                }
+                json_path = _json_log_path(json_dir, safe_name, has_error=False)
+                try:
+                    with open(json_path, 'w', encoding='utf-8') as fh:
+                        fh.write(_scrubbed_json(json_data, name_map))
+                except OSError as exc:
+                    logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+                _move_file(pdf_file, processed_dir / safe_name, h8)
+                duplicates += 1
+                continue
 
             # ── Step 1: classify ──────────────────────────────────────────
             self.stdout.write('  Classifying...')
@@ -159,14 +225,16 @@ class Command(BaseCommand):
             # ── Step 2: parse + import + log ──────────────────────────────
             if doc_type == 'annual':
                 classified_annual += 1
-                rec, errs, err_msg, annual_data, safe_name = self._process_annual(
-                    pdf_file, dry_run, h8
-                )
+                (rec, errs, err_msg, annual_data, safe_name,
+                 verdict) = self._process_annual(pdf_file, dry_run, h8, full_hash)
                 imported_annual += rec
                 errors += errs
+                if verdict == 'duplicate':
+                    duplicates += 1
 
                 json_data = {'type': 'annual', 'filename': safe_name,
                              'processed_at': timezone.now().isoformat(),
+                             'verdict': verdict,
                              'records_created': rec, 'errors': errs,
                              'error_messages': [err_msg] if err_msg else [],
                              'data': annual_data}
@@ -174,14 +242,16 @@ class Command(BaseCommand):
             elif doc_type == 'monthly':
                 classified_monthly += 1
                 (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
-                 safe_name, parser_used, self_check_reasons) = (
-                    self._process_monthly(pdf_file, dry_run, name_map, h8)
+                 safe_name, parser_used, self_check_reasons, verdict) = (
+                    self._process_monthly(pdf_file, dry_run, name_map, h8, full_hash)
                 )
                 imported_monthly_stmts += stmts
                 imported_transactions += txns
                 imported_balances += bals
                 imported_holdings += holdings
                 errors += errs
+                if verdict == 'duplicate':
+                    duplicates += 1
 
                 json_data = {
                     'type': 'monthly',
@@ -189,6 +259,7 @@ class Command(BaseCommand):
                     'processed_at': timezone.now().isoformat(),
                     'parser': parser_used,
                     'self_check_reasons': self_check_reasons,
+                    'verdict': verdict,
                     'errors': errs,
                     'error_messages': err_msgs,
                     'sections': json_sections,
@@ -208,11 +279,13 @@ class Command(BaseCommand):
                     )
                 )
                 if not dry_run:
-                    self._log_import(safe_name, 0, 'error', 'Document type unknown')
+                    self._log_import(safe_name, 0, 'error', 'Document type unknown',
+                                     content_hash=full_hash)
                     json_data = {
                         'type': 'unknown',
                         'filename': safe_name,
                         'processed_at': timezone.now().isoformat(),
+                        'verdict': 'error',
                         'errors': 1,
                         'error_messages': (
                             'VL classifier could not identify document type. '
@@ -276,12 +349,12 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
 
     def _process_annual(
-        self, pdf_file: Path, dry_run: bool, hash8: str
-    ) -> tuple[int, int, str, dict, str | None]:
+        self, pdf_file: Path, dry_run: bool, hash8: str, full_hash: str
+    ) -> tuple[int, int, str, dict, str | None, str]:
         """Parse and import an annual report PDF.
 
         Returns (records_created, error_count, error_message, parsed_data,
-                 safe_name). ``safe_name`` is None in dry-run mode.
+                 safe_name, verdict). ``safe_name`` is None in dry-run mode.
         """
         try:
             parsed = parse_rbc_annual_report_vl(str(pdf_file))
@@ -289,21 +362,10 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
                 safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                self._log_import(safe_name, 0, 'error', str(exc))
-                return 0, 1, str(exc), {}, safe_name
-            return 0, 1, str(exc), {}, None
-
-        if dry_run:
-            currencies = [c for c in ('cad', 'usd') if parsed.get(c) is not None]
-            acct = lookup_account(parsed.get('account_number'))
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f'  [DRY-RUN] Would import annual: '
-                    f'{acct.name if acct else "UNKNOWN_ACCOUNT"} '
-                    f'year={parsed["report_year"]} currencies={currencies}'
-                )
-            )
-            return len(currencies), 0, '', parsed, None
+                self._log_import(safe_name, 0, 'error', str(exc),
+                                 content_hash=full_hash)
+                return 0, 1, str(exc), {}, safe_name, 'error'
+            return 0, 1, str(exc), {}, None, 'error'
 
         account = _get_or_create_account(
             parsed['account_number'],
@@ -314,11 +376,29 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  {hash8}.pdf: {msg}'))
             safe_name = _annual_safe_name(pdf_file.name, None, parsed.get('report_year'), hash8)
             if not dry_run:
-                self._log_import(safe_name, 0, 'error', msg)
-            return 0, 1, msg, parsed, safe_name
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            return 0, 1, msg, parsed, safe_name, 'error'
 
         safe_name = _annual_safe_name(pdf_file.name, account.name, parsed.get('report_year'), hash8)
         records_created = 0
+
+        # Date sanity (step 13b): report_period_end not in the future and not
+        # before 2000 — no 1–100-day rule for annuals (tdw, Oct 27). A failure
+        # rejects the whole file.
+        problems = statement_date_problems(
+            parsed.get('report_period_end'), today=timezone.now().date(),
+            last_known=None,
+        )
+        if problems:
+            msg = '; '.join(f'report_period_end {p}' for p in problems)
+            self.stderr.write(self.style.ERROR(f'  {msg}'))
+            if not dry_run:
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            return 0, 1, msg, parsed, safe_name, 'date_error'
+
+        # ── Pass 1: duplicate/conflict per currency section (all-or-nothing) ──
+        plans = []          # (currency, cdata, action)
+        conflict_msgs = []
         for currency, cdata in [('CAD', parsed.get('cad')), ('USD', parsed.get('usd'))]:
             if cdata is None:
                 continue
@@ -328,43 +408,87 @@ class Command(BaseCommand):
                 currency=currency,
             )
             if existing.exists():
-                self.stdout.write(
-                    self.style.WARNING(
-                        f'  Duplicate annual: {safe_name} '
-                        f'(year={parsed["report_year"]}, {currency})'
+                stored_hashes = set(existing.values_list('content_hash', flat=True))
+                if full_hash in stored_hashes:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'  Duplicate annual: {safe_name} '
+                            f'(year={parsed["report_year"]}, {currency})'
+                        )
                     )
-                )
-                continue
+                    plans.append((currency, cdata, 'duplicate'))
+                else:
+                    # A stored row without content_hash counts as different
+                    # content (tdw, Oct 27).
+                    msg = (f'Conflict: {account.name} {currency} year='
+                           f'{parsed["report_year"]} already stored with '
+                           'different content')
+                    conflict_msgs.append(msg)
+                    self.stderr.write(self.style.ERROR(f'  {msg}'))
+            else:
+                plans.append((currency, cdata, 'import'))
 
-            RbcAnnual.objects.create(
-                account=account,
-                file_name=safe_name,
-                report_year=parsed['report_year'],
-                report_period_start=parsed['report_period_start'],
-                report_period_end=parsed['report_period_end'],
-                account_type_code=parsed.get('account_type_code', ''),
-                currency=currency,
-                bal_beginning_value=cdata.get('bal_beginning_value', 0),
-                bal_deposits_in=cdata.get('bal_deposits_in', 0),
-                bal_withdrawals_out=cdata.get('bal_withdrawals_out', 0),
-                bal_net_return=cdata.get('bal_net_return', 0),
-                bal_ending_value=cdata.get('bal_ending_value', 0),
-                bal_amount_invested=cdata.get('bal_amount_invested', 0),
-                perf_since_date=cdata.get('perf_since_date'),
-                perf_1yr=cdata.get('perf_1yr'),
-                perf_3yr=cdata.get('perf_3yr'),
-                perf_5yr=cdata.get('perf_5yr'),
-                perf_10yr=cdata.get('perf_10yr'),
-                perf_since=cdata.get('perf_since'),
-                chg_operating=cdata.get('chg_operating', 0),
-                chg_commissions=cdata.get('chg_commissions', 0),
-                chg_total_transaction=cdata.get('chg_total_transaction', 0),
-                chg_total_paid=cdata.get('chg_total_paid', 0),
-                comp_trailing=cdata.get('comp_trailing', 0),
-                comp_other=cdata.get('comp_other', 0),
-                comp_total=cdata.get('comp_total', 0),
-            )
-            records_created += 1
+        # A conflict rejects the whole file: nothing from it is stored.
+        if conflict_msgs:
+            msg = '; '.join(conflict_msgs)
+            if not dry_run:
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            return 0, 1, msg, parsed, safe_name, 'conflict'
+
+        # Dry run: report the real verdict and write nothing (no rows, no
+        # FileImportLog, no JSON log, no move).
+        if dry_run:
+            would_create = sum(1 for p in plans if p[2] == 'import')
+            if plans and all(p[2] == 'duplicate' for p in plans):
+                verdict = 'duplicate'
+            elif would_create:
+                verdict = 'imported'
+            else:
+                verdict = 'error'
+            self.stdout.write(self.style.SUCCESS(
+                f'  [DRY-RUN] verdict={verdict} (would create '
+                f'{would_create} record(s), year={parsed["report_year"]})'
+            ))
+            return would_create, 0, '', parsed, safe_name, verdict
+
+        # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
+        # A failure while storing rolls the whole file back: nothing from
+        # it is left behind.
+        with transaction.atomic():
+            for currency, cdata, action in plans:
+                if action == 'duplicate':
+                    continue
+
+                RbcAnnual.objects.create(
+                    account=account,
+                    file_name=safe_name,
+                    report_year=parsed['report_year'],
+                    report_period_start=parsed['report_period_start'],
+                    report_period_end=parsed['report_period_end'],
+                    account_type_code=parsed.get('account_type_code', ''),
+                    currency=currency,
+                    bal_beginning_value=cdata.get('bal_beginning_value', 0),
+                    bal_deposits_in=cdata.get('bal_deposits_in', 0),
+                    bal_withdrawals_out=cdata.get('bal_withdrawals_out', 0),
+                    bal_net_return=cdata.get('bal_net_return', 0),
+                    bal_ending_value=cdata.get('bal_ending_value', 0),
+                    bal_amount_invested=cdata.get('bal_amount_invested', 0),
+                    perf_since_date=cdata.get('perf_since_date'),
+                    perf_1yr=cdata.get('perf_1yr'),
+                    perf_3yr=cdata.get('perf_3yr'),
+                    perf_5yr=cdata.get('perf_5yr'),
+                    perf_10yr=cdata.get('perf_10yr'),
+                    perf_since=cdata.get('perf_since'),
+                    chg_operating=cdata.get('chg_operating', 0),
+                    chg_commissions=cdata.get('chg_commissions', 0),
+                    chg_total_transaction=cdata.get('chg_total_transaction', 0),
+                    chg_total_paid=cdata.get('chg_total_paid', 0),
+                    comp_trailing=cdata.get('comp_trailing', 0),
+                    comp_other=cdata.get('comp_other', 0),
+                    comp_total=cdata.get('comp_total', 0),
+                    content_hash=full_hash,
+                )
+                records_created += 1
 
         if records_created > 0:
             self.stdout.write(
@@ -372,28 +496,32 @@ class Command(BaseCommand):
                     f'  Imported annual: {safe_name} -> {records_created} record(s)'
                 )
             )
-            self._log_import(safe_name, records_created, 'ok', '')
-        else:
-            self.stdout.write(
-                self.style.WARNING(f'  All duplicates: {safe_name}')
-            )
-            self._log_import(safe_name, 0, 'ok', 'All records already exist')
+            self._log_import(safe_name, records_created, 'ok', '',
+                             content_hash=full_hash)
+            return records_created, 0, '', parsed, safe_name, 'imported'
 
-        return records_created, 0, '', parsed, safe_name
+        # Nothing new, nothing wrong: the whole file is a duplicate and moves
+        # to processed/ normally (Q5, tdw Oct 27).
+        self.stdout.write(self.style.WARNING(f'  All duplicates: {safe_name}'))
+        self._log_import(safe_name, 0, 'duplicate', 'All records already exist',
+                         content_hash=full_hash)
+        return 0, 0, '', parsed, safe_name, 'duplicate'
 
     # ------------------------------------------------------------------
     # Monthly processing
     # ------------------------------------------------------------------
 
     def _process_monthly(
-        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str], hash8: str
+        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str],
+        hash8: str, full_hash: str,
     ) -> tuple[int, int, int, int, int, list, list, str | None]:
         """Parse and import a monthly statement PDF.
 
         Returns (statements_created, transactions_imported, balances_recorded,
                  holdings_recorded, error_count, json_sections, error_messages,
-                 safe_name, parser_used, self_check_reasons). ``safe_name`` is
-                 None in dry-run mode.
+                 safe_name, parser_used, self_check_reasons, verdict). In
+                 dry-run mode the real verdict is computed and reported but
+                 nothing is written.
         """
         parsed_list = None
         parser_used = 'text'
@@ -437,7 +565,8 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
                 if not dry_run:
                     safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                    self._log_import(safe_name, 0, 'error', str(exc))
+                    self._log_import(safe_name, 0, 'error', str(exc),
+                                     content_hash=full_hash)
                     return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
                             parser_used, self_check_reasons)
                 return (0, 0, 0, 0, 1, [], [str(exc)], None,
@@ -462,7 +591,12 @@ class Command(BaseCommand):
         holdings_imported = 0
         file_errors = []
         json_sections = []
+        plans = []          # per-section: parsed/currency/statement_date/action
+        conflict_msgs = []
+        date_msgs = []
+        today = timezone.now().date()
 
+        # ── Pass 1: validate every section (all-or-nothing, tdw Oct 27) ──
         for parsed in parsed_list:
             statement_date = _coerce_statement_date(parsed.get('statement_date'))
             account_number = parsed.get('account_number', '')
@@ -470,20 +604,6 @@ class Command(BaseCommand):
 
             # Always capture parsed data for JSON log
             json_sections.append(parsed)
-
-            if dry_run:
-                acct = lookup_account(account_number) if account_number else None
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f'  [DRY-RUN] Would import monthly [{currency}]: '
-                        f'{acct.name if acct else "UNKNOWN_ACCOUNT"} {statement_date} '
-                        f'\u2014 {len(parsed.get("transactions", []))} txns, '
-                        f'{len(parsed.get("holdings", []))} holdings, '
-                        f'{len(parsed.get("balances", []))} balances'
-                    )
-                )
-                stmts_created += 1
-                continue
 
             if statement_date is None:
                 # No usable date: the section cannot be stored and must not
@@ -509,123 +629,222 @@ class Command(BaseCommand):
                     date=statement_date, hash8=hash8,
                 )
 
-            # Duplicate check
+            # Date sanity (step 13b), after parsing so it covers the text and
+            # the VL result: not in the future, not before 2000, and 1–100
+            # days after the Date of Last Statement printed on this same PDF
+            # — never a database lookup (tdw, Oct 27). A failure rejects the
+            # whole file.
+            problems = statement_date_problems(
+                statement_date, today=today,
+                last_known=parsed.get('last_statement_date'),
+            )
+            if problems:
+                for problem in problems:
+                    msg = f'{currency} {problem}'
+                    date_msgs.append(msg)
+                    self.stderr.write(self.style.ERROR(f'  [{currency}] {msg}'))
+                continue
+
+            # Duplicate check by content (step 13b): the file name no longer
+            # takes part in the key. A stored row with this file's
+            # content_hash → duplicate section; any other hit — including a
+            # row without content_hash — → conflict (tdw, Oct 27).
             existing = RbcMonthly.objects.filter(
                 account=account,
                 statement_date=statement_date,
                 currency=currency,
-                file_name=safe_name,
             )
             if existing.exists():
-                self.stdout.write(
-                    self.style.WARNING(
-                        f'  Duplicate monthly [{currency}]: {safe_name} '
-                        f'(account={account}, date={statement_date})'
-                    )
-                )
+                stored_hashes = set(existing.values_list('content_hash', flat=True))
+                if full_hash in stored_hashes:
+                    plans.append({'parsed': parsed, 'currency': currency,
+                                  'statement_date': statement_date,
+                                  'action': 'duplicate'})
+                else:
+                    msg = (f'Conflict: {account.name} {currency} {statement_date} '
+                           'already stored with different content')
+                    conflict_msgs.append(msg)
+                    self.stderr.write(self.style.ERROR(f'  [{currency}] {msg}'))
                 continue
 
-            rbc_monthly = RbcMonthly.objects.create(
-                account=account,
-                file_name=safe_name,
-                statement_date=statement_date,
-                currency=currency,
-                last_statement_date=parsed.get('last_statement_date'),
-                begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
-                end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
-                fx_rate=parsed.get('fx_rate', Decimal('1.0000')),
-            )
+            plans.append({'parsed': parsed, 'currency': currency,
+                          'statement_date': statement_date,
+                          'action': 'import'})
 
-            # Bulk create balances
-            balances_to_create = [
-                RbcMonthlyBalance(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    account_type=bal['account_type'],
-                    opening_balance=bal.get('opening', Decimal('0.00')),
-                    closing_balance=bal.get('closing', Decimal('0.00')),
-                    market_value=bal.get('market_value', Decimal('0.00')),
-                    percentage=bal.get('percentage', Decimal('0.00')),
-                )
-                for bal in parsed.get('balances', [])
-            ]
-            if balances_to_create:
-                RbcMonthlyBalance.objects.bulk_create(balances_to_create)
-            bals_imported += len(balances_to_create)
-
-            # Bulk create holdings
-            holdings_to_create = [
-                RbcMonthlyHolding(
-                    rbc_monthly=rbc_monthly,
-                    currency=currency,
-                    security=h.get('security', ''),
-                    symbol=h.get('symbol', '')[:200],
-                    quantity=h.get('quantity', Decimal('0.0000')),
-                    book_cost=h.get('book_cost', Decimal('0.00')),
-                    market_price=h.get('market_price', Decimal('0.0000')),
-                    market_value=h.get('market_value', Decimal('0.00')),
-                )
-                for h in parsed.get('holdings', [])
-            ]
-            if holdings_to_create:
-                RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
-            holdings_imported += len(holdings_to_create)
-
-            # Bulk create transactions
-            txs_to_create = [
-                RbcMonthlyTransaction(
-                    rbc_monthly=rbc_monthly,
-                    date=tx['date'],
-                    activity_type=tx['activity_type'][:100],
-                    description=scrub_text(tx['description'] or '', name_map)[0][:500],
-                    symbol=(tx.get('symbol', '') or '')[:200],
-                    quantity=tx.get('quantity') or Decimal('0.0000'),
-                    price=tx.get('price') or Decimal('0.0000'),
-                    debit=tx.get('debit') or Decimal('0.00'),
-                    credit=tx.get('credit') or Decimal('0.00'),
-                    currency=currency,
-                )
-                for tx in parsed.get('transactions', [])
-            ]
-            if txs_to_create:
-                RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
-            txns_imported += len(txs_to_create)
-
-            stmts_created += 1
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f'  Imported monthly [{currency}]: {account.name} {statement_date} '
-                    f'\u2014 {len(txs_to_create)} txns, '
-                    f'{len(holdings_to_create)} holdings, '
-                    f'{len(balances_to_create)} balances'
-                )
-            )
-
+        # Dry run: report the real verdict and write nothing (no rows, no
+        # FileImportLog, no JSON log, no move).
         if dry_run:
-            return (stmts_created, 0, 0, 0, 0, [], [], None,
-                    parser_used, self_check_reasons)
+            would_import = sum(1 for p in plans if p['action'] == 'import')
+            if conflict_msgs or date_msgs:
+                verdict = 'conflict' if conflict_msgs else 'date_error'
+            elif file_errors:
+                verdict = 'error'
+            elif plans and all(p['action'] == 'duplicate' for p in plans):
+                verdict = 'duplicate'
+            elif would_import:
+                verdict = 'imported'
+            else:
+                verdict = 'error'
+            for plan in plans:
+                if plan['action'] == 'import':
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  [DRY-RUN] Would import monthly "
+                        f"[{plan['currency']}]: {plan['statement_date']}"
+                    ))
+                else:
+                    self.stdout.write(self.style.WARNING(
+                        f"  [DRY-RUN] Duplicate monthly "
+                        f"[{plan['currency']}]: {plan['statement_date']}"
+                    ))
+            self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
+            return (would_import, 0, 0, 0,
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
+                    json_sections,
+                    [e['error'] for e in file_errors] + conflict_msgs + date_msgs,
+                    safe_name, parser_used, self_check_reasons, verdict)
+
+        # A conflict or a date failure rejects the whole file: nothing from
+        # it is stored (all-or-nothing, tdw Oct 27).
+        if conflict_msgs or date_msgs:
+            safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
+            msgs = conflict_msgs + date_msgs
+            self._log_import(safe_name, 0, 'error', '; '.join(msgs),
+                             content_hash=full_hash)
+            verdict = 'conflict' if conflict_msgs else 'date_error'
+            return (0, 0, 0, 0,
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
+                    json_sections,
+                    [e['error'] for e in file_errors] + msgs,
+                    safe_name, parser_used, self_check_reasons, verdict)
+
+        # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
+        # A failure while storing rolls the whole file back: nothing from
+        # it is left behind.
+        with transaction.atomic():
+            for plan in plans:
+                parsed = plan['parsed']
+                currency = plan['currency']
+                statement_date = plan['statement_date']
+
+                if plan['action'] == 'duplicate':
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'  Duplicate monthly [{currency}]: {safe_name} '
+                            f'(account={account}, date={statement_date})'
+                        )
+                    )
+                    continue
+
+                rbc_monthly = RbcMonthly.objects.create(
+                    account=account,
+                    file_name=safe_name,
+                    statement_date=statement_date,
+                    currency=currency,
+                    last_statement_date=parsed.get('last_statement_date'),
+                    content_hash=full_hash,
+                    begin_total_market_value=parsed.get('begin_total_market_value', Decimal('0.00')),
+                    end_total_market_value=parsed.get('end_total_market_value', Decimal('0.00')),
+                    fx_rate=parsed.get('fx_rate', Decimal('1.0000')),
+                )
+
+                # Bulk create balances
+                balances_to_create = [
+                    RbcMonthlyBalance(
+                        rbc_monthly=rbc_monthly,
+                        currency=currency,
+                        account_type=bal['account_type'],
+                        opening_balance=bal.get('opening', Decimal('0.00')),
+                        closing_balance=bal.get('closing', Decimal('0.00')),
+                        market_value=bal.get('market_value', Decimal('0.00')),
+                        percentage=bal.get('percentage', Decimal('0.00')),
+                    )
+                    for bal in parsed.get('balances', [])
+                ]
+                if balances_to_create:
+                    RbcMonthlyBalance.objects.bulk_create(balances_to_create)
+                bals_imported += len(balances_to_create)
+
+                # Bulk create holdings
+                holdings_to_create = [
+                    RbcMonthlyHolding(
+                        rbc_monthly=rbc_monthly,
+                        currency=currency,
+                        security=h.get('security', ''),
+                        symbol=h.get('symbol', '')[:200],
+                        quantity=h.get('quantity', Decimal('0.0000')),
+                        book_cost=h.get('book_cost', Decimal('0.00')),
+                        market_price=h.get('market_price', Decimal('0.0000')),
+                        market_value=h.get('market_value', Decimal('0.00')),
+                    )
+                    for h in parsed.get('holdings', [])
+                ]
+                if holdings_to_create:
+                    RbcMonthlyHolding.objects.bulk_create(holdings_to_create)
+                holdings_imported += len(holdings_to_create)
+
+                # Bulk create transactions
+                txs_to_create = [
+                    RbcMonthlyTransaction(
+                        rbc_monthly=rbc_monthly,
+                        date=tx['date'],
+                        activity_type=tx['activity_type'][:100],
+                        description=scrub_text(tx['description'] or '', name_map)[0][:500],
+                        symbol=(tx.get('symbol', '') or '')[:200],
+                        quantity=tx.get('quantity') or Decimal('0.0000'),
+                        price=tx.get('price') or Decimal('0.0000'),
+                        debit=tx.get('debit') or Decimal('0.00'),
+                        credit=tx.get('credit') or Decimal('0.00'),
+                        currency=currency,
+                    )
+                    for tx in parsed.get('transactions', [])
+                ]
+                if txs_to_create:
+                    RbcMonthlyTransaction.objects.bulk_create(txs_to_create)
+                txns_imported += len(txs_to_create)
+
+                stmts_created += 1
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f'  Imported monthly [{currency}]: {account.name} {statement_date} '
+                        f'\u2014 {len(txs_to_create)} txns, '
+                        f'{len(holdings_to_create)} holdings, '
+                        f'{len(balances_to_create)} balances'
+                    )
+                )
 
         # No section could be attributed to an account (or had a date).
         if safe_name is None:
             safe_name = _unattributable_safe_name(pdf_file.name, hash8)
 
         if stmts_created > 0:
+            verdict = 'imported'
             self._log_import(
                 safe_name,
                 stmts_created + txns_imported + bals_imported + holdings_imported,
                 'success',
                 '',
+                content_hash=full_hash,
             )
+        elif plans and all(p['action'] == 'duplicate' for p in plans):
+            # Nothing new, nothing wrong: the whole file is a duplicate and
+            # moves to processed/ normally (Q5, tdw Oct 27).
+            verdict = 'duplicate'
+            self._log_import(safe_name, 0, 'duplicate',
+                             'All sections already imported',
+                             content_hash=full_hash)
+        else:
+            verdict = 'error'
 
         return (stmts_created, txns_imported, bals_imported, holdings_imported,
                 len(file_errors), json_sections, [e['error'] for e in file_errors],
-                safe_name, parser_used, self_check_reasons)
+                safe_name, parser_used, self_check_reasons, verdict)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _log_import(self, filename: str, records: int, status: str, error_msg: str):
+    def _log_import(self, filename: str, records: int, status: str, error_msg: str,
+                    content_hash: str = ""):
         """Create a FileImportLog entry."""
         FileImportLog.objects.create(
             filename=filename,
@@ -635,6 +854,7 @@ class Command(BaseCommand):
             records_skipped=0,
             status=status,
             error_message=error_msg,
+            content_hash=content_hash,
         )
 
 
@@ -675,6 +895,26 @@ def _annual_safe_name(original_name, account_name, report_year, hash8: str) -> s
 def _unattributable_safe_name(original_name: str, hash8: str) -> str:
     """Safe name for a PDF that cannot be attributed to an account."""
     return safe_file_name(original_name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=hash8)
+
+
+def _unique_destination(directory: Path, name: str) -> Path:
+    """``directory/name``, uniquified with a ``_dup`` suffix if it exists.
+
+    Re-imported duplicate content must never overwrite the file (or its JSON
+    log) from the original import.
+    """
+    dest = directory / name
+    if not dest.exists():
+        return dest
+    stem, dot, ext = name.rpartition('.')
+    base = stem if dot else name
+    suffix = f'.{ext}' if dot else ''
+    n = 1
+    while True:
+        candidate = directory / f'{base}_dup{n}{suffix}'
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 def _coerce_statement_date(value):

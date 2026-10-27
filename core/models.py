@@ -350,6 +350,13 @@ class RbcMonthly(models.Model):
     last_statement_date = models.DateField(
         null=True, blank=True, help_text="Date of previous statement"
     )
+    content_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SHA-256 of the imported PDF; same content again is a duplicate, "
+                  "same key with different content is a conflict",
+    )
     fx_rate = models.DecimalField(
         max_digits=10,
         decimal_places=6,
@@ -661,6 +668,13 @@ class RbcAnnual(models.Model):
         blank=True,
         default="",
         help_text="RRSP, RRIF, RIF, LIF, LIRA, TFSA, RESP",
+    )
+    content_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="SHA-256 of the imported PDF; same content again is a duplicate, "
+                  "same key with different content is a conflict",
     )
     currency = models.CharField(
         max_length=3,

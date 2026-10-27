@@ -258,6 +258,14 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                     logger.error(f"Error creating transaction for {trade}: {e}")
                     raise
 
+            # Fill the statement period from the file's transaction dates
+            # (architecture §6; import-checks plan step 13b).
+            trade_dates = [t['date'] for t in trades if t.get('date')]
+            if trade_dates:
+                statement.period_start = min(trade_dates)
+                statement.period_end = max(trade_dates)
+                statement.save(update_fields=['period_start', 'period_end'])
+
             # Save file import log
             FileImportLog.objects.create(
                 filename=os.path.basename(file_path),

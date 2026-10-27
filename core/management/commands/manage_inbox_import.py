@@ -44,7 +44,11 @@ from core.utils.account_fingerprint import (
     normalize_account_number,
     scrub_text,
 )
-from core.utils.import_checks import content_hash_of, is_content_imported
+from core.utils.import_checks import (
+    content_hash_of,
+    is_content_imported,
+    statement_date_problems,
+)
 from core.utils.safe_names import (
     ANNUAL,
     MONTHLY,
@@ -376,6 +380,19 @@ class Command(BaseCommand):
         safe_name = _annual_safe_name(pdf_file.name, account.name, parsed.get('report_year'), hash8)
         records_created = 0
 
+        # Date sanity (step 13b): report_period_end not in the future and not
+        # before 2000 — no 1–100-day rule for annuals (tdw, Oct 27). A failure
+        # rejects the whole file.
+        problems = statement_date_problems(
+            parsed.get('report_period_end'), today=timezone.now().date(),
+            last_known=None,
+        )
+        if problems:
+            msg = '; '.join(f'report_period_end {p}' for p in problems)
+            self.stderr.write(self.style.ERROR(f'  {msg}'))
+            self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            return 0, 1, msg, parsed, safe_name, 'date_error'
+
         # ── Pass 1: duplicate/conflict per currency section (all-or-nothing) ──
         plans = []          # (currency, cdata, action)
         conflict_msgs = []
@@ -552,6 +569,8 @@ class Command(BaseCommand):
         json_sections = []
         plans = []          # per-section: parsed/currency/statement_date/action
         conflict_msgs = []
+        date_msgs = []
+        today = timezone.now().date()
 
         # ── Pass 1: validate every section (all-or-nothing, tdw Oct 27) ──
         for parsed in parsed_list:
@@ -600,6 +619,22 @@ class Command(BaseCommand):
                     date=statement_date, hash8=hash8,
                 )
 
+            # Date sanity (step 13b), after parsing so it covers the text and
+            # the VL result: not in the future, not before 2000, and 1–100
+            # days after the Date of Last Statement printed on this same PDF
+            # — never a database lookup (tdw, Oct 27). A failure rejects the
+            # whole file.
+            problems = statement_date_problems(
+                statement_date, today=today,
+                last_known=parsed.get('last_statement_date'),
+            )
+            if problems:
+                for problem in problems:
+                    msg = f'{currency} {problem}'
+                    date_msgs.append(msg)
+                    self.stderr.write(self.style.ERROR(f'  [{currency}] {msg}'))
+                continue
+
             # Duplicate check by content (step 13b): the file name no longer
             # takes part in the key. A stored row with this file's
             # content_hash → duplicate section; any other hit — including a
@@ -630,15 +665,19 @@ class Command(BaseCommand):
             return (stmts_created, 0, 0, 0, 0, [], [], None,
                     parser_used, self_check_reasons, 'imported')
 
-        # A conflict rejects the whole file: nothing from it is stored.
-        if conflict_msgs:
+        # A conflict or a date failure rejects the whole file: nothing from
+        # it is stored (all-or-nothing, tdw Oct 27).
+        if conflict_msgs or date_msgs:
             safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
-            msg = '; '.join(conflict_msgs)
-            self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
-            return (0, 0, 0, 0, len(file_errors) + len(conflict_msgs),
+            msgs = conflict_msgs + date_msgs
+            self._log_import(safe_name, 0, 'error', '; '.join(msgs),
+                             content_hash=full_hash)
+            verdict = 'conflict' if conflict_msgs else 'date_error'
+            return (0, 0, 0, 0,
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
                     json_sections,
-                    [e['error'] for e in file_errors] + conflict_msgs,
-                    safe_name, parser_used, self_check_reasons, 'conflict')
+                    [e['error'] for e in file_errors] + msgs,
+                    safe_name, parser_used, self_check_reasons, verdict)
 
         # ── Pass 2: store the non-duplicate sections ─────────────────────
         for plan in plans:

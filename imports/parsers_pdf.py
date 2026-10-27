@@ -103,7 +103,8 @@ def _extract_statement_date(lines: list[str]) -> date | None:
     - single line: "SEPT 30 2025" (month, day and year together);
     - two lines with the month/day at the start of the line: "SEPT 30" / "2025";
     - two lines with the month/day mid-line — both layouts: e.g.
-      "RRSP Statement SEPT 30" / "2025" (the year sits on the next line).
+      "Order Execution Only SEPT 30" / "Cdn. Dollar Statement 2025"
+      (the year sits at the end of the next line, which may carry other words).
 
     The "Date of Last Statement" line is excluded in every shape. Returns None
     when no date can be read.
@@ -128,10 +129,11 @@ def _extract_statement_date(lines: list[str]) -> date | None:
                 logger.warning("Could not parse statement date: %s", date_match.group(0))
                 continue
 
-        # Two-line match: month+day anywhere on this line, year alone on the next.
+        # Two-line match: month+day anywhere on this line, the year at the end
+        # of the next line (a bare "2025" line ends with its year too).
         if i + 1 < len(lines):
             month_match = month_day_pat.search(line)
-            year_match = re.fullmatch(r'(\d{4})', lines[i + 1].strip())
+            year_match = re.search(r'(\d{4})\s*$', lines[i + 1].strip())
             if month_match and year_match:
                 try:
                     return _parse_rbc_date(

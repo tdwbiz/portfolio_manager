@@ -183,6 +183,11 @@ class Command(BaseCommand):
         prefix = f"{base} {account.name} {cur} {statement_date.isoformat()}"
         pdf_holdings = section.get("holdings") or []
 
+        if not rows:
+            # n == 0: every PDF field line is ONLY_PDF.
+            self._emit_only_pdf_lines(prefix, section)
+            return
+
         for row in rows:
             row_prefix = f"{prefix} [row {row.pk}]"
 
@@ -222,6 +227,34 @@ class Command(BaseCommand):
 
             # Per-symbol holding fields.
             self._compare_holdings(row_prefix, pdf_holdings, row)
+
+    def _emit_only_pdf_lines(self, prefix: str, section: dict) -> None:
+        """No stored row: emit ONLY_PDF for every field present in the PDF."""
+        if section.get("last_statement_date") is not None:
+            self._emit_field(prefix, "last_statement_date", "ONLY_PDF")
+        for field in ("begin_total_market_value", "end_total_market_value"):
+            self._emit_field(prefix, field, "ONLY_PDF")
+        if self._pdf_cash(section) is not None:
+            self._emit_field(prefix, "cash", "ONLY_PDF")
+
+        pdf_holdings = section.get("holdings") or []
+        if not pdf_holdings:
+            return
+        self._emit_field(prefix, "holdings_count", "ONLY_PDF")
+
+        pdf_by_symbol: dict[str, list] = {}
+        for h in pdf_holdings:
+            pdf_by_symbol.setdefault(str(h.get("symbol") or ""), []).append(h)
+        for sym in sorted(pdf_by_symbol):
+            if len(pdf_by_symbol[sym]) > 1:
+                self._emit_note(
+                    f"{prefix} DUP_SYMBOLS {self._sym_token(sym)} "
+                    f"{len(pdf_by_symbol[sym])} 0"
+                )
+            for field in ("quantity", "book_cost", "market_price", "market_value"):
+                self._emit_field(
+                    prefix, f"holding {self._sym_token(sym)} {field}", "ONLY_PDF"
+                )
 
     def _value_verdict(self, pdf_val, db_val) -> str:
         """Both absent → MATCH; one absent or unequal → DIFFER."""

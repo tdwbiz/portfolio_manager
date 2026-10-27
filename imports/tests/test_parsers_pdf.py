@@ -261,6 +261,137 @@ class TestAssetReviewHoldings(TestCase):
         self.assertIsNone(vfv['quantity'])
 
 
+# Step 12b test fixtures: full synthetic statements whose holdings + cash
+# reconcile to the end total (fake numbers only). Layout mimics the real
+# statements: date pair at the top, "Total on …" footer lines in the Asset
+# Summary, right-anchored Asset Review rows.
+CAD_ONLY_STATEMENT = """
+Order Execution Only SEPT 30
+Cdn. Dollar Statement 2025
+Page 1 of 2
+Your Account Number: 900-00006-1-8
+Date of Last Statement: AUG. 29, 2025
+
+--------------------------------------------------------------------------------
+Asset Summary
+--------------------------------------------------------------------------------
+                      MARKET VALUE
+Cash                  $100.00          5.00 %
+Common Shares         $1,400.00        70.00 %
+Mutual Funds          $500.00          25.00 %
+Total on AUG. 29      $1,850.00
+Total on SEPT 30      $2,000.00       100.00 %
+
+--------------------------------------------------------------------------------
+Cash Balance
+--------------------------------------------------------------------------------
+ACCOUNT TYPE            OPENING BALANCE AT AUG. 29   CLOSING BALANCE AT SEPT 30
+Cash                    $90.00                         $100.00
+
+--------------------------------------------------------------------------------
+Asset Review  ( Exchange rate 1USD = 1.40000 CAD as of SEPT 30, 2025 )
+--------------------------------------------------------------------------------
+SECURITY QUANTITY MKT. PRICE BOOK COST MARKET VALUE
+SYMBOL SEGREGATED RATE
+VANGUARD CANADA HIGH DIVIDEND ETF                        VFV         5.000       280.000     1,300.00    $1,400.00
+VANGUARD FTSE ALL-WORLD EQUITY ETF                       VDY         10.000      50.000      480.00      $500.00
+Total Value of securities                                                  1,780.00    $1,900.00
+
+--------------------------------------------------------------------------------
+Account Activity
+--------------------------------------------------------------------------------
+DATE        ACTIVITY    DESCRIPTION                                    PRICE/RATE    QUANTITY    DEBIT    CREDIT
+"""
+
+# CAD + USD statement: the USD part starts at its header line (the split
+# point) and repeats the page-header pair, as the real multi-currency PDFs do.
+MULTI_CURRENCY_STATEMENT = CAD_ONLY_STATEMENT + """
+Order Execution Only SEPT 30
+U.S. Dollar Statement 2025
+Order Execution Only SEPT 30
+U.S. Dollar Statement 2025
+Page 2 of 4
+
+--------------------------------------------------------------------------------
+Asset Summary
+--------------------------------------------------------------------------------
+                      MARKET VALUE
+Cash                  $50.00           5.00 %
+Common Shares         $950.00          95.00 %
+Total on AUG. 29      $980.00
+Total on SEPT 30      $1,000.00       100.00 %
+
+--------------------------------------------------------------------------------
+Cash Balance
+--------------------------------------------------------------------------------
+ACCOUNT TYPE            OPENING BALANCE AT AUG. 29   CLOSING BALANCE AT SEPT 30
+Cash                    $40.00                         $50.00
+
+--------------------------------------------------------------------------------
+Asset Review  ( Exchange rate 1USD = 1.40000 CAD as of SEPT 30, 2025 )
+--------------------------------------------------------------------------------
+SECURITY QUANTITY MKT. PRICE BOOK COST MARKET VALUE
+SYMBOL SEGREGATED RATE
+SMALL CAP VALUE ETF                                      XDIV        10.000      95.000       900.00      $950.00
+Total Value of securities                                                     900.00      $950.00
+
+--------------------------------------------------------------------------------
+Account Activity
+--------------------------------------------------------------------------------
+DATE        ACTIVITY    DESCRIPTION                                    PRICE/RATE    QUANTITY    DEBIT    CREDIT
+"""
+
+
+class TestPerCurrencySections(TestCase):
+    """Step 12b tests 4-5: cash, totals and holdings per currency section."""
+
+    @staticmethod
+    def _cash_closing(section):
+        return sum(
+            (Decimal(b['market_value']) for b in section['balances']
+             if b['account_type'].strip().lower() == 'cash'),
+            Decimal('0'),
+        )
+
+    def test_cad_only_section_data(self):
+        sections = parse_rbc_pdf_multi(CAD_ONLY_STATEMENT)
+        self.assertEqual(len(sections), 1)
+        sec = sections[0]
+        self.assertEqual(sec['currency'], 'CAD')
+        self.assertEqual(sec['statement_date'], date(2025, 9, 30))
+        self.assertEqual(sec['end_total_market_value'], Decimal('2000.00'))
+        self.assertEqual(sec['begin_total_market_value'], Decimal('1850.00'))
+        self.assertEqual(self._cash_closing(sec), Decimal('100.00'))
+        self.assertEqual(
+            {h['symbol'] for h in sec['holdings']}, {'VFV', 'VDY'})
+        # holdings + cash reconcile to the end total to the cent
+        mv = sum((Decimal(h['market_value']) for h in sec['holdings']), Decimal('0'))
+        self.assertEqual(mv + self._cash_closing(sec), Decimal('2000.00'))
+
+    def test_cad_and_usd_sections_each_own_data(self):
+        sections = parse_rbc_pdf_multi(MULTI_CURRENCY_STATEMENT)
+        self.assertEqual(len(sections), 2)
+        by_cur = {s['currency']: s for s in sections}
+        self.assertEqual(set(by_cur), {'CAD', 'USD'})
+
+        cad, usd = by_cur['CAD'], by_cur['USD']
+        # Both sections carry their own date, totals, cash and holdings —
+        # taken from the section text, not the full text.
+        for sec in (cad, usd):
+            self.assertEqual(sec['statement_date'], date(2025, 9, 30))
+
+        self.assertEqual(cad['end_total_market_value'], Decimal('2000.00'))
+        self.assertEqual(self._cash_closing(cad), Decimal('100.00'))
+        self.assertEqual({h['symbol'] for h in cad['holdings']}, {'VFV', 'VDY'})
+
+        self.assertEqual(usd['end_total_market_value'], Decimal('1000.00'))
+        self.assertEqual(self._cash_closing(usd), Decimal('50.00'))
+        self.assertEqual({h['symbol'] for h in usd['holdings']}, {'XDIV'})
+
+        mv = sum((Decimal(h['market_value']) for h in usd['holdings']), Decimal('0'))
+        self.assertEqual(mv + self._cash_closing(usd), Decimal('1000.00'))
+
+
 class TestParseRbcDate(TestCase):
     """Test the _parse_rbc_date helper function."""
 

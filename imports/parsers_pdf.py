@@ -195,10 +195,11 @@ def _clean_pct(value_str: str) -> Decimal:
 #   - "TFSA Statement (CDN$) 2026"
 #   - "LIF Statement (CDN$) 2026"
 #   - "FHSA Statement (CDN$) 2026"
+#   - "RRIF Statement (CDN$) 2025"
 #   - "Cdn. Dollar Statement 2022"
 #   - "Your Canadian dollar account" (Annual Investment Performance Report format)
 CAD_STATEMENT_PATTERNS = [
-    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(CDN\$\)', re.IGNORECASE),
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA|RRIF)\s+Statement\s+\(CDN\$\)', re.IGNORECASE),
     re.compile(r'Cdn\.\s*Dollar\s+Statement', re.IGNORECASE),
     re.compile(r'Your\s+Canadian\s+dollar\s+account', re.IGNORECASE),
 ]
@@ -208,10 +209,11 @@ CAD_STATEMENT_PATTERNS = [
 #   - "TFSA Statement (U.S.$) 2026"
 #   - "LIF Statement (U.S.$) 2026"
 #   - "FHSA Statement (U.S.$) 2026"
+#   - "RRIF Statement (U.S.$) 2025"
 #   - "U.S. Dollar Statement"
 #   - "Your U.S. dollar account" (Annual Investment Performance Report format)
 USD_STATEMENT_PATTERNS = [
-    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(U\.S\.\$\)', re.IGNORECASE),
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA|RRIF)\s+Statement\s+\(U\.S\.\$\)', re.IGNORECASE),
     re.compile(r'U\.S\.\s*Dollar\s+Statement', re.IGNORECASE),
     re.compile(r'Your\s+U\.S\.\s*dollar\s+account', re.IGNORECASE),
     re.compile(r'Your\s+US\s+dollar\s+account', re.IGNORECASE),

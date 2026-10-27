@@ -584,19 +584,19 @@ class Command(BaseCommand):
                     self._log_import(safe_name, 0, 'error', str(exc),
                                      content_hash=full_hash)
                     return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
-                            parsers, self_check_reasons)
+                            parsers, self_check_reasons, 'error')
                 return (0, 0, 0, 0, 1, [], [str(exc)], None,
-                        parsers, self_check_reasons)
+                        parsers, self_check_reasons, 'error')
 
             if parsed_list is None:
                 empty_msg = 'Parser returned no sections (possible unsupported statement format)'
                 if dry_run:
                     self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
                     return (0, 0, 0, 0, 1, [], [empty_msg], None,
-                            parsers, self_check_reasons)
+                            parsers, self_check_reasons, 'error')
                 safe_name = _unattributable_safe_name(pdf_file.name, hash8)
                 return (0, 0, 0, 0, 1, [], [empty_msg], safe_name,
-                        parsers, self_check_reasons)
+                        parsers, self_check_reasons, 'error')
             # Step 13c-b (Q1, tdw Oct 27): the fallback is gated too — on
             # the VL result's own cash rows and transactions, so nothing
             # that does not reconcile is ever stored.

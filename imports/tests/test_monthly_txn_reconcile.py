@@ -300,6 +300,67 @@ class MonthlyTxnReconcileTests(TestCase):
             self.assertEqual(section['txn_count'], 0)
             self.assertEqual(section['reconcile'], 'failed')
 
+    def _bad_self_check_text(self):
+        """A text section that fails the self-check → VL fallback path."""
+        bad_text = _text_section()
+        bad_text['end_total_market_value'] = Decimal('999.99')
+        return bad_text
+
+    def test_fallback_vl_error_returns_full_tuple_and_moves_to_errors(self):
+        # The fallback early return must be the full 11-value tuple with
+        # verdict 'error': the file goes to errors/ and the run continues.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_side_effect=RuntimeError('boom'),
+            )
+
+            self.assertIn('falling back to VL', out)
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            moved = os.listdir(os.path.join(processed_dir, 'errors'))
+            self.assertEqual(len(moved), 1)
+            log = FileImportLog.objects.get()
+            self.assertEqual(log.status, 'error')
+            self.assertIn('boom', log.error_message)
+            payload = self._json_log(processed_dir, error=True)
+            self.assertEqual(payload['verdict'], 'error')
+            # The run continued to the summary.
+            self.assertIn('Inbox Import Summary', out)
+
+    def test_fallback_no_sections_returns_full_tuple_and_moves_to_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, _err = self._run(
+                tmpdir, [self._bad_self_check_text()], vl_sections=None,
+            )
+
+            self.assertIn('falling back to VL', out)
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            moved = os.listdir(os.path.join(processed_dir, 'errors'))
+            self.assertEqual(len(moved), 1)
+            payload = self._json_log(processed_dir, error=True)
+            self.assertEqual(payload['verdict'], 'error')
+            self.assertIn('no sections', '; '.join(payload['error_messages']))
+            # The run continued to the summary.
+            self.assertIn('Inbox Import Summary', out)
+
+    def test_fallback_vl_error_dry_run_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir, out, err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_side_effect=RuntimeError('boom'), dry_run=True,
+            )
+
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            self.assertEqual(FileImportLog.objects.count(), 0)
+            json_dir = os.path.join(processed_dir, 'json_logs')
+            self.assertEqual(
+                os.listdir(json_dir) if os.path.isdir(json_dir) else [], [])
+            # The file was not moved.
+            self.assertEqual(len(os.listdir(inbox_dir)), 1)
+            # The run continued to the summary.
+            self.assertIn('Inbox Import Summary', out)
+
     def test_dry_run_reconciling_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             inbox_dir = os.path.join(tmpdir, 'inbox')

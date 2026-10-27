@@ -22,7 +22,9 @@ quantities or prices. Only counts, field names, symbols and MATCH/DIFFER/MISSING
   - Date fix: a shared date-extraction helper used by `parse_rbc_pdf` and `parse_rbc_pdf_multi`.
     In both layouts the month and day sit on a line that starts with other words and the year
     is on the **next** line; the current single-line and two-line matchers miss this. Also keep
-    the "last statement" line exclusion.
+    the "last statement" line exclusion. The year must be a whole 4-digit number (word
+    boundary — the last four digits of a longer number never count) between 2000 and next
+    year (decision 6, Oct 26 follow-up).
   - Holdings: new `_parse_asset_review()` that reads the Asset Review table per currency
     section and returns rows with the **same keys as the VL parser's holdings**
     (`security`, `symbol`, `quantity`, `book_cost`, `market_price`, `market_value` — see
@@ -40,7 +42,13 @@ quantities or prices. Only counts, field names, symbols and MATCH/DIFFER/MISSING
     - `statement_date` is not None;
     - every holding has a readable `book_cost` (`None` → reason, never stored as 0);
     - per holding, `quantity * market_price` is within **0.1 percent** of `market_value`;
-    - `sum(holdings.market_value) + cash == end_total_market_value` to the cent.
+    - `sum(holdings.market_value) + cash == end_total_market_value` to the cent;
+    - the number of currency sections returned equals the number present in the whole
+      text (counting the Asset Summary / Asset Review table headers in the full text);
+      the reason names only the counts (decision 5, Oct 26 follow-up) — an unsplit
+      section used to pass silently because the CAD numbers still reconciled;
+    - when `last_statement_date` is found, `statement_date` is after it and at most
+      100 days later (decision 6, Oct 26 follow-up).
     No begin-total check (tdw decision). Cash = the closing cash value for that currency
     (same source the 12a check used).
 - `core/management/commands/manage_inbox_import.py` — `_process_monthly` becomes text-first:
@@ -90,6 +98,10 @@ numbers. Cases:
    to VL; log line names only fields/currencies/symbols.
 7. JSON log of a text-parsed file contains no account digits (the scrubber handles the text
    parser's payload).
+8. Oct 26 follow-up: synthetic CAD + USD text whose USD header is not recognised → one
+   section returned, totals still reconcile, self-check reason names only the counts;
+   statement-date year glued to a longer number or outside 2000..next year → no date;
+   `statement_date` before `last_statement_date` or more than 100 days after it → reason.
 
 ## Steps (one commit each)
 
@@ -177,3 +189,20 @@ Answers to the open questions above, plus one correction:
 4. **Scrubber.** Agreed: verify `_scrubbed_json` / `_parsed_account_sections` handles the text
    parser's payload in step 5, adapt the scrubber if needed, and add a test that the JSON log
    of a text-parsed file contains no account digits.
+
+Follow-up decisions (tdw, Oct 26), after the four-PDF run:
+
+5. **An unsplit currency section must fail the self-check.** Today, if
+   `parse_rbc_pdf_multi` does not recognise a section header (as happened with RRIF before
+   step 3), the USD part stays inside the CAD section; `_parse_asset_review` stops at the
+   first table, the CAD holdings plus cash still equal the CAD end total, so the self-check
+   passes and the USD holdings, cash and totals are silently lost. Add a check that the
+   number of currency sections returned equals the number of currency sections present in
+   the whole text (for example by counting the Asset Summary or Asset Review table headers
+   in the full text), with a reason that names only the counts. Unit test: synthetic CAD +
+   USD text whose USD header is not recognised.
+6. **Statement date sanity.** In `_extract_statement_date` the year must be a whole 4-digit
+   number (word boundary, so the last four digits of a longer number never count) between
+   2000 and next year. In the self-check, when `last_statement_date` is found,
+   `statement_date` must be after it and at most 100 days later, otherwise a reason. Unit
+   tests for both.

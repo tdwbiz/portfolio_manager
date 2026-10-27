@@ -162,9 +162,10 @@ def parse_holdings_csv(file_path: str) -> list[dict]:
     if header_acct_match:
         account_id = header_acct_match.group(1)
     
-    # Skip PRACEF practice accounts at file level
+    # Skip PRACEF practice accounts at file level (the file name can carry
+    # the account number and must not be logged).
     if account_id and account_id.startswith('PRACEF'):
-        logger.info(f"Skipping PRACEF practice account file: {filename}")
+        logger.info("Skipping PRACEF practice account file")
         return [], None
 
     # Fallback: scan raw content for first data row starting with a digit
@@ -420,12 +421,12 @@ def import_holdings_snapshot(
     positions = parse_holdings_csv(file_path)
 
     if not positions:
-        logger.warning(f"No positions found in {file_path}")
+        logger.warning("No positions found in holdings file")
         return 0, 0
 
     snapshot_date = positions[0]['snapshot_date']
     if not snapshot_date:
-        logger.error(f"Could not determine snapshot date from {file_path}")
+        logger.error("Could not determine snapshot date from holdings file")
         return 0, 0
 
     if dry_run:

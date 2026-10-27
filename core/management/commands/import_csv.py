@@ -28,6 +28,7 @@ from core.utils.import_checks import (
     is_content_imported,
     statement_date_problems,
 )
+from core.utils.safe_names import is_safe_file_name
 from imports.auto_import import auto_import
 from imports.parsers_holdings import (
     holdings_import_report,
@@ -194,20 +195,30 @@ class Command(BaseCommand):
         errors = 0
 
         for file_path in csv_files:
+            # The original file name can carry the account number: it is used
+            # only for the on-disk moves; FileImportLog and every output line
+            # use a safe name instead (step 13b review).
             filename = os.path.basename(file_path)
-            self.stdout.write(f"Importing holdings: {filename}")
-
             full_hash = content_hash_of(file_path)
+            self.stdout.write(f"Importing holdings: {_holdings_safe_name(None, full_hash)}")
 
             # Content-hash duplicate check (step 13b): the same content
             # already imported successfully → skip before parsing.
             if not dry_run and is_content_imported(full_hash):
+                prior = FileImportLog.objects.filter(
+                    content_hash=full_hash, status__in=('success', 'ok')
+                ).order_by('-imported_at').first()
+                safe_name = (
+                    prior.filename
+                    if prior and is_safe_file_name(prior.filename)
+                    else _holdings_safe_name(None, full_hash)
+                )
                 duplicates += 1
                 self.stdout.write(self.style.SUCCESS(
                     "  Duplicate content — already imported; skipping (no parse)"
                 ))
                 FileImportLog.objects.create(
-                    filename=filename, broker='RBC',
+                    filename=safe_name, broker='RBC',
                     records_imported=0, records_skipped=0,
                     status='duplicate', error_message='Content already imported',
                     content_hash=full_hash,
@@ -215,17 +226,18 @@ class Command(BaseCommand):
                 _holdings_json_log(json_dir, full_hash, 'duplicate', [], 0)
                 dest = _unique_destination(processed_dir, filename)
                 _move_file(Path(file_path), dest)
-                self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {dest.name}"))
+                self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {safe_name}"))
                 continue
 
             try:
                 report = holdings_import_report(file_path)
             except Exception as e:
-                self.stderr.write(f"  ERROR importing holdings {filename}: {e}")
+                safe_name = _holdings_safe_name(None, full_hash)
+                self.stderr.write(f"  ERROR importing holdings {safe_name}: {e}")
                 errors += 1
                 if not dry_run:
                     FileImportLog.objects.create(
-                        filename=filename, broker='RBC',
+                        filename=safe_name, broker='RBC',
                         records_imported=0, records_skipped=0,
                         status='error', error_message=str(e),
                         content_hash=full_hash,
@@ -233,13 +245,14 @@ class Command(BaseCommand):
                     _holdings_json_log(json_dir, full_hash, 'error', [], 0)
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
-                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {dest.name}"))
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {safe_name}"))
                 continue
 
             positions = report['positions']
             snapshot_date = report['snapshot_date']
             sections = report['sections']
             holdings_count = len(positions)
+            safe_name = _holdings_safe_name(snapshot_date, full_hash)
 
             if not positions:
                 # No parseable data
@@ -247,7 +260,7 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR("  No positions parsed"))
                 if not dry_run:
                     FileImportLog.objects.create(
-                        filename=filename, broker='RBC',
+                        filename=safe_name, broker='RBC',
                         records_imported=0, records_skipped=0,
                         status='error', error_message='No positions parsed',
                         content_hash=full_hash,
@@ -255,7 +268,7 @@ class Command(BaseCommand):
                     _holdings_json_log(json_dir, full_hash, 'error', [], 0)
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
-                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {dest.name}"))
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {safe_name}"))
                 continue
 
             # Snapshot-date sanity (step 13b): not in the future, not before
@@ -269,7 +282,7 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR(f"  {reason}"))
                 if not dry_run:
                     FileImportLog.objects.create(
-                        filename=filename, broker='RBC',
+                        filename=safe_name, broker='RBC',
                         records_imported=0, records_skipped=0,
                         status='error', error_message=reason,
                         content_hash=full_hash,
@@ -278,7 +291,7 @@ class Command(BaseCommand):
                                        sections, holdings_count)
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
-                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {dest.name}"))
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {safe_name}"))
                 continue
 
             brief = _sections_brief(sections)
@@ -302,7 +315,7 @@ class Command(BaseCommand):
 
             if verdict == 'imported':
                 FileImportLog.objects.create(
-                    filename=filename, broker='RBC',
+                    filename=safe_name, broker='RBC',
                     records_imported=created, records_skipped=closed,
                     status='success', error_message='',
                     content_hash=full_hash,
@@ -316,7 +329,7 @@ class Command(BaseCommand):
                 dest = processed_dir / filename
             else:
                 FileImportLog.objects.create(
-                    filename=filename, broker='RBC',
+                    filename=safe_name, broker='RBC',
                     records_imported=0, records_skipped=holdings_count,
                     status='error',
                     error_message='No positions imported (all rows skipped)',
@@ -333,12 +346,25 @@ class Command(BaseCommand):
 
             _move_file(Path(file_path), dest)
             label = 'processed/' if verdict == 'imported' else 'errors/'
-            self.stdout.write(self.style.SUCCESS(f"  Moved to {label}: {dest.name}"))
+            self.stdout.write(self.style.SUCCESS(f"  Moved to {label}: {safe_name}"))
 
         self.stdout.write(
             f"Total: {created_total} created, {closed_total} closed "
             f"({duplicates} duplicates, {errors} errors)"
         )
+
+
+def _holdings_safe_name(snapshot_date, full_hash: str) -> str:
+    """Safe name for holdings artifacts — never the original file name, which
+    can carry the account number (step 13b review).
+
+    ``<snapshot date>_holdings_<hash8>.csv`` when the snapshot date is known,
+    else ``<hash8>_holdings.csv``.
+    """
+    h8 = full_hash[:8]
+    if snapshot_date:
+        return f'{snapshot_date}_holdings_{h8}.csv'
+    return f'{h8}_holdings.csv'
 
 
 def _sections_brief(sections: list[dict]) -> str:

@@ -28,20 +28,32 @@ quantities or prices. Only counts, field names, symbols and MATCH/DIFFER/MISSING
     (`security`, `symbol`, `quantity`, `book_cost`, `market_price`, `market_value` — see
     `_coerce_response()` in `imports/parsers_monthly_vl.py`). Handle the old layout's joined
     words (e.g. `TotalValueof…`) on the total lines; the recent layout reads `Total Value of …`.
+    Parse `book_cost` in **both layouts**; a holding whose `book_cost` cannot be read is
+    returned with `book_cost: None` — never 0 as a placeholder — and fails the self-check.
     Add a `holdings` key to the section dicts returned by both entry points.
   - Multi-currency: `parse_rbc_pdf_multi` already splits CAD/USD sections; make sure holdings,
     cash and the begin/end totals are taken **per section**, not from the full text.
   - Self-check: new `self_check_sections(sections) -> list[str]` returning empty when the parse
-    is trustworthy, else reasons naming only fields/currencies (e.g. `"statement_date missing"`,
-    `"USD holdings+cash != end_total_market_value"`). Per currency section:
-    `sum(holdings.market_value) + cash == end_total_market_value` to the cent, and
-    `statement_date` is not None. Cash = the closing cash value for that currency (same source
-    the 12a check used).
+    is trustworthy, else reasons naming only fields/currencies/symbols (e.g.
+    `"statement_date missing"`, `"USD holdings+cash != end_total_market_value"`). Per currency
+    section:
+    - `statement_date` is not None;
+    - every holding has a readable `book_cost` (`None` → reason, never stored as 0);
+    - per holding, `quantity * market_price` is within **0.1 percent** of `market_value`;
+    - `sum(holdings.market_value) + cash == end_total_market_value` to the cent.
+    No begin-total check (tdw decision). Cash = the closing cash value for that currency
+    (same source the 12a check used).
 - `core/management/commands/manage_inbox_import.py` — `_process_monthly` becomes text-first:
   run `parse_rbc_pdf_multi`, run `self_check_sections`; on any reason, fall back to
   `parse_rbc_monthly_vl`. Log (and add to the JSON log status) which parser was used and the
   self-check reasons — field names and currency codes only, never values. The VL classifier
   (`classify_pdf`) is unchanged.
+  - **The text path stores no PDF transactions** (scope decided Oct 21: holdings, cash and
+    totals only; CSV Activity is the master): drop `transactions` from the text payload before
+    storing. The VL fallback keeps its current behaviour (stores what VL returns).
+  - Verify `_scrubbed_json` / `_parsed_account_sections` handle the text parser's payload
+    (extra `income_summary`/`contribution_summary` keys); adapt the scrubber if needed — no
+    migration.
 - `imports/tests/test_parsers_pdf.py` — new synthetic-text tests (see Tests).
 - `imports/tests/test_manage_inbox_import.py` — fallback test with monkeypatched parsers.
 - `pm-logs/text_parser_check.py` — **untracked**, extended (stays untracked).
@@ -67,13 +79,17 @@ numbers. Cases:
 1. Recent-layout date line (month/day mid-line, year on next line) → date found.
 2. Old-layout date line (e.g. `MAR. 31` + next line `2020`) → date found.
 3. Holdings from a synthetic Asset Review table, including a joined-word total line
-   (`TotalValueof…`) → correct symbols/counts, VL-shaped keys.
+   (`TotalValueof…`) → correct symbols/counts, VL-shaped keys, `book_cost` parsed in both
+   layouts.
 4. CAD-only section → self-check passes.
 5. CAD + USD sections, each with own cash, totals and holdings → two sections, self-check
    passes per currency.
-6. Failing self-check (holdings + cash ≠ end total, or date missing) → reasons returned, and
-   in `manage_inbox_import` (monkeypatched parsers) the file falls back to VL; log line names
-   only fields/currencies.
+6. Failing self-checks — holdings + cash ≠ end total; date missing; a holding with unreadable
+   `book_cost`; `quantity * market_price` off by more than 0.1 percent of `market_value` →
+   reasons returned, and in `manage_inbox_import` (monkeypatched parsers) the file falls back
+   to VL; log line names only fields/currencies/symbols.
+7. JSON log of a text-parsed file contains no account digits (the scrubber handles the text
+   parser's payload).
 
 ## Steps (one commit each)
 
@@ -81,22 +97,27 @@ numbers. Cases:
    layouts. Add tests 1–2.
    Check: `/opt/pm-venv/bin/python -m pytest imports/tests/test_parsers_pdf.py -q`
 2. **Holdings parsing.** `_parse_asset_review()` + `holdings` key in both entry points'
-   output, joined-word totals handled. Add test 3.
+   output, joined-word totals handled, `book_cost` parsed in both layouts (unreadable →
+   `None`, never 0). Add test 3.
    Check: same pytest file, plus `pytest --collect-only -q imports/tests/`.
 3. **Per-currency correctness.** Verify/fix that cash, totals and holdings in
    `parse_rbc_pdf_multi` come from each currency section. Add tests 4–5.
    Check: same pytest file.
-4. **Self-check helper.** `self_check_sections()` with cent-exact Decimal comparison.
-   Add test 6 (helper part).
+4. **Self-check helper.** `self_check_sections()` with cent-exact Decimal comparison,
+   per-holding `book_cost` presence, and `quantity * market_price` within 0.1 percent of
+   `market_value`; no begin-total check. Add test 6 (helper part).
    Check: same pytest file.
-5. **manage_inbox_import text-first.** Wire text → self-check → VL fallback; log parser used +
-   reasons (no values). Add test 6 (command part).
+5. **manage_inbox_import text-first.** Wire text → self-check → VL fallback; drop
+   `transactions` from the text payload (no PDF transactions stored on the text path); log
+   parser used + reasons (no values); verify/adapt `_scrubbed_json` for the text payload.
+   Add test 6 (command part) and test 7.
    Check: `/opt/pm-venv/bin/python -m pytest imports/tests/test_manage_inbox_import.py -q`
 6. **Extend `pm-logs/text_parser_check.py`** (stays untracked, `git status` must stay clean of
    it): compare text parser vs VL on `inbox/check-1.pdf`…`inbox/check-4.pdf` (check-3 = old
-   layout, check-4 = recent, same account, CAD + USD sections). Compare to the cent:
-   statement_date, currency sections, cash per currency, begin/end total market value,
-   holdings per symbol (quantity, market value). Console prints verdicts only. Run it
+   statement, check-4 = recent; both from the same account with a CAD and a USD section).
+   Compare to the cent: statement_date, currency sections, cash per currency, begin/end total
+   market value, holdings per symbol (quantity, market value, **book_cost**). Console prints
+   verdicts only. Run it
    (VL on port 11435, ~2 min for 4 files).
    Check: `git status --short` shows no `pm-logs/` entry; output contains no digits that look
    like values (spot-check verdict lines).
@@ -128,17 +149,31 @@ numbers. Cases:
 
 ## Open questions
 
-1. *Should `manage_inbox_import` store the text parser's transactions, given VL's may be
-   better?* Recommended: yes — store whatever the chosen parser returns.
-   `RbcMonthlyTransaction` is documented as unreliable and CSV Activity is the master for
-   transactions, so parity of shape matters more than transaction quality here.
-2. *`book_cost` column in the old layout's Asset Review table.* Recommended: parse it when the
-   column is recognisable, store 0 when not; the self-check does not use it, and a DIFFER on
-   book_cost alone would not trigger fallback.
-3. *Should the self-check also verify the begin total?* Recommended: no — only the end total
-   is derivable from holdings + cash on the same statement; the begin total is a snapshot of
-   the previous statement.
-4. *Does `_scrubbed_json` / `_parsed_account_sections` in `manage_inbox_import` handle the
-   text parser's payload (it has extra `income_summary`/`contribution_summary` keys)?*
-   Recommended: verify in step 5; extra keys are ignored by the scrubbing path, and if they
-   are not, adapt the scrubber — still no migration.
+Answered in **Decisions (tdw, Oct 26)** below.
+
+1. *Should `manage_inbox_import` store the text parser's transactions?* → Decided: no.
+2. *`book_cost` column in the old layout's Asset Review table.* → Decided: parse it in both
+   layouts; unreadable → self-check fails, file goes to VL.
+3. *Should the self-check also verify the begin total?* → Decided: no.
+4. *Does `_scrubbed_json` / `_parsed_account_sections` handle the text parser's payload?* →
+   Decided: verify in step 5, adapt if needed, plus a JSON-log test.
+
+## Decisions (tdw, Oct 26)
+
+Answers to the open questions above, plus one correction:
+
+- **Correction:** `check-3.pdf` is the OLD statement and `check-4.pdf` the RECENT one; both
+  are from the same account with a CAD and a USD section. (Step 6 already reads it this way.)
+1. **No PDF transactions on the text path.** The text parser stores no transactions — scope
+   decided Oct 21: holdings, cash and totals only; CSV Activity is the master for
+   transactions. When `manage_inbox_import` takes the text path it drops the parsed
+   `transactions` before storing. The VL fallback keeps its current behaviour (stores what
+   VL returns).
+2. **`book_cost` is required, not optional.** Parse book_cost in both layouts. Never store 0
+   as a placeholder: if book_cost cannot be read for a holding, the self-check fails and that
+   file goes to VL. The four-PDF check (step 6) also compares book_cost with VL to the cent.
+3. **No begin-total check.** Agreed: the self-check verifies only the end total (plus
+   statement_date, per-holding book_cost presence and quantity × price vs market value).
+4. **Scrubber.** Agreed: verify `_scrubbed_json` / `_parsed_account_sections` handles the text
+   parser's payload in step 5, adapt the scrubber if needed, and add a test that the JSON log
+   of a text-parsed file contains no account digits.

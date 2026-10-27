@@ -34,6 +34,8 @@ FAKE_PDF_CONTENT = b"%PDF-1.4\nfake statement content for safe-name tests\n"
 
 
 def _monthly_section():
+    """A VL section that passes the 13c-b cash gate: 90.00 opening +
+    10.00 credit == 100.00 closing."""
     return {
         'statement_date': date(2025, 9, 30),
         'last_statement_date': date(2025, 8, 29),
@@ -42,8 +44,17 @@ def _monthly_section():
         'fx_rate': Decimal('1.0000'),
         'begin_total_market_value': Decimal('100.00'),
         'end_total_market_value': Decimal('105.00'),
-        'transactions': [],
-        'balances': [],
+        'transactions': [
+            {'date': date(2025, 9, 15), 'activity_type': 'DEPOSIT',
+             'description': 'TEST DEPOSIT', 'symbol': '',
+             'quantity': Decimal('0'), 'price': Decimal('0.0000'),
+             'debit': Decimal('0.00'), 'credit': Decimal('10.00')},
+        ],
+        'balances': [
+            {'account_type': 'Cash', 'opening': Decimal('90.00'),
+             'closing': Decimal('100.00'), 'market_value': Decimal('100.00'),
+             'percentage': Decimal('5.00')},
+        ],
         'holdings': [],
         # The number repeated in a free-text field must not survive either.
         'raw_text': f'acct {FAKE_NUMBER} statement end',
@@ -311,7 +322,8 @@ class ManageInboxImportTextFirstTests(TestCase):
             )
             with open(json_path, encoding='utf-8') as fh:
                 payload = fh.read()
-            self.assertIn('"parser": "vl"', payload)
+            self.assertIn('"parser_holdings": "vl"', payload)
+            self.assertIn('"parser_transactions": "vl"', payload)
             _assert_no_number_anywhere(processed_dir)
 
     def test_text_parsed_file_json_log_has_no_account_digits(self):
@@ -339,6 +351,23 @@ class ManageInboxImportTextFirstTests(TestCase):
             with patch(
                 'core.management.commands.manage_inbox_import.classify_pdf',
                 return_value='monthly',
+            ), patch(
+                # Step 13c-b: the text path always calls VL for
+                # transactions; a mock that reconciles with the statement's
+                # cash (90.00 opening + 10.00 credit == 100.00 closing).
+                'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl',
+                return_value=[{
+                    'currency': 'CAD',
+                    'transactions': [
+                        {'date': date(2025, 9, 15),
+                         'activity_type': 'DEPOSIT',
+                         'description': 'TEST DEPOSIT', 'symbol': '',
+                         'quantity': Decimal('0'),
+                         'price': Decimal('0.0000'),
+                         'debit': Decimal('0.00'),
+                         'credit': Decimal('10.00')},
+                    ],
+                }],
             ):
                 with override_settings(
                     IMPORT_PROCESSED_DIR=processed_dir,
@@ -352,8 +381,8 @@ class ManageInboxImportTextFirstTests(TestCase):
             # Imported via the text path: statement and holdings stored…
             self.assertEqual(RbcMonthly.objects.count(), 1)
             self.assertEqual(RbcMonthlyHolding.objects.count(), 2)
-            # …but no PDF transactions (scope Oct 21: CSV is the master).
-            self.assertEqual(RbcMonthlyTransaction.objects.count(), 0)
+            # …and the one transaction comes from the VL mock (13c-b).
+            self.assertEqual(RbcMonthlyTransaction.objects.count(), 1)
 
             h8 = hash8_of(CAD_ONLY_STATEMENT.encode('utf-8'))
             json_path = os.path.join(
@@ -365,5 +394,6 @@ class ManageInboxImportTextFirstTests(TestCase):
             self.assertNotIn('90000006', payload)
             self.assertNotIn('900-00006-1-8', payload)
             self.assertIn('ACCOUNT_F', payload)
-            self.assertIn('"parser": "text"', payload)
+            self.assertIn('"parser_holdings": "text"', payload)
+            self.assertIn('"parser_transactions": "vl"', payload)
             self.assertIn('"self_check_reasons": []', payload)

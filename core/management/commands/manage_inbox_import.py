@@ -48,6 +48,8 @@ from core.utils.account_fingerprint import (
 from core.utils.import_checks import (
     content_hash_of,
     is_pdf_content_stored,
+    merge_and_reconcile,
+    reconcile_section,
     statement_date_problems,
 )
 from core.utils.safe_names import (
@@ -242,7 +244,7 @@ class Command(BaseCommand):
             elif doc_type == 'monthly':
                 classified_monthly += 1
                 (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
-                 safe_name, parser_used, self_check_reasons, verdict) = (
+                 safe_name, parsers, self_check_reasons, verdict) = (
                     self._process_monthly(pdf_file, dry_run, name_map, h8, full_hash)
                 )
                 imported_monthly_stmts += stmts
@@ -257,7 +259,10 @@ class Command(BaseCommand):
                     'type': 'monthly',
                     'filename': safe_name,
                     'processed_at': timezone.now().isoformat(),
-                    'parser': parser_used,
+                    # Step 13c-b: holdings and transactions may come from
+                    # different parsers (text path: text / vl).
+                    'parser_holdings': parsers['holdings'],
+                    'parser_transactions': parsers['transactions'],
                     'self_check_reasons': self_check_reasons,
                     'verdict': verdict,
                     'errors': errs,
@@ -519,17 +524,19 @@ class Command(BaseCommand):
 
         Returns (statements_created, transactions_imported, balances_recorded,
                  holdings_recorded, error_count, json_sections, error_messages,
-                 safe_name, parser_used, self_check_reasons, verdict). In
-                 dry-run mode the real verdict is computed and reported but
-                 nothing is written.
+                 safe_name, parsers, self_check_reasons, verdict). ``parsers``
+                 is {'holdings': 'text'|'vl', 'transactions': 'vl'} (step
+                 13c-b: monthly transactions always come from the VL
+                 parser). In dry-run mode the real verdict is computed and
+                 reported but nothing is written.
         """
         parsed_list = None
-        parser_used = 'text'
+        parsers = {'holdings': 'text', 'transactions': 'vl'}
         self_check_reasons: list[str] = []
+        reconcile_msgs: list[str] = []
 
         # Text-first (step 12b): deterministic text parser, then self-check;
-        # any reason (or a text-parser error) falls back to the VL parser,
-        # whose behaviour is unchanged.
+        # any reason (or a text-parser error) falls back to the VL parser.
         try:
             text_sections = parse_rbc_pdf_multi(str(pdf_file))
             # The whole text again for the currency-section count check: an
@@ -543,14 +550,23 @@ class Command(BaseCommand):
             text_sections = None
 
         if text_sections and not self_check_reasons:
-            parsed_list = text_sections
-            # Scope (tdw, Oct 21): the text path stores no PDF transactions —
-            # holdings, cash and totals only; CSV Activity is the master.
-            for sec in parsed_list:
-                sec['transactions'] = []
+            # Step 13c-b (tdw Oct 27): holdings, cash and totals stay from
+            # the text parser; Account Activity transactions always come
+            # from the VL parser, matched to the text currency sections by
+            # currency, and must reconcile with the text cash before
+            # anything is stored.
             self.stdout.write(self.style.SUCCESS('  Parser: text (self-check passed)'))
+            try:
+                vl_sections = parse_rbc_monthly_vl(str(pdf_file))
+            except Exception as exc:
+                logger.warning("VL call failed on the text path for %s: %s", hash8, exc)
+                reconcile_msgs.append(f'vl_parser {exc}')
+                vl_sections = None
+            if vl_sections is not None:
+                parsed_list, reasons = merge_and_reconcile(text_sections, vl_sections)
+                reconcile_msgs.extend(reasons)
         else:
-            parser_used = 'vl'
+            parsers['holdings'] = 'vl'
             if self_check_reasons:
                 # Reasons name only fields, currencies and symbols — no values.
                 self.stdout.write(
@@ -568,19 +584,42 @@ class Command(BaseCommand):
                     self._log_import(safe_name, 0, 'error', str(exc),
                                      content_hash=full_hash)
                     return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
-                            parser_used, self_check_reasons)
+                            parsers, self_check_reasons)
                 return (0, 0, 0, 0, 1, [], [str(exc)], None,
-                        parser_used, self_check_reasons)
+                        parsers, self_check_reasons)
 
             if parsed_list is None:
                 empty_msg = 'Parser returned no sections (possible unsupported statement format)'
                 if dry_run:
                     self.stderr.write(self.style.WARNING(f'  [DRY-RUN] {empty_msg}'))
                     return (0, 0, 0, 0, 1, [], [empty_msg], None,
-                            parser_used, self_check_reasons)
+                            parsers, self_check_reasons)
                 safe_name = _unattributable_safe_name(pdf_file.name, hash8)
                 return (0, 0, 0, 0, 1, [], [empty_msg], safe_name,
-                        parser_used, self_check_reasons)
+                        parsers, self_check_reasons)
+            # Step 13c-b (Q1, tdw Oct 27): the fallback is gated too — on
+            # the VL result's own cash rows and transactions, so nothing
+            # that does not reconcile is ever stored.
+            for sec in parsed_list:
+                reconcile_msgs.extend(reconcile_section(sec))
+
+        # A VL error or a currency mismatch (text path) rejects the whole
+        # file before any section validation or storage (all-or-nothing).
+        if parsed_list is None:
+            msg = '; '.join(reconcile_msgs)
+            self.stderr.write(self.style.ERROR(f'  {msg}'))
+            if not dry_run:
+                safe_name = _unattributable_safe_name(pdf_file.name, hash8)
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
+            return (0, 0, 0, 0, max(1, len(reconcile_msgs)), [], reconcile_msgs,
+                    None if dry_run else safe_name, parsers,
+                    self_check_reasons, 'reconcile_error')
+
+        # Per-section JSON log fields (step 13c-b): transaction count and
+        # reconciliation verdict — names and counts only.
+        for sec in parsed_list:
+            sec['txn_count'] = len(sec.get('transactions') or [])
+            sec['reconcile'] = 'failed' if reconcile_section(sec) else 'ok'
 
         # parsed_list is a list of dicts, one per currency section (CAD, USD, etc.)
         account = None
@@ -675,8 +714,12 @@ class Command(BaseCommand):
         # FileImportLog, no JSON log, no move).
         if dry_run:
             would_import = sum(1 for p in plans if p['action'] == 'import')
-            if conflict_msgs or date_msgs:
-                verdict = 'conflict' if conflict_msgs else 'date_error'
+            # Verdict priority (Q2, tdw Oct 27): the file-level identity and
+            # date problems are the more actionable reason.
+            if conflict_msgs or date_msgs or reconcile_msgs:
+                verdict = ('conflict' if conflict_msgs
+                           else 'date_error' if date_msgs
+                           else 'reconcile_error')
             elif file_errors:
                 verdict = 'error'
             elif plans and all(p['action'] == 'duplicate' for p in plans):
@@ -698,24 +741,29 @@ class Command(BaseCommand):
                     ))
             self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
             return (would_import, 0, 0, 0,
-                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs)
+                    + len(reconcile_msgs),
                     json_sections,
-                    [e['error'] for e in file_errors] + conflict_msgs + date_msgs,
-                    safe_name, parser_used, self_check_reasons, verdict)
+                    [e['error'] for e in file_errors] + conflict_msgs + date_msgs
+                    + reconcile_msgs,
+                    safe_name, parsers, self_check_reasons, verdict)
 
-        # A conflict or a date failure rejects the whole file: nothing from
-        # it is stored (all-or-nothing, tdw Oct 27).
-        if conflict_msgs or date_msgs:
+        # A conflict, a date failure or a reconciliation failure rejects the
+        # whole file: nothing from it is stored (all-or-nothing, tdw Oct 27).
+        if conflict_msgs or date_msgs or reconcile_msgs:
             safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
-            msgs = conflict_msgs + date_msgs
+            msgs = conflict_msgs + date_msgs + reconcile_msgs
             self._log_import(safe_name, 0, 'error', '; '.join(msgs),
                              content_hash=full_hash)
-            verdict = 'conflict' if conflict_msgs else 'date_error'
+            verdict = ('conflict' if conflict_msgs
+                       else 'date_error' if date_msgs
+                       else 'reconcile_error')
             return (0, 0, 0, 0,
-                    len(file_errors) + len(conflict_msgs) + len(date_msgs),
+                    len(file_errors) + len(conflict_msgs) + len(date_msgs)
+                    + len(reconcile_msgs),
                     json_sections,
                     [e['error'] for e in file_errors] + msgs,
-                    safe_name, parser_used, self_check_reasons, verdict)
+                    safe_name, parsers, self_check_reasons, verdict)
 
         # ── Pass 2: store the non-duplicate sections (all-or-nothing) ──
         # A failure while storing rolls the whole file back: nothing from
@@ -837,7 +885,7 @@ class Command(BaseCommand):
 
         return (stmts_created, txns_imported, bals_imported, holdings_imported,
                 len(file_errors), json_sections, [e['error'] for e in file_errors],
-                safe_name, parser_used, self_check_reasons, verdict)
+                safe_name, parsers, self_check_reasons, verdict)
 
     # ------------------------------------------------------------------
     # Helpers

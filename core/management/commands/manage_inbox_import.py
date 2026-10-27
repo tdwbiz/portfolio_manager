@@ -44,7 +44,14 @@ from core.utils.account_fingerprint import (
     normalize_account_number,
     scrub_text,
 )
-from core.utils.safe_names import ANNUAL, MONTHLY, UNKNOWN, hash8_of, safe_file_name
+from core.utils.import_checks import content_hash_of, is_content_imported
+from core.utils.safe_names import (
+    ANNUAL,
+    MONTHLY,
+    UNKNOWN,
+    is_safe_file_name,
+    safe_file_name,
+)
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
@@ -148,8 +155,49 @@ class Command(BaseCommand):
         for i, pdf_file in enumerate(pdf_files, 1):
             # Content-based hash: the original file name carries the account
             # number and must never appear in stdout, logs or new names.
-            h8 = hash8_of(pdf_file)
+            full_hash = content_hash_of(pdf_file)
+            h8 = full_hash[:8]
             self.stdout.write(f'\n[{i}/{total}] {h8}.pdf')
+
+            # ── Step 0: file-level duplicate check (step 13b) ────────────
+            # The same content already imported successfully → skip before
+            # classify: no VL call, nothing stored. The PDF moves to
+            # processed/ under a uniquified safe name; the JSON log carries
+            # verdict "duplicate" and a FileImportLog row is written.
+            if not dry_run and is_content_imported(full_hash):
+                prior = FileImportLog.objects.filter(
+                    content_hash=full_hash, status__in=('success', 'ok')
+                ).order_by('-imported_at').first()
+                base_name = (
+                    prior.filename
+                    if prior and is_safe_file_name(prior.filename)
+                    else _unattributable_safe_name(pdf_file.name, h8)
+                )
+                safe_name = _unique_destination(processed_dir, base_name).name
+                self.stdout.write(self.style.SUCCESS(
+                    f'  Duplicate content — already imported as {base_name}; '
+                    'skipping (no classify, no VL call)'
+                ))
+                self._log_import(safe_name, 0, 'duplicate',
+                                 'Content already imported',
+                                 content_hash=full_hash)
+                json_data = {
+                    'type': 'duplicate',
+                    'filename': safe_name,
+                    'processed_at': timezone.now().isoformat(),
+                    'verdict': 'duplicate',
+                    'errors': 0,
+                    'error_messages': [],
+                }
+                json_path = _json_log_path(json_dir, safe_name, has_error=False)
+                try:
+                    with open(json_path, 'w', encoding='utf-8') as fh:
+                        fh.write(_scrubbed_json(json_data, name_map))
+                except OSError as exc:
+                    logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
+                _move_file(pdf_file, processed_dir / safe_name, h8)
+                duplicates += 1
+                continue
 
             # ── Step 1: classify ──────────────────────────────────────────
             self.stdout.write('  Classifying...')
@@ -160,7 +208,7 @@ class Command(BaseCommand):
             if doc_type == 'annual':
                 classified_annual += 1
                 rec, errs, err_msg, annual_data, safe_name = self._process_annual(
-                    pdf_file, dry_run, h8
+                    pdf_file, dry_run, h8, full_hash
                 )
                 imported_annual += rec
                 errors += errs
@@ -175,7 +223,7 @@ class Command(BaseCommand):
                 classified_monthly += 1
                 (stmts, txns, bals, holdings, errs, json_sections, err_msgs,
                  safe_name, parser_used, self_check_reasons) = (
-                    self._process_monthly(pdf_file, dry_run, name_map, h8)
+                    self._process_monthly(pdf_file, dry_run, name_map, h8, full_hash)
                 )
                 imported_monthly_stmts += stmts
                 imported_transactions += txns
@@ -208,11 +256,13 @@ class Command(BaseCommand):
                     )
                 )
                 if not dry_run:
-                    self._log_import(safe_name, 0, 'error', 'Document type unknown')
+                    self._log_import(safe_name, 0, 'error', 'Document type unknown',
+                                     content_hash=full_hash)
                     json_data = {
                         'type': 'unknown',
                         'filename': safe_name,
                         'processed_at': timezone.now().isoformat(),
+                        'verdict': 'error',
                         'errors': 1,
                         'error_messages': (
                             'VL classifier could not identify document type. '
@@ -276,7 +326,7 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
 
     def _process_annual(
-        self, pdf_file: Path, dry_run: bool, hash8: str
+        self, pdf_file: Path, dry_run: bool, hash8: str, full_hash: str
     ) -> tuple[int, int, str, dict, str | None]:
         """Parse and import an annual report PDF.
 
@@ -289,7 +339,8 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
             if not dry_run:
                 safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                self._log_import(safe_name, 0, 'error', str(exc))
+                self._log_import(safe_name, 0, 'error', str(exc),
+                                 content_hash=full_hash)
                 return 0, 1, str(exc), {}, safe_name
             return 0, 1, str(exc), {}, None
 
@@ -314,7 +365,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'  {hash8}.pdf: {msg}'))
             safe_name = _annual_safe_name(pdf_file.name, None, parsed.get('report_year'), hash8)
             if not dry_run:
-                self._log_import(safe_name, 0, 'error', msg)
+                self._log_import(safe_name, 0, 'error', msg, content_hash=full_hash)
             return 0, 1, msg, parsed, safe_name
 
         safe_name = _annual_safe_name(pdf_file.name, account.name, parsed.get('report_year'), hash8)
@@ -372,12 +423,14 @@ class Command(BaseCommand):
                     f'  Imported annual: {safe_name} -> {records_created} record(s)'
                 )
             )
-            self._log_import(safe_name, records_created, 'ok', '')
+            self._log_import(safe_name, records_created, 'ok', '',
+                             content_hash=full_hash)
         else:
             self.stdout.write(
                 self.style.WARNING(f'  All duplicates: {safe_name}')
             )
-            self._log_import(safe_name, 0, 'ok', 'All records already exist')
+            self._log_import(safe_name, 0, 'ok', 'All records already exist',
+                             content_hash=full_hash)
 
         return records_created, 0, '', parsed, safe_name
 
@@ -386,7 +439,8 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
 
     def _process_monthly(
-        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str], hash8: str
+        self, pdf_file: Path, dry_run: bool, name_map: dict[str, str],
+        hash8: str, full_hash: str,
     ) -> tuple[int, int, int, int, int, list, list, str | None]:
         """Parse and import a monthly statement PDF.
 
@@ -437,7 +491,8 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
                 if not dry_run:
                     safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                    self._log_import(safe_name, 0, 'error', str(exc))
+                    self._log_import(safe_name, 0, 'error', str(exc),
+                                     content_hash=full_hash)
                     return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
                             parser_used, self_check_reasons)
                 return (0, 0, 0, 0, 1, [], [str(exc)], None,
@@ -615,6 +670,7 @@ class Command(BaseCommand):
                 stmts_created + txns_imported + bals_imported + holdings_imported,
                 'success',
                 '',
+                content_hash=full_hash,
             )
 
         return (stmts_created, txns_imported, bals_imported, holdings_imported,
@@ -625,7 +681,8 @@ class Command(BaseCommand):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _log_import(self, filename: str, records: int, status: str, error_msg: str):
+    def _log_import(self, filename: str, records: int, status: str, error_msg: str,
+                    content_hash: str = ""):
         """Create a FileImportLog entry."""
         FileImportLog.objects.create(
             filename=filename,
@@ -635,6 +692,7 @@ class Command(BaseCommand):
             records_skipped=0,
             status=status,
             error_message=error_msg,
+            content_hash=content_hash,
         )
 
 
@@ -675,6 +733,26 @@ def _annual_safe_name(original_name, account_name, report_year, hash8: str) -> s
 def _unattributable_safe_name(original_name: str, hash8: str) -> str:
     """Safe name for a PDF that cannot be attributed to an account."""
     return safe_file_name(original_name, 'UNKNOWN_ACCOUNT', UNKNOWN, hash8=hash8)
+
+
+def _unique_destination(directory: Path, name: str) -> Path:
+    """``directory/name``, uniquified with a ``_dup`` suffix if it exists.
+
+    Re-imported duplicate content must never overwrite the file (or its JSON
+    log) from the original import.
+    """
+    dest = directory / name
+    if not dest.exists():
+        return dest
+    stem, dot, ext = name.rpartition('.')
+    base = stem if dot else name
+    suffix = f'.{ext}' if dot else ''
+    n = 1
+    while True:
+        candidate = directory / f'{base}_dup{n}{suffix}'
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 def _coerce_statement_date(value):

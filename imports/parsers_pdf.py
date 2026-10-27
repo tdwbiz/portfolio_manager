@@ -19,6 +19,18 @@ CONTRIBUTION_HEADER = re.compile(r'Contribution\s+Summary', re.IGNORECASE)
 ASSET_REVIEW_HEADER = re.compile(r'Asset\s+Review', re.IGNORECASE)
 ACCOUNT_ACTIVITY_HEADER = re.compile(r'Account\s+Activity', re.IGNORECASE)
 
+# Asset Review holdings table (layout per docs/audit/05-text-parser-check.md):
+# a header line carrying "SECURITY … QUANTITY", then holding rows whose fixed
+# columns are right-anchored:
+#   ... DESCRIPTION SYMBOL QTY MKT_PRICE BOOK_COST $MARKET_VALUE
+ASSET_REVIEW_TABLE_HEADER = re.compile(r'SECURITY\s+QUANTITY', re.IGNORECASE)
+HOLDINGS_FOOTNOTES_HEADER = re.compile(r'^\s*FOOTNOTES\b', re.IGNORECASE)
+_HOLDING_SYMBOL = re.compile(r'^[A-Z][A-Z0-9.\-]{1,9}$')
+_HOLDING_QTY = re.compile(r'^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$')
+_HOLDING_PRICE = re.compile(r'^\d+(?:\.\d+)?$')
+_HOLDING_MONEY = re.compile(r'^[\d,]+\.\d+$')
+_HOLDING_MV = re.compile(r'^\$[\d,]+\.\d+$')
+
 # Metadata patterns
 FX_RATE_PATTERN = re.compile(
     r'Exchange rate\s+1\s*USD\s*=\s*([\d.]+)\s*CAD', re.IGNORECASE
@@ -510,6 +522,98 @@ def _parse_contribution_summary(text: str) -> dict[str, Any]:
     return result
 
 
+def _parse_asset_review(text: str) -> list[dict[str, Any]]:
+    """Parse the Asset Review holdings table.
+
+    Returns one dict per holding row with the same keys as the VL parser's
+    holdings (``_coerce_response`` in ``imports/parsers_monthly_vl.py``):
+    ``security``, ``symbol``, ``quantity``, ``book_cost``, ``market_price``,
+    ``market_value``.
+
+    The fixed columns are right-anchored on each row; the security description
+    may span continuation lines and carries no dollar value. Total lines are
+    skipped in both layouts (recent: "Total Value of …", old: joined words like
+    "TotalValueof…").
+
+    A column that cannot be read is returned as ``None`` — never 0 as a
+    placeholder; the self-check (``self_check_sections``) fails on it and the
+    file goes to the VL parser.
+    """
+    lines = text.split('\n')
+    start = None
+    for i, line in enumerate(lines):
+        if ASSET_REVIEW_TABLE_HEADER.search(line):
+            start = i
+            break
+    if start is None:
+        return []
+
+    # End of the table: the next statement section or the footnotes block.
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        candidate = lines[j]
+        if (ACCOUNT_ACTIVITY_HEADER.search(candidate)
+                or HOLDINGS_FOOTNOTES_HEADER.match(candidate.strip())
+                or ASSET_SUMMARY_HEADER.search(candidate)
+                or CASH_BALANCE_HEADER.search(candidate)
+                or INCOME_SUMMARY_HEADER.search(candidate)
+                or CONTRIBUTION_HEADER.search(candidate)):
+            end = j
+            break
+
+    def _decimal(pattern: re.Pattern, value: str) -> Decimal | None:
+        if not pattern.match(value):
+            return None
+        try:
+            return Decimal(value.replace('$', '').replace(',', ''))
+        except InvalidOperation:
+            return None
+
+    holdings: list[dict[str, Any]] = []
+    for line in lines[start + 1:end]:
+        stripped = line.strip()
+        if not stripped or set(stripped) <= {'-', '_', ' '}:
+            continue
+        # Total lines — recent layout "Total Value of …", old layout joined words.
+        if re.match(r'(?i)^total', stripped):
+            continue
+        # A holding row carries the $ market value; description continuation
+        # lines and category headers do not.
+        tokens = stripped.split()
+        if not any(_HOLDING_MV.match(t) for t in tokens):
+            continue
+        if len(tokens) >= 5 and _HOLDING_MV.match(tokens[-1]):
+            symbol_s, qty_s, price_s, cost_s, mv_s = tokens[-5:]
+            if (_HOLDING_SYMBOL.match(symbol_s) and _HOLDING_QTY.match(qty_s)
+                    and _HOLDING_PRICE.match(price_s)
+                    and _HOLDING_MONEY.match(cost_s)):
+                holdings.append({
+                    'security': ' '.join(tokens[:-5]),
+                    'symbol': symbol_s,
+                    'quantity': _decimal(_HOLDING_QTY, qty_s),
+                    'book_cost': _decimal(_HOLDING_MONEY, cost_s),
+                    'market_price': _decimal(_HOLDING_PRICE, price_s),
+                    'market_value': _decimal(_HOLDING_MV, mv_s),
+                })
+                continue
+        # A holding row whose fixed columns cannot be read in order (e.g. a
+        # missing column shifts the tokens). Fail loud — never store 0 as a
+        # placeholder: the self-check fails on the None fields and the file
+        # goes to the VL parser.
+        holdings.append({
+            'security': stripped,
+            'symbol': '',
+            'quantity': None,
+            'book_cost': None,
+            'market_price': None,
+            'market_value': _decimal(
+                _HOLDING_MV,
+                next(t for t in reversed(tokens) if _HOLDING_MV.match(t)),
+            ),
+        })
+    return holdings
+
+
 def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]:
     """Parse the Account Activity table.
 
@@ -913,6 +1017,12 @@ def parse_rbc_pdf(file_path: str) -> dict:
         logger.warning("Error parsing account activity: %s", e)
         transactions = []
 
+    try:
+        holdings = _parse_asset_review(full_text)
+    except Exception as e:
+        logger.warning("Error parsing asset review: %s", e)
+        holdings = []
+
     return {
         'statement_date': statement_date,
         'last_statement_date': last_statement_date,
@@ -921,6 +1031,7 @@ def parse_rbc_pdf(file_path: str) -> dict:
         'begin_total_market_value': asset_data['begin_total'],
         'end_total_market_value': asset_data['end_total'],
         'balances': all_balances,
+        'holdings': holdings,
         'transactions': transactions,
         'income_summary': income_summary,
         'contribution_summary': contribution_summary,
@@ -1052,6 +1163,12 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
             logger.warning("Error parsing account activity for %s: %s", currency, e)
             transactions = []
 
+        try:
+            holdings = _parse_asset_review(section_text)
+        except Exception as e:
+            logger.warning("Error parsing asset review for %s: %s", currency, e)
+            holdings = []
+
         # Tag transactions with currency
         for tx in transactions:
             tx['currency'] = currency
@@ -1065,6 +1182,7 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
             'begin_total_market_value': asset_data['begin_total'],
             'end_total_market_value': asset_data['end_total'],
             'balances': all_balances,
+            'holdings': holdings,
             'transactions': transactions,
             'income_summary': income_summary,
             'contribution_summary': contribution_summary,

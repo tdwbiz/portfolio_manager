@@ -184,6 +184,83 @@ class TestStatementDateLayouts(TestCase):
         self.assertEqual(sections[0]['statement_date'], date(2025, 9, 30))
 
 
+# Step 12b test fixture: Asset Review holdings table in the real layout —
+# two-line header (SECURITY … QUANTITY on the first line), right-anchored
+# fixed columns, description words before the symbol, and a joined-word total
+# line as in the old layout. Fake numbers only.
+ASSET_REVIEW_PDF_TEXT = """
+RRSP Statement OCT 31 2025
+Your Account Number: 900-00005-1-8
+Date of Last Statement: SEPT 30 2025
+
+--------------------------------------------------------------------------------
+Asset Review  ( Exchange rate 1USD = 1.40000 CAD as of OCT 31, 2025 )
+--------------------------------------------------------------------------------
+SECURITY QUANTITY MKT. PRICE BOOK COST MARKET VALUE
+SYMBOL SEGREGATED RATE
+RBC INVESTMENT SAVINGS ACCOUNT SR A (2010)                RBF2010    150.000     10.500      1,470.00    $1,575.00
+VANGUARD CANADA HIGH DIVIDEND ETF                        VFV         5.000       280.000     1,300.00    $1,400.00
+TotalValueofsecurities                                                       2,770.00    $2,975.00
+
+--------------------------------------------------------------------------------
+Account Activity
+--------------------------------------------------------------------------------
+DATE        ACTIVITY    DESCRIPTION                                    PRICE/RATE    QUANTITY    DEBIT    CREDIT
+"""
+
+
+class TestAssetReviewHoldings(TestCase):
+    """Step 12b test 3: holdings from a synthetic Asset Review table."""
+
+    def test_holdings_parsed_with_vl_shaped_keys(self):
+        result = parse_rbc_pdf(ASSET_REVIEW_PDF_TEXT)
+        holdings = result['holdings']
+        self.assertEqual(len(holdings), 2)
+        for h in holdings:
+            self.assertEqual(
+                set(h.keys()),
+                {'security', 'symbol', 'quantity', 'book_cost',
+                 'market_price', 'market_value'},
+            )
+        by_symbol = {h['symbol']: h for h in holdings}
+        self.assertEqual(set(by_symbol), {'RBF2010', 'VFV'})
+
+        rbf = by_symbol['RBF2010']
+        self.assertEqual(rbf['security'], 'RBC INVESTMENT SAVINGS ACCOUNT SR A (2010)')
+        self.assertEqual(rbf['quantity'], Decimal('150.000'))
+        self.assertEqual(rbf['book_cost'], Decimal('1470.00'))
+        self.assertEqual(rbf['market_price'], Decimal('10.500'))
+        self.assertEqual(rbf['market_value'], Decimal('1575.00'))
+
+        vfv = by_symbol['VFV']
+        self.assertEqual(vfv['security'], 'VANGUARD CANADA HIGH DIVIDEND ETF')
+        self.assertEqual(vfv['quantity'], Decimal('5.000'))
+        self.assertEqual(vfv['book_cost'], Decimal('1300.00'))
+        self.assertEqual(vfv['market_price'], Decimal('280.000'))
+        self.assertEqual(vfv['market_value'], Decimal('1400.00'))
+
+    def test_holdings_key_present_in_multi_entry_point(self):
+        sections = parse_rbc_pdf_multi(ASSET_REVIEW_PDF_TEXT)
+        self.assertEqual(len(sections), 1)
+        self.assertIn('holdings', sections[0])
+        self.assertEqual(len(sections[0]['holdings']), 2)
+
+    def test_unreadable_book_cost_is_none_not_zero(self):
+        # A holding row whose BOOK COST column is missing: the parser must not
+        # invent a 0 — it returns None and the self-check (step 4) fails on it.
+        text = ASSET_REVIEW_PDF_TEXT.replace(
+            'VFV         5.000       280.000     1,300.00    $1,400.00',
+            'VFV         5.000       280.000                 $1,400.00',
+        )
+        holdings = parse_rbc_pdf(text)['holdings']
+        self.assertEqual(len(holdings), 2)
+        # The shifted row is kept (its $ market value is still readable) but
+        # with unreadable columns — never a placeholder 0.
+        vfv = next(h for h in holdings if h['market_value'] == Decimal('1400.00'))
+        self.assertIsNone(vfv['book_cost'])
+        self.assertIsNone(vfv['quantity'])
+
+
 class TestParseRbcDate(TestCase):
     """Test the _parse_rbc_date helper function."""
 

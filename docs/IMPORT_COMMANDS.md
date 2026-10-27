@@ -70,6 +70,7 @@ python manage.py watch_inbox --interval 300
 | `audit_fx` | Audit/repair `amount_cad` on transactions |
 | `merge_duplicate_accounts` | Merge auto-created duplicate accounts |
 | `clean_misclassified_annuals` | Delete RbcMonthly records created from annual report PDFs |
+| `dedupe_monthly_statements` | Report duplicate RbcMonthly pairs (same account/date/currency); `--apply` deletes the higher-id row of each identical pair |
 
 ## Workflow
 

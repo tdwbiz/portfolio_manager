@@ -356,6 +356,49 @@ def _parse_date(date_str: str) -> date:
     return datetime.strptime(cleaned, '%B %d %Y').date()
 
 
+def holdings_import_report(file_path: str) -> dict:
+    """Parse a Holdings CSV and report what an import would touch.
+
+    Returns a dict with:
+      - ``positions``: the parsed position dicts (as :func:`parse_holdings_csv`);
+      - ``snapshot_date``: the snapshot date, or None;
+      - ``sections``: one entry per (account name, currency) group with the
+        holdings count.
+
+    The report carries names and counts only — never quantities, prices or
+    account digits (import-checks plan step 13b). Unresolvable, UNKNOWN and
+    PRACEF account ids are labelled ``UNKNOWN_ACCOUNT``.
+    """
+    positions = parse_holdings_csv(file_path)
+    snapshot_date = positions[0]['snapshot_date'] if positions else None
+
+    name_cache: dict[str, str] = {}
+    counts: dict[tuple[str, str], int] = {}
+    for pos in positions:
+        acct_id = (pos.get('account_id') or '').strip()
+        if not acct_id or acct_id == 'UNKNOWN' or acct_id.startswith('PRACEF'):
+            label = 'UNKNOWN_ACCOUNT'
+        else:
+            if acct_id not in name_cache:
+                account = lookup_account(acct_id)
+                name_cache[acct_id] = (
+                    account.name if account is not None else 'UNKNOWN_ACCOUNT'
+                )
+            label = name_cache[acct_id]
+        key = (label, pos.get('currency') or 'CAD')
+        counts[key] = counts.get(key, 0) + 1
+
+    sections = [
+        {'account': account, 'currency': currency, 'holdings': n}
+        for (account, currency), n in sorted(counts.items())
+    ]
+    return {
+        'positions': positions,
+        'snapshot_date': snapshot_date,
+        'sections': sections,
+    }
+
+
 def import_holdings_snapshot(
     file_path: str,
     dry_run: bool = False,

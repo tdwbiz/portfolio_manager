@@ -136,6 +136,12 @@ gating a per-file fallback to VL. This section records the four-PDF comparison r
 `pm-logs/text_parser_check.py` (untracked; `portfolio_manager.settings_test` only, VL = Halogen
 on port 11435). Verdicts only — no account numbers, names, amounts, quantities or prices.
 
+Re-run after the Oct 26 follow-up decisions: the self-check additionally fails on an
+unsplit currency section (sections parsed vs Asset Summary / Asset Review table headers in
+the full text; reason names only the counts) and when the statement date is not 1–100 days
+after the last statement date, and `_extract_statement_date` requires a whole 4-digit year
+(word boundary) between 2000 and next year. All four files still pass.
+
 Files: `check-1.pdf` (2025, recent layout, CAD), `check-2.pdf` (2020, old layout, CAD),
 `check-3.pdf` (2020, old statement, CAD + USD) and `check-4.pdf` (2025, recent, CAD + USD);
 check-3 and check-4 are the same account.
@@ -160,8 +166,9 @@ Notes:
   not affect the verdict.
 - Fallback verdict: all four files pass the self-check, so under the new text-first routing
   none of them would be sent to VL; VL remains the fallback for any file whose self-check
-  returns a reason (missing date, unreadable book_cost, quantity × price beyond 0.1 percent of
-  market value, or holdings + cash ≠ end total to the cent).
+  returns a reason (missing date, statement date not 1–100 days after the last statement
+  date, currency-section count mismatch, unreadable book_cost, quantity × price beyond
+  0.1 percent of market value, or holdings + cash ≠ end total to the cent).
 
-Timings (per file): text parser 0.4–1.0 s; VL parser 36–74 s (Halogen; regex fallback not
-used on any file).
+Timings (per file, Oct 26 re-run): text parser 0.3–1.0 s; VL parser 26–48 s (Halogen;
+regex fallback not used on any file).

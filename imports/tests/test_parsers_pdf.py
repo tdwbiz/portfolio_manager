@@ -13,7 +13,7 @@ from io import BytesIO
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from core.utils.account_fingerprint import fingerprint_account_number
-from imports.parsers_pdf import parse_rbc_pdf, _parse_rbc_date
+from imports.parsers_pdf import parse_rbc_pdf, parse_rbc_pdf_multi, _parse_rbc_date
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +145,43 @@ Account Activity
 DATE        ACTIVITY    DESCRIPTION                                    PRICE/RATE    QUANTITY    DEBIT    CREDIT
 NOV 01      INTEREST    RBC INVESTMENT SAVINGS                            0.10                     $0.10
 """
+
+
+# Step 12b test fixtures: statement date with month/day mid-line and the year
+# on the next line (both layouts — see docs/audit/05-text-parser-check.md).
+RECENT_LAYOUT_DATE_TEXT = """
+RRSP Statement SEPT 30
+2025
+Your Account Number: 900-00001-1-8
+Date of Last Statement: AUG. 29 2025
+"""
+
+OLD_LAYOUT_DATE_TEXT = """
+Cdn. Dollar Statement MAR. 31
+2020
+Your Account Number: 900-00002-1-8
+Date of Last Statement: FEB. 28 2020
+"""
+
+
+class TestStatementDateLayouts(TestCase):
+    """Step 12b tests 1-2: statement date with month/day mid-line, year on next line."""
+
+    def test_recent_layout_date_found(self):
+        result = parse_rbc_pdf(RECENT_LAYOUT_DATE_TEXT)
+        self.assertEqual(result['statement_date'], date(2025, 9, 30))
+        # The "Date of Last Statement" line must not be taken as the statement date.
+        self.assertEqual(result['last_statement_date'], date(2025, 8, 29))
+
+    def test_old_layout_date_found(self):
+        result = parse_rbc_pdf(OLD_LAYOUT_DATE_TEXT)
+        self.assertEqual(result['statement_date'], date(2020, 3, 31))
+        self.assertEqual(result['last_statement_date'], date(2020, 2, 28))
+
+    def test_recent_layout_date_found_multi(self):
+        sections = parse_rbc_pdf_multi(RECENT_LAYOUT_DATE_TEXT)
+        self.assertEqual(len(sections), 1)
+        self.assertEqual(sections[0]['statement_date'], date(2025, 9, 30))
 
 
 class TestParseRbcDate(TestCase):

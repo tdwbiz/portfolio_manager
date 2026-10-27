@@ -96,6 +96,57 @@ def _extract_date_from_filename(file_name: str) -> date | None:
     return None
 
 
+def _extract_statement_date(lines: list[str]) -> date | None:
+    """Extract the statement date from header lines (shared by both entry points).
+
+    Handles the shapes seen in RBC statements:
+    - single line: "SEPT 30 2025" (month, day and year together);
+    - two lines with the month/day at the start of the line: "SEPT 30" / "2025";
+    - two lines with the month/day mid-line — both layouts: e.g.
+      "RRSP Statement SEPT 30" / "2025" (the year sits on the next line).
+
+    The "Date of Last Statement" line is excluded in every shape. Returns None
+    when no date can be read.
+    """
+    month_day_pat = re.compile(
+        r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})',
+        re.IGNORECASE,
+    )
+    for i, line in enumerate(lines):
+        if 'last statement' in line.lower():
+            continue
+
+        # Single-line match: "SEPT 30 2025"
+        date_match = STATEMENT_DATE_PATTERN.search(line)
+        if date_match:
+            try:
+                return _parse_rbc_date(
+                    f"{date_match.group(1)} {int(date_match.group(2))}",
+                    int(date_match.group(3)),
+                )
+            except ValueError:
+                logger.warning("Could not parse statement date: %s", date_match.group(0))
+                continue
+
+        # Two-line match: month+day anywhere on this line, year alone on the next.
+        if i + 1 < len(lines):
+            month_match = month_day_pat.search(line)
+            year_match = re.fullmatch(r'(\d{4})', lines[i + 1].strip())
+            if month_match and year_match:
+                try:
+                    return _parse_rbc_date(
+                        f"{month_match.group(1)} {int(month_match.group(2))}",
+                        int(year_match.group(1)),
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Could not parse statement date: %s %s",
+                        month_match.group(0), year_match.group(0),
+                    )
+                    continue
+    return None
+
+
 def _clean_currency(value_str: str) -> Decimal:
     """Convert a dollar string like '$1,036.34' to Decimal."""
     if not value_str or value_str.strip() == '':
@@ -763,53 +814,8 @@ def parse_rbc_pdf(file_path: str) -> dict:
     if fx_match:
         fx_rate = Decimal(fx_match.group(1))
 
-    statement_date = None
+    statement_date = _extract_statement_date(full_text.split('\n'))
     last_statement_date = None
-
-    # Extract statement date from header — look for the main header line
-    # The header typically has "SEPT 30 2025" near the top, before "Date of Last Statement"
-    # Some PDFs split month+day and year across two lines (e.g. "SEPT 30\n2025")
-    lines = full_text.split('\n')
-    for i, line in enumerate(lines):
-        # Try single-line match first: "SEPT 30 2025"
-        date_match = STATEMENT_DATE_PATTERN.search(line)
-        if date_match:
-            month_str = date_match.group(1)
-            day = int(date_match.group(2))
-            year = int(date_match.group(3))
-            if 'last statement' in line.lower():
-                continue
-            try:
-                # Build full month+day string so _parse_rbc_date gets the day
-                full_month_str = f"{month_str} {day}"
-                statement_date = _parse_rbc_date(full_month_str, year)
-                break
-            except ValueError:
-                logger.warning("Could not parse statement date: %s", date_match.group(0))
-                continue
-
-        # Try two-line match: "SEPT 30" on this line, "2025" on next line
-        if i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            month_match = re.match(
-                r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})',
-                line.strip(), re.IGNORECASE,
-            )
-            year_match = re.match(r'^(\d{4})$', next_line)
-            if month_match and year_match:
-                month_str = month_match.group(1)
-                day = int(month_match.group(2))
-                year = int(year_match.group(1))
-                if 'last statement' in line.lower():
-                    continue
-                try:
-                    # Build a full date string so _parse_rbc_date gets the day
-                    full_month_str = f"{month_str} {day}"
-                    statement_date = _parse_rbc_date(full_month_str, year)
-                    break
-                except ValueError:
-                    logger.warning("Could not parse statement date: %s %s", month_match.group(0), year_match.group(0))
-                    continue
 
     # Extract last statement date
     last_stmt_match = LAST_STATEMENT_PATTERN.search(full_text)
@@ -956,26 +962,8 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
 
     results = []
     for currency, section_text in sections:
-        statement_date = None
+        statement_date = _extract_statement_date(section_text.split('\n'))
         last_statement_date = None
-
-        # Extract statement date
-        lines = section_text.split('\n')
-        for i, line in enumerate(lines):
-            date_match = STATEMENT_DATE_PATTERN.search(line)
-            if date_match:
-                month_str = date_match.group(1)
-                day = int(date_match.group(2))
-                year = int(date_match.group(3))
-                if 'last statement' in line.lower():
-                    continue
-                try:
-                    full_month_str = f"{month_str} {day}"
-                    statement_date = _parse_rbc_date(full_month_str, year)
-                    break
-                except ValueError:
-                    logger.warning("Could not parse statement date: %s", date_match.group(0))
-                    continue
 
         # Extract last statement date
         last_stmt_match = LAST_STATEMENT_PATTERN.search(section_text)

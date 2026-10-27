@@ -753,6 +753,10 @@ class Command(BaseCommand):
         if conflict_msgs or date_msgs or reconcile_msgs:
             safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
             msgs = conflict_msgs + date_msgs + reconcile_msgs
+            # The reconcile reasons were not printed during pass 1 (they come
+            # from the gate), so print them here — fields/currencies only.
+            for msg in reconcile_msgs:
+                self.stderr.write(self.style.ERROR(f'  {msg}'))
             self._log_import(safe_name, 0, 'error', '; '.join(msgs),
                              content_hash=full_hash)
             verdict = ('conflict' if conflict_msgs

@@ -19,6 +19,18 @@ CONTRIBUTION_HEADER = re.compile(r'Contribution\s+Summary', re.IGNORECASE)
 ASSET_REVIEW_HEADER = re.compile(r'Asset\s+Review', re.IGNORECASE)
 ACCOUNT_ACTIVITY_HEADER = re.compile(r'Account\s+Activity', re.IGNORECASE)
 
+# Asset Review holdings table (layout per docs/audit/05-text-parser-check.md):
+# a header line carrying "SECURITY … QUANTITY", then holding rows whose fixed
+# columns are right-anchored:
+#   ... DESCRIPTION SYMBOL QTY MKT_PRICE BOOK_COST $MARKET_VALUE
+ASSET_REVIEW_TABLE_HEADER = re.compile(r'SECURITY\s+QUANTITY', re.IGNORECASE)
+HOLDINGS_FOOTNOTES_HEADER = re.compile(r'^\s*FOOTNOTES\b', re.IGNORECASE)
+_HOLDING_SYMBOL = re.compile(r'^[A-Z][A-Z0-9.\-]{1,9}$')
+_HOLDING_QTY = re.compile(r'^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$')
+_HOLDING_PRICE = re.compile(r'^\d+(?:\.\d+)?$')
+_HOLDING_MONEY = re.compile(r'^[\d,]+\.\d+$')
+_HOLDING_MV = re.compile(r'^\$[\d,]+\.\d+$')
+
 # Metadata patterns
 FX_RATE_PATTERN = re.compile(
     r'Exchange rate\s+1\s*USD\s*=\s*([\d.]+)\s*CAD', re.IGNORECASE
@@ -36,11 +48,22 @@ MONTH_ABBREVS = (
     'SEPT', 'SEP', 'OCT', 'NOV', 'DEC',
 )
 
-# Match full month names or abbreviations (including SEPT), optional dot, then day and year.
+# Match full month names or abbreviations (including SEPT), optional dot, then day and
+# year. The year must be a whole 4-digit number: the lookarounds keep the last four
+# digits of a longer number from counting as a year.
 STATEMENT_DATE_PATTERN = re.compile(
-    r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})\s+(\d{4})',
+    r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})\s+(?<!\d)(\d{4})(?!\d)',
     re.IGNORECASE,
 )
+
+# Two-line shape: the year sits at the end of the next line, again as a whole
+# 4-digit number (word boundary on both sides).
+_STATEMENT_YEAR_EOL = re.compile(r'(?<!\d)(\d{4})(?!\d)\s*$')
+
+
+def _statement_year_ok(year: int) -> bool:
+    """Sanity window for a statement year: 2000 .. next year (inclusive)."""
+    return 2000 <= year <= date.today().year + 1
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,6 +119,75 @@ def _extract_date_from_filename(file_name: str) -> date | None:
     return None
 
 
+def _extract_statement_date(lines: list[str]) -> date | None:
+    """Extract the statement date from header lines (shared by both entry points).
+
+    Handles the shapes seen in RBC statements:
+    - single line: "SEPT 30 2025" (month, day and year together);
+    - two lines with the month/day at the start of the line: "SEPT 30" / "2025";
+    - two lines with the month/day mid-line — both layouts: e.g.
+      "Order Execution Only SEPT 30" / "Cdn. Dollar Statement 2025"
+      (the year sits at the end of the next line, which may carry other words).
+
+    The year must be a whole 4-digit number (word boundary — the last four digits
+    of a longer number never count) between 2000 and next year; anything else is
+    skipped. The "Date of Last Statement" line is excluded in every shape.
+    Returns None when no date can be read.
+    """
+    month_day_pat = re.compile(
+        r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})',
+        re.IGNORECASE,
+    )
+    for i, line in enumerate(lines):
+        if 'last statement' in line.lower():
+            continue
+
+        # Single-line match: "SEPT 30 2025"
+        date_match = STATEMENT_DATE_PATTERN.search(line)
+        if date_match:
+            year = int(date_match.group(3))
+            if not _statement_year_ok(year):
+                logger.warning(
+                    "Statement date year outside 2000..next year: %s",
+                    date_match.group(0),
+                )
+                continue
+            try:
+                return _parse_rbc_date(
+                    f"{date_match.group(1)} {int(date_match.group(2))}",
+                    year,
+                )
+            except ValueError:
+                logger.warning("Could not parse statement date: %s", date_match.group(0))
+                continue
+
+        # Two-line match: month+day anywhere on this line, the year at the end
+        # of the next line (a bare "2025" line ends with its year too).
+        if i + 1 < len(lines):
+            month_match = month_day_pat.search(line)
+            year_match = _STATEMENT_YEAR_EOL.search(lines[i + 1].strip())
+            if month_match and year_match:
+                year = int(year_match.group(1))
+                if not _statement_year_ok(year):
+                    logger.warning(
+                        "Statement date year outside 2000..next year: %s",
+                        year_match.group(0),
+                    )
+                    continue
+                try:
+                    return _parse_rbc_date(
+                        f"{month_match.group(1)} {int(month_match.group(2))}",
+                        int(year_match.group(1)),
+                    )
+                except ValueError:
+                    logger.warning(
+                        "Could not parse statement date: %s %s",
+                        month_match.group(0), year_match.group(0),
+                    )
+                    continue
+    return None
+
+
 def _clean_currency(value_str: str) -> Decimal:
     """Convert a dollar string like '$1,036.34' to Decimal."""
     if not value_str or value_str.strip() == '':
@@ -130,10 +222,11 @@ def _clean_pct(value_str: str) -> Decimal:
 #   - "TFSA Statement (CDN$) 2026"
 #   - "LIF Statement (CDN$) 2026"
 #   - "FHSA Statement (CDN$) 2026"
+#   - "RRIF Statement (CDN$) 2025"
 #   - "Cdn. Dollar Statement 2022"
 #   - "Your Canadian dollar account" (Annual Investment Performance Report format)
 CAD_STATEMENT_PATTERNS = [
-    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(CDN\$\)', re.IGNORECASE),
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA|RRIF)\s+Statement\s+\(CDN\$\)', re.IGNORECASE),
     re.compile(r'Cdn\.\s*Dollar\s+Statement', re.IGNORECASE),
     re.compile(r'Your\s+Canadian\s+dollar\s+account', re.IGNORECASE),
 ]
@@ -143,10 +236,11 @@ CAD_STATEMENT_PATTERNS = [
 #   - "TFSA Statement (U.S.$) 2026"
 #   - "LIF Statement (U.S.$) 2026"
 #   - "FHSA Statement (U.S.$) 2026"
+#   - "RRIF Statement (U.S.$) 2025"
 #   - "U.S. Dollar Statement"
 #   - "Your U.S. dollar account" (Annual Investment Performance Report format)
 USD_STATEMENT_PATTERNS = [
-    re.compile(r'(?:RRSP|TFSA|LIF|FHSA)\s+Statement\s+\(U\.S\.\$\)', re.IGNORECASE),
+    re.compile(r'(?:RRSP|TFSA|LIF|FHSA|RRIF)\s+Statement\s+\(U\.S\.\$\)', re.IGNORECASE),
     re.compile(r'U\.S\.\s*Dollar\s+Statement', re.IGNORECASE),
     re.compile(r'Your\s+U\.S\.\s*dollar\s+account', re.IGNORECASE),
     re.compile(r'Your\s+US\s+dollar\s+account', re.IGNORECASE),
@@ -457,6 +551,98 @@ def _parse_contribution_summary(text: str) -> dict[str, Any]:
     return result
 
 
+def _parse_asset_review(text: str) -> list[dict[str, Any]]:
+    """Parse the Asset Review holdings table.
+
+    Returns one dict per holding row with the same keys as the VL parser's
+    holdings (``_coerce_response`` in ``imports/parsers_monthly_vl.py``):
+    ``security``, ``symbol``, ``quantity``, ``book_cost``, ``market_price``,
+    ``market_value``.
+
+    The fixed columns are right-anchored on each row; the security description
+    may span continuation lines and carries no dollar value. Total lines are
+    skipped in both layouts (recent: "Total Value of …", old: joined words like
+    "TotalValueof…").
+
+    A column that cannot be read is returned as ``None`` — never 0 as a
+    placeholder; the self-check (``self_check_sections``) fails on it and the
+    file goes to the VL parser.
+    """
+    lines = text.split('\n')
+    start = None
+    for i, line in enumerate(lines):
+        if ASSET_REVIEW_TABLE_HEADER.search(line):
+            start = i
+            break
+    if start is None:
+        return []
+
+    # End of the table: the next statement section or the footnotes block.
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        candidate = lines[j]
+        if (ACCOUNT_ACTIVITY_HEADER.search(candidate)
+                or HOLDINGS_FOOTNOTES_HEADER.match(candidate.strip())
+                or ASSET_SUMMARY_HEADER.search(candidate)
+                or CASH_BALANCE_HEADER.search(candidate)
+                or INCOME_SUMMARY_HEADER.search(candidate)
+                or CONTRIBUTION_HEADER.search(candidate)):
+            end = j
+            break
+
+    def _decimal(pattern: re.Pattern, value: str) -> Decimal | None:
+        if not pattern.match(value):
+            return None
+        try:
+            return Decimal(value.replace('$', '').replace(',', ''))
+        except InvalidOperation:
+            return None
+
+    holdings: list[dict[str, Any]] = []
+    for line in lines[start + 1:end]:
+        stripped = line.strip()
+        if not stripped or set(stripped) <= {'-', '_', ' '}:
+            continue
+        # Total lines — recent layout "Total Value of …", old layout joined words.
+        if re.match(r'(?i)^total', stripped):
+            continue
+        # A holding row carries the $ market value; description continuation
+        # lines and category headers do not.
+        tokens = stripped.split()
+        if not any(_HOLDING_MV.match(t) for t in tokens):
+            continue
+        if len(tokens) >= 5 and _HOLDING_MV.match(tokens[-1]):
+            symbol_s, qty_s, price_s, cost_s, mv_s = tokens[-5:]
+            if (_HOLDING_SYMBOL.match(symbol_s) and _HOLDING_QTY.match(qty_s)
+                    and _HOLDING_PRICE.match(price_s)
+                    and _HOLDING_MONEY.match(cost_s)):
+                holdings.append({
+                    'security': ' '.join(tokens[:-5]),
+                    'symbol': symbol_s,
+                    'quantity': _decimal(_HOLDING_QTY, qty_s),
+                    'book_cost': _decimal(_HOLDING_MONEY, cost_s),
+                    'market_price': _decimal(_HOLDING_PRICE, price_s),
+                    'market_value': _decimal(_HOLDING_MV, mv_s),
+                })
+                continue
+        # A holding row whose fixed columns cannot be read in order (e.g. a
+        # missing column shifts the tokens). Fail loud — never store 0 as a
+        # placeholder: the self-check fails on the None fields and the file
+        # goes to the VL parser.
+        holdings.append({
+            'security': stripped,
+            'symbol': '',
+            'quantity': None,
+            'book_cost': None,
+            'market_price': None,
+            'market_value': _decimal(
+                _HOLDING_MV,
+                next(t for t in reversed(tokens) if _HOLDING_MV.match(t)),
+            ),
+        })
+    return holdings
+
+
 def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]:
     """Parse the Account Activity table.
 
@@ -683,6 +869,122 @@ def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
+# Self-check (step 12b)
+# ---------------------------------------------------------------------------
+
+CENT = Decimal('0.01')
+_PRICE_TOLERANCE = Decimal('0.001')  # 0.1 percent
+_LAST_STATEMENT_MAX_GAP_DAYS = 100
+
+
+def _count_currency_sections(full_text: str) -> int:
+    """Count the currency sections present in the whole statement text.
+
+    Each currency statement carries exactly one Asset Summary table; when no
+    Asset Summary header is present, fall back to the Asset Review holdings
+    table headers ("SECURITY … QUANTITY"). Returns 0 when neither is found —
+    the caller then skips the count check rather than guessing.
+    """
+    lines = full_text.split('\n')
+    n = sum(1 for line in lines if ASSET_SUMMARY_HEADER.search(line))
+    if n:
+        return n
+    return sum(1 for line in lines if ASSET_REVIEW_TABLE_HEADER.search(line))
+
+
+def _section_cash(section: dict) -> Decimal:
+    """Closing cash for one currency section (same source as the 12a check)."""
+    return sum(
+        (Decimal(b.get('market_value') or 0)
+         for b in section.get('balances') or []
+         if str(b.get('account_type', '')).strip().lower() == 'cash'),
+        Decimal('0'),
+    )
+
+
+def self_check_sections(
+    sections: list[dict], full_text: str | None = None,
+) -> list[str]:
+    """Self-check the text parser's sections before they may be stored.
+
+    Returns a list of reasons (empty when the parse is trustworthy). Reasons
+    name only fields, currencies and symbols — never values. When
+    ``full_text`` (the whole statement text) is given, one more check runs:
+
+    - the number of currency sections returned equals the number present in
+      the whole text (Asset Summary / Asset Review table headers counted in
+      the full text); the reason names only the counts. Without this, an
+      unrecognised section header leaves the second currency inside the first
+      section and its holdings, cash and totals are silently lost while the
+      first currency's numbers still reconcile (tdw decision, Oct 26).
+
+    Per currency section:
+
+    - ``statement_date`` is not None;
+    - when ``last_statement_date`` is found, ``statement_date`` is after it
+      and at most 100 days later (tdw decision, Oct 26);
+    - every holding has a readable ``book_cost`` (never 0 as a placeholder);
+    - per holding, ``quantity * market_price`` is within 0.1 percent of
+      ``market_value``;
+    - ``sum(holdings.market_value) + cash == end_total_market_value`` to the
+      cent.
+
+    No begin-total check: only the end total is derivable from holdings +
+    cash on the same statement (tdw decision, Oct 26).
+    """
+    reasons = []
+    if full_text is not None:
+        expected = _count_currency_sections(full_text)
+        parsed = len(sections or [])
+        if expected and parsed != expected:
+            reasons.append(
+                f'currency sections: {parsed} parsed vs {expected} in text'
+            )
+    for section in sections or []:
+        cur = str(section.get('currency') or 'CAD').upper()
+        statement_date = section.get('statement_date')
+        if statement_date is None:
+            reasons.append(f'{cur} statement_date missing')
+        else:
+            last_date = section.get('last_statement_date')
+            if last_date is not None:
+                gap = (statement_date - last_date).days
+                if not 1 <= gap <= _LAST_STATEMENT_MAX_GAP_DAYS:
+                    reasons.append(
+                        f'{cur} statement_date not 1-{_LAST_STATEMENT_MAX_GAP_DAYS}'
+                        ' days after last_statement_date'
+                    )
+
+        mv_sum = Decimal('0')
+        for h in section.get('holdings') or []:
+            sym = str(h.get('symbol') or '?')
+            qty, price, cost, mv = (h.get('quantity'), h.get('market_price'),
+                                    h.get('book_cost'), h.get('market_value'))
+            if cost is None:
+                reasons.append(f'{cur} {sym} book_cost unreadable')
+            if mv is None:
+                reasons.append(f'{cur} {sym} market_value unreadable')
+                continue
+            mv_sum += Decimal(mv)
+            if qty is None or price is None:
+                reasons.append(f'{cur} {sym} quantity/market_price unreadable')
+                continue
+            expected = Decimal(qty) * Decimal(price)
+            if abs(expected - Decimal(mv)) > _PRICE_TOLERANCE * abs(Decimal(mv)):
+                reasons.append(
+                    f'{cur} {sym} quantity*market_price vs market_value '
+                    'beyond 0.1 percent'
+                )
+
+        end_total = section.get('end_total_market_value')
+        if (end_total is None
+                or (mv_sum + _section_cash(section)).quantize(CENT)
+                != Decimal(end_total).quantize(CENT)):
+            reasons.append(f'{cur} holdings+cash != end_total_market_value')
+    return reasons
+
+
+# ---------------------------------------------------------------------------
 # Main parser
 # ---------------------------------------------------------------------------
 
@@ -763,53 +1065,8 @@ def parse_rbc_pdf(file_path: str) -> dict:
     if fx_match:
         fx_rate = Decimal(fx_match.group(1))
 
-    statement_date = None
+    statement_date = _extract_statement_date(full_text.split('\n'))
     last_statement_date = None
-
-    # Extract statement date from header — look for the main header line
-    # The header typically has "SEPT 30 2025" near the top, before "Date of Last Statement"
-    # Some PDFs split month+day and year across two lines (e.g. "SEPT 30\n2025")
-    lines = full_text.split('\n')
-    for i, line in enumerate(lines):
-        # Try single-line match first: "SEPT 30 2025"
-        date_match = STATEMENT_DATE_PATTERN.search(line)
-        if date_match:
-            month_str = date_match.group(1)
-            day = int(date_match.group(2))
-            year = int(date_match.group(3))
-            if 'last statement' in line.lower():
-                continue
-            try:
-                # Build full month+day string so _parse_rbc_date gets the day
-                full_month_str = f"{month_str} {day}"
-                statement_date = _parse_rbc_date(full_month_str, year)
-                break
-            except ValueError:
-                logger.warning("Could not parse statement date: %s", date_match.group(0))
-                continue
-
-        # Try two-line match: "SEPT 30" on this line, "2025" on next line
-        if i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            month_match = re.match(
-                r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})',
-                line.strip(), re.IGNORECASE,
-            )
-            year_match = re.match(r'^(\d{4})$', next_line)
-            if month_match and year_match:
-                month_str = month_match.group(1)
-                day = int(month_match.group(2))
-                year = int(year_match.group(1))
-                if 'last statement' in line.lower():
-                    continue
-                try:
-                    # Build a full date string so _parse_rbc_date gets the day
-                    full_month_str = f"{month_str} {day}"
-                    statement_date = _parse_rbc_date(full_month_str, year)
-                    break
-                except ValueError:
-                    logger.warning("Could not parse statement date: %s %s", month_match.group(0), year_match.group(0))
-                    continue
 
     # Extract last statement date
     last_stmt_match = LAST_STATEMENT_PATTERN.search(full_text)
@@ -905,6 +1162,12 @@ def parse_rbc_pdf(file_path: str) -> dict:
         logger.warning("Error parsing account activity: %s", e)
         transactions = []
 
+    try:
+        holdings = _parse_asset_review(full_text)
+    except Exception as e:
+        logger.warning("Error parsing asset review: %s", e)
+        holdings = []
+
     return {
         'statement_date': statement_date,
         'last_statement_date': last_statement_date,
@@ -913,6 +1176,7 @@ def parse_rbc_pdf(file_path: str) -> dict:
         'begin_total_market_value': asset_data['begin_total'],
         'end_total_market_value': asset_data['end_total'],
         'balances': all_balances,
+        'holdings': holdings,
         'transactions': transactions,
         'income_summary': income_summary,
         'contribution_summary': contribution_summary,
@@ -956,26 +1220,8 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
 
     results = []
     for currency, section_text in sections:
-        statement_date = None
+        statement_date = _extract_statement_date(section_text.split('\n'))
         last_statement_date = None
-
-        # Extract statement date
-        lines = section_text.split('\n')
-        for i, line in enumerate(lines):
-            date_match = STATEMENT_DATE_PATTERN.search(line)
-            if date_match:
-                month_str = date_match.group(1)
-                day = int(date_match.group(2))
-                year = int(date_match.group(3))
-                if 'last statement' in line.lower():
-                    continue
-                try:
-                    full_month_str = f"{month_str} {day}"
-                    statement_date = _parse_rbc_date(full_month_str, year)
-                    break
-                except ValueError:
-                    logger.warning("Could not parse statement date: %s", date_match.group(0))
-                    continue
 
         # Extract last statement date
         last_stmt_match = LAST_STATEMENT_PATTERN.search(section_text)
@@ -1062,6 +1308,12 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
             logger.warning("Error parsing account activity for %s: %s", currency, e)
             transactions = []
 
+        try:
+            holdings = _parse_asset_review(section_text)
+        except Exception as e:
+            logger.warning("Error parsing asset review for %s: %s", currency, e)
+            holdings = []
+
         # Tag transactions with currency
         for tx in transactions:
             tx['currency'] = currency
@@ -1075,6 +1327,7 @@ def parse_rbc_pdf_multi(file_path: str) -> list[dict]:
             'begin_total_market_value': asset_data['begin_total'],
             'end_total_market_value': asset_data['end_total'],
             'balances': all_balances,
+            'holdings': holdings,
             'transactions': transactions,
             'income_summary': income_summary,
             'contribution_summary': contribution_summary,

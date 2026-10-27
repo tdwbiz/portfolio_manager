@@ -126,3 +126,49 @@ candidate for 12b).
 
 So: proceed with step 12b as text-first / VL-fallback covering currency sections, cash, total
 market value and holdings; statement date stays VL-sourced until the text parser fix lands.
+
+## Step 12b results (text-first, four statements)
+
+Per `docs/plans/pdf-text-holdings.md` (decisions: tdw, Oct 26). The text parser now extracts
+the statement date (both layouts) and the Asset Review holdings (same field shape as VL,
+including book_cost), and `manage_inbox_import` is text-first with `self_check_sections`
+gating a per-file fallback to VL. This section records the four-PDF comparison run of
+`pm-logs/text_parser_check.py` (untracked; `portfolio_manager.settings_test` only, VL = Halogen
+on port 11435). Verdicts only — no account numbers, names, amounts, quantities or prices.
+
+Re-run after the Oct 26 follow-up decisions: the self-check additionally fails on an
+unsplit currency section (sections parsed vs Asset Summary / Asset Review table headers in
+the full text; reason names only the counts) and when the statement date is not 1–100 days
+after the last statement date, and `_extract_statement_date` requires a whole 4-digit year
+(word boundary) between 2000 and next year. All four files still pass.
+
+Files: `check-1.pdf` (2025, recent layout, CAD), `check-2.pdf` (2020, old layout, CAD),
+`check-3.pdf` (2020, old statement, CAD + USD) and `check-4.pdf` (2025, recent, CAD + USD);
+check-3 and check-4 are the same account.
+
+| Field | check-1 | check-2 | check-3 | check-4 |
+|---|---|---|---|---|
+| statement_date (text vs VL) | MATCH (2025-09-30) | MATCH (2020-03-31) | MATCH (2020-04-30) | MATCH (2025-08-29) |
+| currency sections | MATCH (CAD) | MATCH (CAD) | MATCH (CAD, USD) | MATCH (CAD, USD) |
+| holdings count (text parser vs VL) | MATCH (3) | MATCH (3) | MATCH (3: 1 CAD + 2 USD) | MATCH (7: 4 CAD + 3 USD) |
+| symbols per (currency, symbol) | MATCH (RBF2010, VDY, VFV) | MATCH (VDY, VFV, XDIV) | MATCH (CAD ZLB; USD SPHD, VO) | MATCH (CAD RBF2010, VDY, VFV, ZMMK; USD CTA, RBF2014, VOO) |
+| per-symbol quantity / market value / book_cost (to the cent) | all MATCH | all MATCH | all MATCH (3 symbols) | all MATCH (7 symbols) |
+| cash per currency (to the cent) | MATCH (CAD) | MATCH (CAD) | MATCH (CAD, USD) | MATCH (CAD, USD) |
+| total market value begin / end (to the cent) | MATCH | MATCH | MATCH (both currencies) | MATCH (both currencies) |
+| text self-check | PASS | PASS | PASS | PASS |
+
+Notes:
+
+- The step 12a raw-text-layer readout (kept in the script as an extra check) still shows a
+  DIFFER on `number_of_holdings` / `symbols` for check-3 and check-4: it reads only the
+  **first** Asset Review table of a multi-currency PDF. The text parser's own per-section
+  holdings — the field that is actually stored — match VL exactly (table above), so this does
+  not affect the verdict.
+- Fallback verdict: all four files pass the self-check, so under the new text-first routing
+  none of them would be sent to VL; VL remains the fallback for any file whose self-check
+  returns a reason (missing date, statement date not 1–100 days after the last statement
+  date, currency-section count mismatch, unreadable book_cost, quantity × price beyond
+  0.1 percent of market value, or holdings + cash ≠ end total to the cent).
+
+Timings (per file, Oct 26 re-run): text parser 0.3–1.0 s; VL parser 26–48 s (Halogen;
+regex fallback not used on any file).

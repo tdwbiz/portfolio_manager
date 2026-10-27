@@ -12,8 +12,8 @@ Using the four check PDFs in `inbox/` (`check-1.pdf`…`check-4.pdf`; per audit 
 CAD, check-2 old CAD, check-3 old CAD+USD, check-4 recent CAD+USD), per **currency section**:
 
 - compare the transactions from the text parser with those from the VL parser **row by row** on
-  `date`, `activity_type`, `symbol`, `quantity`, `price`, `debit`, `credit` — money to the cent,
-  quantity and price to 4 decimals — never "found on both sides";
+  `date`, `activity_type`, `symbol`, `currency`, `quantity`, `price`, `debit`, `credit` — money to
+  the cent, quantity and price to 4 decimals — never "found on both sides";
 - report the **number of rows per side**;
 - run a **cash reconciliation per side**: opening cash + sum(credits) − sum(debits) equals
   closing cash, to the cent (opening/closing cash from each side's own Cash balance row).
@@ -62,17 +62,23 @@ Nothing else. No code, no tests, no migrations touched.
     `balances` (Cash row: `opening`, `closing`) and `transactions`
     (`date`, `activity_type`, `symbol`, `quantity`, `price`, `debit`, `credit`, …). Note today
     `symbol` is hard-coded `''` (see the "Symbol extraction disabled" comment in
-    `_parse_account_activity`) and the per-tx `currency` field is hard-coded `'CAD'` — the
-    script uses the **section** currency, not the tx field.
+    `_parse_account_activity`) and the per-tx `currency` field is hard-coded `'CAD'`. The
+    comparison uses the **per-tx `currency` field** (per tdw's decision on Q4), so USD sections
+    show the text side as `CAD`.
   - **VL**: `parse_rbc_monthly_vl(path)` → per-currency sections with the same transaction
     field names and `balances` (`opening`, `closing`).
-- **Row alignment**: sort each side's transactions by `date` (stable, original order within a
-  date), then compare **by index**. If the counts differ, the extra rows on the longer side are
-  `MISSING(<side>)`. Row identity in the report is the 1-based index within the currency section.
+- **Row alignment** (per tdw's decision on Q1): **align per date, not by index after a sort.**
+  Group both sides' transactions by `date`, keep statement order within a date, and compare the
+  rows of each date **by position**. A date whose counts differ gets a `COUNT_DIFFER` line with
+  both counts; its overlapping rows are still compared, so a missing row only affects its own
+  date. Rows whose date appears on only one side are reported as `MISSING(<side>)`. Row identity
+  in the report is the 1-based index within the currency section.
 - **Per-row, per-field verdicts** for `date` (exact), `activity_type` (mapped, see below),
-  `symbol` (exact string; text side is always `''`), `quantity` and `price` (equal to 4
-  decimals; `None` vs `0` counts as DIFFER and is reported as such), `debit` and `credit`
-  (equal to the cent). Verdict words: `MATCH`, `DIFFER`, `MISSING(TEXT)`, `MISSING(VL)`.
+  `symbol` (exact string; text side is always `''`), `currency` (exact string; text side is
+  always `'CAD'`, so USD sections show the gap — reported per tdw's decision on Q4), `quantity`
+  and `price` (equal to 4 decimals; `None` vs `0` counts as DIFFER and is reported as such),
+  `debit` and `credit` (equal to the cent). Verdict words: `MATCH`, `DIFFER`, `MISSING(TEXT)`,
+  `MISSING(VL)`, plus `COUNT_DIFFER` lines for dates whose row counts differ.
 - **Activity-type mapping** (text vocabulary → VL normalised vocabulary), defined in the script:
   `BUY→BOUGHT`, `BOUGHT→BOUGHT`, `SELL→SOLD`, `SOLD→SOLD`, `DIVIDEND→DIVIDEND`, `DIVID→DIVIDEND`,
   `INTEREST→INTEREST_RECEIVED`, `TAX→TAX`, `WITHDRAW→WITHDRAWAL`, `TRANSFER→TRANSFER`.
@@ -113,8 +119,10 @@ Nothing else. No code, no tests, no migrations touched.
      price/quantity/debit/credit token-mapping heuristics per activity type; continuation-line
      handling) — with file and line references, no values;
    - method: entries, alignment rule, tolerances (cent / 4 decimals), the type-mapping table;
-   - per file, per currency: a row-by-row table (rows = row index, columns = the seven fields,
-     cells = MATCH / DIFFER / MISSING(side) / UNMAPPED(type)); rows per side; the two
+   - per file, per currency: a row-by-row table (rows = row index, columns = the eight fields
+     `date`, `activity_type`, `symbol`, `currency`, `quantity`, `price`, `debit`, `credit`,
+     cells = MATCH / DIFFER / MISSING(side) / UNMAPPED(type), plus COUNT_DIFFER lines for dates
+     whose counts differ); rows per side; the two
      cash-reconciliation verdicts;
    - a summary verdict per file: does the text parser reproduce the Activity table well enough
      for text-first transactions in 13c, or must transactions stay VL-sourced;
@@ -151,10 +159,12 @@ No new tests (check only, no code change).
 
 ## Open questions
 
+Answered in **Decisions (tdw, Oct 27)** below.
+
 1. *Row alignment: index-after-date-sort or greedy matching by (date, amount)?* —
-   **Recommended: index-after-date-sort** as specified. It is honest about count differences and
-   cannot silently pair different rows by amount; a shifted row shows up as a run of DIFFERs,
-   which is exactly the evidence 13c needs.
+   Recommended: index-after-date-sort. **Superseded by tdw's decision: align per date** (group
+   both sides by date, keep statement order within a date, compare by position; COUNT_DIFFER on
+   count mismatch).
 2. *May the report name the activity types in verdicts?* — **Recommended: yes.** The type names
    are a fixed enum (choices in `core/models.py`), not data; a bare `DIFFER` on `activity_type`
    would be useless for deciding 13c. Amounts, dates and symbols stay out.
@@ -165,3 +175,15 @@ No new tests (check only, no code change).
 4. *Symbol will DIFFER on every text row (hard-coded `''`).* — **Recommended: still compare it
    row by row** and report it honestly; it quantifies the gap 13c has to close (or argues for
    VL-sourced transactions).
+
+## Decisions (tdw, Oct 27)
+
+- **Q1 — Row alignment:** align per date instead of index-after-sort: group both sides by
+  `date`, keep statement order within a date, and compare the rows of each date by position; a
+  date where the counts differ gets a `COUNT_DIFFER` line with both counts, and its overlapping
+  rows are still compared, so a missing row only affects its own date.
+- **Q2 — Naming activity types in verdicts:** yes, as recommended.
+- **Q3 — Net-zero types in the cash reconciliation:** yes, as recommended (naive sum, no
+  exclusions).
+- **Q4 — Symbol comparison:** yes, as recommended; also compare the per-transaction `currency`
+  field, since the text parser sets `CAD` on every row, and report it for the USD sections.

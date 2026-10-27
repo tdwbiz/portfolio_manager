@@ -94,7 +94,9 @@ def is_content_imported(content_hash: str) -> bool:
     """True when a successful import log already has this content hash.
 
     Only ``success``/``ok`` logs count: a file that previously failed (and
-    sits in ``errors/``) may be retried and is not a duplicate.
+    sits in ``errors/``) may be retried and is not a duplicate. This is the
+    rule for the Holdings CSV import; PDFs use
+    :func:`is_pdf_content_stored` instead.
     """
     from core.models import FileImportLog  # local: keep the module DB-free
 
@@ -103,3 +105,22 @@ def is_content_imported(content_hash: str) -> bool:
     return FileImportLog.objects.filter(
         content_hash=content_hash, status__in=("success", "ok")
     ).exists()
+
+
+def is_pdf_content_stored(content_hash: str) -> bool:
+    """True while stored statement rows carry this PDF's content hash.
+
+    A PDF counts as already imported only while ``RbcMonthly`` or
+    ``RbcAnnual`` rows with its ``content_hash`` exist — not because a
+    ``FileImportLog`` row does: deleting the file's rows (e.g. to re-import
+    a corrected statement) lets the same file be imported again, even if the
+    import log remains.
+    """
+    from core.models import RbcAnnual, RbcMonthly  # local: keep the module DB-free
+
+    if not content_hash:
+        return False
+    return (
+        RbcMonthly.objects.filter(content_hash=content_hash).exists()
+        or RbcAnnual.objects.filter(content_hash=content_hash).exists()
+    )

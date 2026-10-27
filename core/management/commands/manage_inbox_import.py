@@ -46,7 +46,7 @@ from core.utils.account_fingerprint import (
 )
 from core.utils.import_checks import (
     content_hash_of,
-    is_content_imported,
+    is_pdf_content_stored,
     statement_date_problems,
 )
 from core.utils.safe_names import (
@@ -165,17 +165,21 @@ class Command(BaseCommand):
 
             # ── Step 0: file-level duplicate check (step 13b) ────────────
             # The same content already imported successfully → skip before
-            # classify: no VL call, nothing stored. The PDF moves to
-            # processed/ under a uniquified safe name; the JSON log carries
-            # verdict "duplicate" and a FileImportLog row is written.
-            if not dry_run and is_content_imported(full_hash):
-                prior = FileImportLog.objects.filter(
-                    content_hash=full_hash, status__in=('success', 'ok')
-                ).order_by('-imported_at').first()
-                base_name = (
-                    prior.filename
-                    if prior and is_safe_file_name(prior.filename)
-                    else _unattributable_safe_name(pdf_file.name, h8)
+            # classify: no VL call, nothing stored. A PDF counts as imported
+            # only while RbcMonthly/RbcAnnual rows with its content_hash
+            # exist (not because of a FileImportLog row): deleting the file's
+            # rows lets it be imported again. The PDF moves to processed/
+            # under a uniquified safe name; the JSON log carries verdict
+            # "duplicate" and a FileImportLog row is written.
+            if not dry_run and is_pdf_content_stored(full_hash):
+                stored_rows = (
+                    list(RbcMonthly.objects.filter(content_hash=full_hash))
+                    + list(RbcAnnual.objects.filter(content_hash=full_hash))
+                )
+                base_name = next(
+                    (row.file_name for row in stored_rows
+                     if is_safe_file_name(row.file_name)),
+                    _unattributable_safe_name(pdf_file.name, h8),
                 )
                 safe_name = _unique_destination(processed_dir, base_name).name
                 self.stdout.write(self.style.SUCCESS(

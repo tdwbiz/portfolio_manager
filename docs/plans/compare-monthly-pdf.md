@@ -21,7 +21,8 @@ field:
 Numeric money values are compared **to the cent** (`Decimal.quantize(Decimal("0.01"))`), never
 "found on both sides"; `quantity` and `market_price` (4-dp columns) are compared exactly at 4 dp.
 Output is one line per field and per holding with verdict `MATCH`, `DIFFER`, `ONLY_PDF` or
-`ONLY_DB`, plus the number of stored rows found per (file, currency). The command never writes
+`ONLY_DB`, plus the number of stored rows found per (file, currency), and a totals line at
+the end of each file (fields compared, MATCH, DIFFER, ONLY_PDF, ONLY_DB). The command never writes
 to the database — a test proves the row counts are unchanged.
 
 **Privacy (hard rule, as in step 12a):** output, logs, tests and commits contain only field
@@ -68,18 +69,24 @@ Nothing else. **Out of scope:**
 4. **Find stored rows**: `RbcMonthly.objects.filter(account=…, statement_date=…, currency=…)`
    (all `file_name`s — the old July imports have their own safe names). Print
    `ROWS FOUND <n>` per (file, currency). `n == 0` → every field line is `ONLY_PDF`.
-5. **Compare** each stored row (label each line with the stored row's `file_name`, which is a
-   safe name): the four scalar fields, cash, holding count, then per-symbol holding fields.
+5. **Compare** each stored row (each line labels that stored row by its **id**, e.g.
+   `[row 98]` — tdw decision Oct 27; not by `file_name`): the four scalar fields, cash,
+   holding count, then per-symbol holding fields.
    Holdings are matched by `symbol` within the currency section; a symbol present on only one
    side yields `ONLY_PDF` / `ONLY_DB` lines for its four fields. Duplicate symbols on either
    side are matched in sorted order and flagged with a `DUP_SYMBOLS <symbol> <n_pdf> <n_db>`
    count line (counts only). Blank symbols are matched in sorted order among themselves.
 6. **Output line format** (all tokens safe):
-   `<given_file> <account_name> <CUR> [<stored_file>] <field>: <VERDICT>`, e.g.
-   `check-1.pdf TS_HUISGELD CAD rbc-ts_huisgeld-2025-07-a1b2c3d4.pdf end_total_market_value: DIFFER`
-   `check-1.pdf TS_HUISGELD CAD rbc-ts_huisgeld-2025-07-a1b2c3d4.pdf holding NVU.UN quantity: MATCH`
-   With 0 stored rows the `[stored_file]` part is omitted.
-7. **Never writes.** No `save()`, `create()`, `update()`, `delete()` anywhere in the command.
+   `<given_file> <account_name> <CUR> <statement_date> [row <id>] <field>: <VERDICT>`, e.g.
+   `check-1.pdf TS_HUISGELD CAD 2025-07-31 [row 98] end_total_market_value: DIFFER`
+   `check-1.pdf TS_HUISGELD CAD 2025-07-31 [row 98] holding NVU.UN quantity: MATCH`
+   With 0 stored rows the `[row <id>]` part is omitted. The statement date is allowed in
+   output (Q2, tdw decision Oct 27).
+7. **Totals line** at the end of each file, after all of its field lines:
+   `TOTALS <given_file>: fields compared <n>, MATCH <n>, DIFFER <n>, ONLY_PDF <n>,
+   ONLY_DB <n>` — counts only (tdw decision Oct 27). A skipped file (unknown account,
+   missing file) gets a totals line with all zeros.
+8. **Never writes.** No `save()`, `create()`, `update()`, `delete()` anywhere in the command.
 
 ## Steps (one commit each)
 
@@ -89,7 +96,8 @@ Nothing else. **Out of scope:**
    Check: `/opt/pm-venv/bin/python manage.py help compare_monthly_pdf --settings=portfolio_manager.settings_test`
    and `git status --short`.
 2. **Field + holdings comparison** — scalar fields, cash, holding count, per-symbol fields,
-   cent/4-dp quantised comparison, `MATCH/DIFFER/ONLY_PDF/ONLY_DB`, dup-symbol handling.
+   cent/4-dp quantised comparison, `MATCH/DIFFER/ONLY_PDF/ONLY_DB`, dup-symbol handling,
+   and the per-file totals line.
    Check: `/opt/pm-venv/bin/python -m py_compile core/management/commands/compare_monthly_pdf.py`
    and `rg -n "create|save|update|delete" core/management/commands/compare_monthly_pdf.py`
    returns nothing.
@@ -97,11 +105,15 @@ Nothing else. **Out of scope:**
    (fake accounts `90000001`–`90000008`, key from `settings_test.py`; build stored rows
    directly). Cases:
    - all fields and holdings equal → all `MATCH`, `ROWS FOUND 1`;
+   - two stored rows for the same (account, statement date, currency) → both compared,
+     each line labelled `[row <id>]` with that row's id, `ROWS FOUND 2`;
    - one stored value off by one cent → that field `DIFFER`, others `MATCH`;
    - stored row missing (no `RbcMonthly`) → `ROWS FOUND 0`, all fields `ONLY_PDF`;
    - holding only in PDF and only in DB → `ONLY_PDF` / `ONLY_DB` lines;
    - **read-only proof**: snapshot `count()` of `Account`, `RbcMonthly`,
      `RbcMonthlyBalance`, `RbcMonthlyHolding` before and after `call_command` → unchanged;
+   - **totals line**: for each file the totals line's MATCH/DIFFER/ONLY_PDF/ONLY_DB counts
+     equal the verdicts printed for that file;
    - **privacy**: every output line matches a safe pattern (no digits except dates, counts and
      the fixture symbols' own characters; the fixture amounts appear nowhere in stdout).
    Check: `/opt/pm-venv/bin/python -m pytest core/tests/test_compare_monthly_pdf.py --collect-only -q`.
@@ -127,8 +139,9 @@ None.
 
 1. **Multiple stored rows** for the same (account, statement date, currency) — the old July
    imports may have left more than one `file_name`. *Recommended:* compare against **each**
-   stored row (each line carries that row's safe `file_name`) and print the row count; that is
-   exactly what the check needs to expose about the July imports.
+   stored row and print the row count; that is exactly what the check needs to expose about
+   the July imports. *Resolved (Decisions, tdw Oct 27):* yes — each line labels the row by
+   its id, not its `file_name`.
 2. **Statement dates in output.** The task bans values and account digits; step 12a allowed
    dates. *Recommended:* allow the statement date in output (it is not money or an identifier);
    it makes the per-file lines interpretable.
@@ -137,3 +150,16 @@ None.
    a safety net, not the main path.
 4. **Failed self-check.** *Recommended:* print the reasons and still run the comparison — the
    command is read-only and the reasons are themselves a finding about the July imports.
+
+## Decisions (tdw, Oct 27)
+
+1. **Q1 — multiple stored rows:** yes — compare against each stored row; identify each row
+   by its **id** (e.g. `row 98`), not by its `file_name`.
+2. **Q2 — statement dates in output:** yes, as recommended.
+3. **Q3 — duplicate symbols:** as recommended (sorted-order matching + `DUP_SYMBOLS` count
+   line).
+4. **Q4 — failed self-check:** yes, as recommended — print the reasons and still compare.
+
+Also decided:
+- When the account cannot be resolved, print `UNKNOWN_ACCOUNT` for that file and skip it.
+- End each file with a totals line: fields compared, MATCH, DIFFER, ONLY_PDF, ONLY_DB.

@@ -5,6 +5,14 @@ no database writes. Per the data rules, this report contains only field names, c
 section names, currency codes, yes/no flags and MATCH/DIFFER/MISSING verdicts — no account
 numbers, names, amounts, quantities or prices.
 
+Per tdw's review of the first run (Oct 26): the original check compared cash and total market
+value for **presence only**, so those MATCH verdicts were not proven. This revision compares the
+**values inside the helper script**: cash per currency and the beginning/ending total market
+value must be equal between text and VL to the cent, and the holdings rows read from the raw
+text layer are compared with VL's holdings (same set of symbols; per symbol equal quantity and
+market value). Only verdicts are reported — a DIFFER names the differing field/symbol, never a
+value.
+
 ## Method
 
 - PDFs: `inbox/check-1.pdf` (statement date SEPT 30, 2025 — recent layout) and
@@ -17,6 +25,10 @@ numbers, names, amounts, quantities or prices.
   `portfolio_manager.settings_test` only — never through `manage_inbox_import` or the watcher.
 - The VL regex fallback was **not used** on either PDF (the model answered both; no timing of
   the fallback, per tdw's decision).
+- Comparisons are done in-process by the script; the console and this report carry verdicts
+  only. Cash per currency and begin/end total market value are compared **to the cent**; for
+  holdings, each row of the raw-text Asset Review table (right-anchored columns: symbol,
+  quantity, market value) is matched against VL's holdings by symbol.
 
 ## What the text parser extracts and what it misses
 
@@ -39,14 +51,19 @@ Missed (both PDFs):
 
 ## Comparison table (text vs VL)
 
+Holdings rows are read from the raw text layer (the text parser itself has no holdings field —
+symbol hard-coded `''` at L661); cash and total market value come from the text parser's
+output. Cash and totals are compared to the cent.
+
 | Field | check-1 (2025) | check-2 (2020) |
 |---|---|---|
 | statement_date | MISSING (text side) | MISSING (text side) |
 | currency_sections | MATCH (CAD) | MATCH (CAD) |
-| number_of_holdings | MISSING (text side has no holdings field; VL count = 3) | MISSING (text side has no holdings field; VL count = 3) |
-| symbols | MISSING (text side has no per-security symbols; VL: RBF2010, VDY, VFV) | MISSING (text side has no per-security symbols; VL: VDY, VFV, XDIV) |
-| cash_per_currency | MATCH (CAD present both sides, 1 row each) | MATCH (CAD present both sides, 1 row each) |
-| total_market_value | MATCH (begin + end found both sides) | MATCH (begin + end found both sides) |
+| number_of_holdings (raw text rows vs VL) | MATCH (3 both sides) | MATCH (3 both sides) |
+| symbols (raw text set vs VL set) | MATCH (same 3 symbols: RBF2010, VDY, VFV) | MATCH (same 3 symbols: VDY, VFV, XDIV) |
+| cash_per_currency (to the cent) | MATCH (CAD equal to the cent) | MATCH (CAD equal to the cent) |
+| total_market_value begin (to the cent) | MATCH | MATCH |
+| total_market_value end (to the cent) | MATCH | MATCH |
 
 ## Holdings in the raw text layer (added check per tdw's decision)
 
@@ -60,16 +77,30 @@ total lines:
 | check-1 (2025) | 3 | 3 | yes | yes |
 | check-2 (2020) | 3 | 3 | yes | yes |
 
+Per-symbol value comparison (raw text layer vs VL; verdicts only — a DIFFER would name the
+symbol and field, never a value):
+
+| Symbol | check-1 quantity | check-1 market value | check-2 quantity | check-2 market value |
+|---|---|---|---|---|
+| RBF2010 | MATCH | MATCH | — (not held) | — (not held) |
+| VDY | MATCH | MATCH | MATCH | MATCH |
+| VFV | MATCH | MATCH | MATCH | MATCH |
+| XDIV | — (not held) | — (not held) | MATCH | MATCH |
+
+Every symbol present on both sides has equal quantity and market value to the cent on both
+PDFs.
+
 **Verdict for step 12b: add holdings to the text parser, with VL as the fallback.** The table
-is present in both layouts, the row counts match VL exactly on both PDFs, and the symbol and
-quantity columns are recognisable.
+is present in both layouts, the row counts match VL exactly on both PDFs, the symbol and
+quantity columns are recognisable, and the per-symbol values extracted from the raw text layer
+equal VL's to the cent.
 
 ## Timings (per file)
 
 | File | text parser | VL parser (Halogen) |
 |---|---|---|
-| check-1.pdf | 0.56 s | 42.08 s |
-| check-2.pdf | 0.33 s | 51.38 s |
+| check-1.pdf | 0.56 s | 30.91 s |
+| check-2.pdf | 0.34 s | 33.95 s |
 
 ## Layout difference (old vs recent statement)
 
@@ -83,9 +114,11 @@ quantity columns are recognisable.
 
 ## Recommendation (the verdict this run gives)
 
-Text-first with VL as the fallback is supported by the evidence for: **currency sections, cash
-per currency and total market value** (all MATCH on both layouts), and — once step 12b adds
-holdings parsing — **per-security holdings** (text-layer table readable, counts match VL).
+With values now compared to the cent (per tdw's review), text-first with VL as the fallback is
+supported by proven evidence for: **currency sections, cash per currency and total market value**
+(all MATCH on both layouts, equal to the cent), and — once step 12b adds holdings parsing —
+**per-security holdings** (raw-text table readable; same symbol set, and per-symbol quantity and
+market value equal to VL's to the cent on both PDFs).
 
 It is not yet supported for **statement date**: the text parser missed it on both layouts. Keep
 VL as the source for that field until the text parser's date matching is fixed (a small change,

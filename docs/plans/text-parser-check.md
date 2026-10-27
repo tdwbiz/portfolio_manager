@@ -144,3 +144,13 @@ No new tests (check only, no code change).
    text parser, with VL as the fallback.
 2. *Should the report also time the VL regex fallback?* — **Agreed: no.** No timing of the
    regex fallback; the report notes only whether it was used or not used.
+3. *Review of the first run (tdw, Oct 26):* the step-12a check compared **cash per currency and
+   total market value for presence only, not for equal values** — so the `MATCH` verdicts in
+   `docs/audit/05-text-parser-check.md` are **not proven**. Fix, inside the helper script only:
+   compare the values. Cash per currency and the beginning and ending total market value must be
+   equal between text and VL **to the cent**; for holdings, compare the rows read from the raw
+   text layer with VL's holdings — the same set of symbols, and per symbol equal quantity and
+   market value. The output and the report stay **verdicts only**: `MATCH` or `DIFFER` per field
+   and per symbol, and for a `DIFFER` only which field differs — never a value. Rerun on both
+   PDFs and update `docs/audit/05-text-parser-check.md` in place (method, table, holdings
+   section and recommendation follow the new result).

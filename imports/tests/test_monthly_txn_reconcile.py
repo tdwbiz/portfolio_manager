@@ -328,6 +328,42 @@ class MonthlyTxnReconcileTests(TestCase):
             self.assertEqual(log.status, 'error')
             self.assertEqual(log.error_message, 'vl_parser returned no sections')
 
+    def _raw_json_log(self, processed_dir):
+        """The single JSON log of the run as raw text (for scrub checks)."""
+        json_dir = os.path.join(processed_dir, 'json_logs')
+        names = [n for n in (os.listdir(json_dir) if os.path.isdir(json_dir) else [])
+                 if n.endswith('.json')]
+        self.assertEqual(len(names), 1, f'expected one JSON log, got {names}')
+        with open(os.path.join(json_dir, names[0]), encoding='utf-8') as fh:
+            return fh.read()
+
+    def _assert_vl_error_scrubbed(self, processed_dir, out, err):
+        """The fake account number from the exception text must appear
+        nowhere: stdout, stderr, FileImportLog or the JSON log."""
+        log = FileImportLog.objects.get()
+        self.assertEqual(log.status, 'error')
+        raw_json = self._raw_json_log(processed_dir)
+        for blob in (out, err, log.error_message, raw_json):
+            self.assertNotIn(FAKE_NUMBER, blob)
+        # The number was replaced by the account name.
+        self.assertIn(FAKE_NAME, log.error_message)
+
+    def test_vl_error_text_scrubbed_on_fallback_path(self):
+        boom = RuntimeError(f'VL exploded for account {FAKE_NUMBER}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, err = self._run(
+                tmpdir, [self._bad_self_check_text()], vl_side_effect=boom,
+            )
+            self._assert_vl_error_scrubbed(processed_dir, out, err)
+
+    def test_vl_error_text_scrubbed_on_text_path(self):
+        boom = RuntimeError(f'VL exploded for account {FAKE_NUMBER}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, err = self._run(
+                tmpdir, [_text_section()], vl_side_effect=boom,
+            )
+            self._assert_vl_error_scrubbed(processed_dir, out, err)
+
     def _bad_self_check_text(self):
         """A text section that fails the self-check → VL fallback path."""
         bad_text = _text_section()

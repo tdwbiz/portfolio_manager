@@ -559,8 +559,10 @@ class Command(BaseCommand):
             try:
                 vl_sections = parse_rbc_monthly_vl(str(pdf_file))
             except Exception as exc:
-                logger.warning("VL call failed on the text path for %s: %s", hash8, exc)
-                reconcile_msgs.append(f'vl_parser {exc}')
+                # Scrub before the error text reaches any log, output or store.
+                vl_error = 'vl_parser ' + scrub_text(str(exc), name_map)[0]
+                logger.warning("VL call failed on the text path for %s: %s", hash8, vl_error)
+                reconcile_msgs.append(vl_error)
             else:
                 if not vl_sections:
                     # A VL result of None or [] leaves nothing to merge; the
@@ -582,14 +584,16 @@ class Command(BaseCommand):
             try:
                 parsed_list = parse_rbc_monthly_vl(str(pdf_file))
             except Exception as exc:
-                self.stderr.write(self.style.ERROR(f'  Parse error: {exc}'))
+                # Scrub before the error text reaches any log, output or store.
+                vl_error = scrub_text(str(exc), name_map)[0]
+                self.stderr.write(self.style.ERROR(f'  Parse error: {vl_error}'))
                 if not dry_run:
                     safe_name = _unattributable_safe_name(pdf_file.name, hash8)
-                    self._log_import(safe_name, 0, 'error', str(exc),
+                    self._log_import(safe_name, 0, 'error', vl_error,
                                      content_hash=full_hash)
-                    return (0, 0, 0, 0, 1, [], [str(exc)], safe_name,
+                    return (0, 0, 0, 0, 1, [], [vl_error], safe_name,
                             parsers, self_check_reasons, 'error')
-                return (0, 0, 0, 0, 1, [], [str(exc)], None,
+                return (0, 0, 0, 0, 1, [], [vl_error], None,
                         parsers, self_check_reasons, 'error')
 
             if parsed_list is None:

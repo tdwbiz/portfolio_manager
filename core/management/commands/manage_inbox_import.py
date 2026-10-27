@@ -561,10 +561,14 @@ class Command(BaseCommand):
             except Exception as exc:
                 logger.warning("VL call failed on the text path for %s: %s", hash8, exc)
                 reconcile_msgs.append(f'vl_parser {exc}')
-                vl_sections = None
-            if vl_sections is not None:
-                parsed_list, reasons = merge_and_reconcile(text_sections, vl_sections)
-                reconcile_msgs.extend(reasons)
+            else:
+                if not vl_sections:
+                    # A VL result of None or [] leaves nothing to merge; the
+                    # rejection must carry a reason, never an empty one.
+                    reconcile_msgs.append('vl_parser returned no sections')
+                else:
+                    parsed_list, reasons = merge_and_reconcile(text_sections, vl_sections)
+                    reconcile_msgs.extend(reasons)
         else:
             parsers['holdings'] = 'vl'
             if self_check_reasons:

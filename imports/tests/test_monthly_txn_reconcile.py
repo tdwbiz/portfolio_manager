@@ -300,6 +300,34 @@ class MonthlyTxnReconcileTests(TestCase):
             self.assertEqual(section['txn_count'], 0)
             self.assertEqual(section['reconcile'], 'failed')
 
+    def test_text_path_vl_returned_none_rejected_with_reason(self):
+        # A VL result of None on the text path must reject with a reason —
+        # never an empty one.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, _out, _err = self._run(
+                tmpdir, [_text_section()], vl_sections=None,
+            )
+
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            moved = os.listdir(os.path.join(processed_dir, 'errors'))
+            self.assertEqual(len(moved), 1)
+            log = FileImportLog.objects.get()
+            self.assertEqual(log.status, 'error')
+            self.assertEqual(log.error_message, 'vl_parser returned no sections')
+            payload = self._json_log(processed_dir, error=True)
+            self.assertEqual(payload['verdict'], 'reconcile_error')
+
+    def test_text_path_vl_returned_empty_list_rejected_with_reason(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, _out, _err = self._run(
+                tmpdir, [_text_section()], vl_sections=[],
+            )
+
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            log = FileImportLog.objects.get()
+            self.assertEqual(log.status, 'error')
+            self.assertEqual(log.error_message, 'vl_parser returned no sections')
+
     def _bad_self_check_text(self):
         """A text section that fails the self-check → VL fallback path."""
         bad_text = _text_section()

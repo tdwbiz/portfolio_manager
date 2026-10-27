@@ -842,6 +842,76 @@ def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
+# Self-check (step 12b)
+# ---------------------------------------------------------------------------
+
+CENT = Decimal('0.01')
+_PRICE_TOLERANCE = Decimal('0.001')  # 0.1 percent
+
+
+def _section_cash(section: dict) -> Decimal:
+    """Closing cash for one currency section (same source as the 12a check)."""
+    return sum(
+        (Decimal(b.get('market_value') or 0)
+         for b in section.get('balances') or []
+         if str(b.get('account_type', '')).strip().lower() == 'cash'),
+        Decimal('0'),
+    )
+
+
+def self_check_sections(sections: list[dict]) -> list[str]:
+    """Self-check the text parser's sections before they may be stored.
+
+    Returns a list of reasons (empty when the parse is trustworthy). Reasons
+    name only fields, currencies and symbols — never values. Per currency
+    section:
+
+    - ``statement_date`` is not None;
+    - every holding has a readable ``book_cost`` (never 0 as a placeholder);
+    - per holding, ``quantity * market_price`` is within 0.1 percent of
+      ``market_value``;
+    - ``sum(holdings.market_value) + cash == end_total_market_value`` to the
+      cent.
+
+    No begin-total check: only the end total is derivable from holdings +
+    cash on the same statement (tdw decision, Oct 26).
+    """
+    reasons = []
+    for section in sections or []:
+        cur = str(section.get('currency') or 'CAD').upper()
+        if section.get('statement_date') is None:
+            reasons.append(f'{cur} statement_date missing')
+
+        mv_sum = Decimal('0')
+        for h in section.get('holdings') or []:
+            sym = str(h.get('symbol') or '?')
+            qty, price, cost, mv = (h.get('quantity'), h.get('market_price'),
+                                    h.get('book_cost'), h.get('market_value'))
+            if cost is None:
+                reasons.append(f'{cur} {sym} book_cost unreadable')
+            if mv is None:
+                reasons.append(f'{cur} {sym} market_value unreadable')
+                continue
+            mv_sum += Decimal(mv)
+            if qty is None or price is None:
+                reasons.append(f'{cur} {sym} quantity/market_price unreadable')
+                continue
+            expected = Decimal(qty) * Decimal(price)
+            if abs(expected - Decimal(mv)) > _PRICE_TOLERANCE * abs(Decimal(mv)):
+                reasons.append(
+                    f'{cur} {sym} quantity*market_price vs market_value '
+                    'beyond 0.1 percent'
+                )
+
+        end_total = section.get('end_total_market_value')
+        if (end_total is None
+                or (mv_sum + _section_cash(section)).quantize(CENT)
+                != Decimal(end_total).quantize(CENT)):
+            reasons.append(f'{cur} holdings+cash != end_total_market_value')
+    return reasons
+
+
+# ---------------------------------------------------------------------------
 # Main parser
 # ---------------------------------------------------------------------------
 

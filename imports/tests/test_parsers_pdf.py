@@ -13,7 +13,12 @@ from io import BytesIO
 
 from core.models import Account, RbcMonthly, RbcMonthlyBalance, RbcMonthlyTransaction
 from core.utils.account_fingerprint import fingerprint_account_number
-from imports.parsers_pdf import parse_rbc_pdf, parse_rbc_pdf_multi, _parse_rbc_date
+from imports.parsers_pdf import (
+    parse_rbc_pdf,
+    parse_rbc_pdf_multi,
+    self_check_sections,
+    _parse_rbc_date,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +372,8 @@ class TestPerCurrencySections(TestCase):
         # holdings + cash reconcile to the end total to the cent
         mv = sum((Decimal(h['market_value']) for h in sec['holdings']), Decimal('0'))
         self.assertEqual(mv + self._cash_closing(sec), Decimal('2000.00'))
+        # Test 4: the self-check passes.
+        self.assertEqual(self_check_sections(sections), [])
 
     def test_cad_and_usd_sections_each_own_data(self):
         sections = parse_rbc_pdf_multi(MULTI_CURRENCY_STATEMENT)
@@ -390,6 +397,64 @@ class TestPerCurrencySections(TestCase):
 
         mv = sum((Decimal(h['market_value']) for h in usd['holdings']), Decimal('0'))
         self.assertEqual(mv + self._cash_closing(usd), Decimal('1000.00'))
+        # Test 5: the self-check passes per currency.
+        self.assertEqual(self_check_sections(sections), [])
+
+
+class TestSelfCheckSections(TestCase):
+    """Step 12b test 6 (helper part): self_check_sections reasons."""
+
+    def test_date_missing(self):
+        sections = [{
+            'currency': 'CAD', 'statement_date': None, 'holdings': [],
+            'balances': [{'account_type': 'Cash', 'market_value': Decimal('10.00')}],
+            'end_total_market_value': Decimal('10.00'),
+        }]
+        reasons = self_check_sections(sections)
+        self.assertEqual(reasons, ['CAD statement_date missing'])
+
+    def test_holdings_cash_mismatch_by_one_cent(self):
+        sections = parse_rbc_pdf_multi(CAD_ONLY_STATEMENT)
+        sections[0]['end_total_market_value'] = Decimal('2000.01')
+        reasons = self_check_sections(sections)
+        self.assertEqual(reasons, ['CAD holdings+cash != end_total_market_value'])
+
+    def test_unreadable_book_cost_fails(self):
+        text = CAD_ONLY_STATEMENT.replace(
+            'VFV         5.000       280.000     1,300.00    $1,400.00',
+            'VFV         5.000       280.000                 $1,400.00',
+        )
+        reasons = self_check_sections(parse_rbc_pdf_multi(text))
+        self.assertTrue(any('book_cost unreadable' in r for r in reasons), reasons)
+
+    def test_qty_price_beyond_tolerance_fails(self):
+        # 5 shares at 280.00 = 1400.00; move the market value by more than
+        # 0.1 percent (1.40) without touching quantity or price.
+        text = CAD_ONLY_STATEMENT.replace(
+            'VFV         5.000       280.000     1,300.00    $1,400.00',
+            'VFV         5.000       280.000     1,300.00    $1,402.00',
+        )
+        reasons = self_check_sections(parse_rbc_pdf_multi(text))
+        self.assertTrue(
+            any('quantity*market_price vs market_value beyond 0.1 percent' in r
+                for r in reasons),
+            reasons,
+        )
+
+    def test_qty_price_within_tolerance_passes(self):
+        # 5 * 280.00 = 1400.00 vs market value 1401.40: exactly 0.1 percent
+        # off — within tolerance, and cash still reconciles to the end total.
+        sections = [{
+            'currency': 'CAD', 'statement_date': date(2025, 9, 30),
+            'holdings': [{'security': '', 'symbol': 'VFV',
+                          'quantity': Decimal('5'),
+                          'book_cost': Decimal('1300.00'),
+                          'market_price': Decimal('280.000'),
+                          'market_value': Decimal('1401.40')}],
+            'balances': [{'account_type': 'Cash', 'market_value': Decimal('598.60')}],
+            'end_total_market_value': Decimal('2000.00'),
+        }]
+        self.assertEqual(self_check_sections(sections), [])
 
 
 class TestParseRbcDate(TestCase):

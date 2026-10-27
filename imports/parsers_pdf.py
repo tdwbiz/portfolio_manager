@@ -48,11 +48,22 @@ MONTH_ABBREVS = (
     'SEPT', 'SEP', 'OCT', 'NOV', 'DEC',
 )
 
-# Match full month names or abbreviations (including SEPT), optional dot, then day and year.
+# Match full month names or abbreviations (including SEPT), optional dot, then day and
+# year. The year must be a whole 4-digit number: the lookarounds keep the last four
+# digits of a longer number from counting as a year.
 STATEMENT_DATE_PATTERN = re.compile(
-    r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})\s+(\d{4})',
+    r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})\s+(?<!\d)(\d{4})(?!\d)',
     re.IGNORECASE,
 )
+
+# Two-line shape: the year sits at the end of the next line, again as a whole
+# 4-digit number (word boundary on both sides).
+_STATEMENT_YEAR_EOL = re.compile(r'(?<!\d)(\d{4})(?!\d)\s*$')
+
+
+def _statement_year_ok(year: int) -> bool:
+    """Sanity window for a statement year: 2000 .. next year (inclusive)."""
+    return 2000 <= year <= date.today().year + 1
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -118,8 +129,10 @@ def _extract_statement_date(lines: list[str]) -> date | None:
       "Order Execution Only SEPT 30" / "Cdn. Dollar Statement 2025"
       (the year sits at the end of the next line, which may carry other words).
 
-    The "Date of Last Statement" line is excluded in every shape. Returns None
-    when no date can be read.
+    The year must be a whole 4-digit number (word boundary — the last four digits
+    of a longer number never count) between 2000 and next year; anything else is
+    skipped. The "Date of Last Statement" line is excluded in every shape.
+    Returns None when no date can be read.
     """
     month_day_pat = re.compile(
         r'\b(' + '|'.join(MONTH_ABBREVS) + r')\.?\s+(\d{1,2})',
@@ -132,10 +145,17 @@ def _extract_statement_date(lines: list[str]) -> date | None:
         # Single-line match: "SEPT 30 2025"
         date_match = STATEMENT_DATE_PATTERN.search(line)
         if date_match:
+            year = int(date_match.group(3))
+            if not _statement_year_ok(year):
+                logger.warning(
+                    "Statement date year outside 2000..next year: %s",
+                    date_match.group(0),
+                )
+                continue
             try:
                 return _parse_rbc_date(
                     f"{date_match.group(1)} {int(date_match.group(2))}",
-                    int(date_match.group(3)),
+                    year,
                 )
             except ValueError:
                 logger.warning("Could not parse statement date: %s", date_match.group(0))
@@ -145,8 +165,15 @@ def _extract_statement_date(lines: list[str]) -> date | None:
         # of the next line (a bare "2025" line ends with its year too).
         if i + 1 < len(lines):
             month_match = month_day_pat.search(line)
-            year_match = re.search(r'(\d{4})\s*$', lines[i + 1].strip())
+            year_match = _STATEMENT_YEAR_EOL.search(lines[i + 1].strip())
             if month_match and year_match:
+                year = int(year_match.group(1))
+                if not _statement_year_ok(year):
+                    logger.warning(
+                        "Statement date year outside 2000..next year: %s",
+                        year_match.group(0),
+                    )
+                    continue
                 try:
                     return _parse_rbc_date(
                         f"{month_match.group(1)} {int(month_match.group(2))}",
@@ -847,6 +874,22 @@ def _parse_account_activity(text: str, year: int = 2025) -> list[dict[str, Any]]
 
 CENT = Decimal('0.01')
 _PRICE_TOLERANCE = Decimal('0.001')  # 0.1 percent
+_LAST_STATEMENT_MAX_GAP_DAYS = 100
+
+
+def _count_currency_sections(full_text: str) -> int:
+    """Count the currency sections present in the whole statement text.
+
+    Each currency statement carries exactly one Asset Summary table; when no
+    Asset Summary header is present, fall back to the Asset Review holdings
+    table headers ("SECURITY … QUANTITY"). Returns 0 when neither is found —
+    the caller then skips the count check rather than guessing.
+    """
+    lines = full_text.split('\n')
+    n = sum(1 for line in lines if ASSET_SUMMARY_HEADER.search(line))
+    if n:
+        return n
+    return sum(1 for line in lines if ASSET_REVIEW_TABLE_HEADER.search(line))
 
 
 def _section_cash(section: dict) -> Decimal:
@@ -859,14 +902,27 @@ def _section_cash(section: dict) -> Decimal:
     )
 
 
-def self_check_sections(sections: list[dict]) -> list[str]:
+def self_check_sections(
+    sections: list[dict], full_text: str | None = None,
+) -> list[str]:
     """Self-check the text parser's sections before they may be stored.
 
     Returns a list of reasons (empty when the parse is trustworthy). Reasons
-    name only fields, currencies and symbols — never values. Per currency
-    section:
+    name only fields, currencies and symbols — never values. When
+    ``full_text`` (the whole statement text) is given, one more check runs:
+
+    - the number of currency sections returned equals the number present in
+      the whole text (Asset Summary / Asset Review table headers counted in
+      the full text); the reason names only the counts. Without this, an
+      unrecognised section header leaves the second currency inside the first
+      section and its holdings, cash and totals are silently lost while the
+      first currency's numbers still reconcile (tdw decision, Oct 26).
+
+    Per currency section:
 
     - ``statement_date`` is not None;
+    - when ``last_statement_date`` is found, ``statement_date`` is after it
+      and at most 100 days later (tdw decision, Oct 26);
     - every holding has a readable ``book_cost`` (never 0 as a placeholder);
     - per holding, ``quantity * market_price`` is within 0.1 percent of
       ``market_value``;
@@ -877,10 +933,27 @@ def self_check_sections(sections: list[dict]) -> list[str]:
     cash on the same statement (tdw decision, Oct 26).
     """
     reasons = []
+    if full_text is not None:
+        expected = _count_currency_sections(full_text)
+        parsed = len(sections or [])
+        if expected and parsed != expected:
+            reasons.append(
+                f'currency sections: {parsed} parsed vs {expected} in text'
+            )
     for section in sections or []:
         cur = str(section.get('currency') or 'CAD').upper()
-        if section.get('statement_date') is None:
+        statement_date = section.get('statement_date')
+        if statement_date is None:
             reasons.append(f'{cur} statement_date missing')
+        else:
+            last_date = section.get('last_statement_date')
+            if last_date is not None:
+                gap = (statement_date - last_date).days
+                if not 1 <= gap <= _LAST_STATEMENT_MAX_GAP_DAYS:
+                    reasons.append(
+                        f'{cur} statement_date not 1-{_LAST_STATEMENT_MAX_GAP_DAYS}'
+                        ' days after last_statement_date'
+                    )
 
         mv_sum = Decimal('0')
         for h in section.get('holdings') or []:

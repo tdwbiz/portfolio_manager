@@ -48,7 +48,11 @@ from core.utils.safe_names import ANNUAL, MONTHLY, UNKNOWN, hash8_of, safe_file_
 from imports.classify_pdf_vl import classify_pdf
 from imports.parsers_annual_vl import parse_rbc_annual_report_vl
 from imports.parsers_monthly_vl import parse_rbc_monthly_vl
-from imports.parsers_pdf import parse_rbc_pdf_multi, self_check_sections
+from imports.parsers_pdf import (
+    _extract_text_from_pdf,
+    parse_rbc_pdf_multi,
+    self_check_sections,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -400,7 +404,12 @@ class Command(BaseCommand):
         # whose behaviour is unchanged.
         try:
             text_sections = parse_rbc_pdf_multi(str(pdf_file))
-            self_check_reasons = self_check_sections(text_sections)
+            # The whole text again for the currency-section count check: an
+            # unrecognised section header must fail, not pass silently.
+            full_text = _extract_text_from_pdf(str(pdf_file))
+            self_check_reasons = self_check_sections(
+                text_sections, full_text=full_text,
+            )
         except Exception as exc:
             logger.warning("text parser failed for %s — falling back to VL: %s", hash8, exc)
             text_sections = None

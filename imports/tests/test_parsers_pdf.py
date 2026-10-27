@@ -401,8 +401,99 @@ class TestPerCurrencySections(TestCase):
         self.assertEqual(self_check_sections(sections), [])
 
 
+# Step 12b follow-up fixture (tdw, Oct 26): the same CAD + USD statement but
+# with a USD header the splitter does not recognise, so everything stays in
+# one section. The second Asset Summary's end total is set so that the
+# combined parse still reconciles (first holdings table + last cash closing =
+# last end total) — exactly the case that used to pass silently; only the
+# currency-section count check sees it.
+UNRECOGNISED_USD_HEADER_STATEMENT = MULTI_CURRENCY_STATEMENT.replace(
+    'U.S. Dollar Statement', 'Foreign Currency Statement'
+).replace(
+    'Total on SEPT 30      $1,000.00       100.00 %',
+    'Total on SEPT 30      $1,950.00       100.00 %',
+)
+
+
+class TestStatementDateYearSanity(TestCase):
+    """Step 12b follow-up (tdw, Oct 26): whole 4-digit year, 2000..next year."""
+
+    def test_last_four_digits_of_longer_number_do_not_count(self):
+        # Two-line shape: the next line ends in a longer number; its last four
+        # digits must not be taken as the year.
+        text = """
+Order Execution Only SEPT 30
+Cdn. Dollar Statement No 12025
+"""
+        self.assertIsNone(parse_rbc_pdf(text)['statement_date'])
+
+    def test_single_line_year_glued_to_digits_rejected(self):
+        text = "RRSP Statement (CDN$)\nSEPT 30 12025\n"
+        self.assertIsNone(parse_rbc_pdf(text)['statement_date'])
+
+    def test_two_line_year_glued_to_digits_rejected(self):
+        text = """
+Order Execution Only SEPT 30
+Cdn. Dollar Statement 12025
+"""
+        self.assertIsNone(parse_rbc_pdf(text)['statement_date'])
+
+    def test_year_before_2000_rejected(self):
+        text = "RRSP Statement (CDN$)\nSEPT 30 1999\n"
+        self.assertIsNone(parse_rbc_pdf(text)['statement_date'])
+
+    def test_year_beyond_next_year_rejected(self):
+        text = "RRSP Statement (CDN$)\nSEPT 30 2099\n"
+        self.assertIsNone(parse_rbc_pdf(text)['statement_date'])
+
+
 class TestSelfCheckSections(TestCase):
     """Step 12b test 6 (helper part): self_check_sections reasons."""
+
+    @staticmethod
+    def _minimal_section(statement_date, last_statement_date):
+        return [{
+            'currency': 'CAD',
+            'statement_date': statement_date,
+            'last_statement_date': last_statement_date,
+            'holdings': [],
+            'balances': [{'account_type': 'Cash', 'market_value': Decimal('10.00')}],
+            'end_total_market_value': Decimal('10.00'),
+        }]
+
+    def test_unsplit_currency_section_fails_on_count_mismatch(self):
+        # The unrecognised USD header keeps everything in one (CAD) section and
+        # the totals still reconcile — without full_text the self-check passes,
+        # with it the count check returns a reason naming only the counts.
+        sections = parse_rbc_pdf_multi(UNRECOGNISED_USD_HEADER_STATEMENT)
+        self.assertEqual(len(sections), 1)
+        self.assertEqual(self_check_sections(sections), [])
+        reasons = self_check_sections(
+            sections, full_text=UNRECOGNISED_USD_HEADER_STATEMENT,
+        )
+        self.assertEqual(reasons, ['currency sections: 1 parsed vs 2 in text'])
+
+    def test_statement_date_before_last_statement_date_fails(self):
+        sections = self._minimal_section(date(2025, 8, 29), date(2025, 9, 30))
+        reasons = self_check_sections(sections)
+        self.assertEqual(
+            reasons,
+            ['CAD statement_date not 1-100 days after last_statement_date'],
+        )
+
+    def test_statement_date_more_than_100_days_after_last_fails(self):
+        # Sep 1 -> Dec 31 is 121 days.
+        sections = self._minimal_section(date(2025, 12, 31), date(2025, 9, 1))
+        reasons = self_check_sections(sections)
+        self.assertEqual(
+            reasons,
+            ['CAD statement_date not 1-100 days after last_statement_date'],
+        )
+
+    def test_statement_date_within_100_days_after_last_passes(self):
+        # Aug 29 -> Sep 30 is 32 days.
+        sections = self._minimal_section(date(2025, 9, 30), date(2025, 8, 29))
+        self.assertEqual(self_check_sections(sections), [])
 
     def test_date_missing(self):
         sections = [{

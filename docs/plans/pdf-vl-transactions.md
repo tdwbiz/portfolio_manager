@@ -6,10 +6,12 @@ Branch: `feature/pdf-vl-transactions`. Implements tdw's decision after `docs/aud
 ## Goal
 
 In `manage_inbox_import`, a monthly statement whose **text** parse passes the self-check keeps
-holdings, cash and totals from the text parser (VL fallback unchanged when the self-check fails),
-but its **Account Activity transactions always come from the VL parser**, matched to the text
-currency sections by currency. Before anything is stored, a gate must pass **per currency
-section**:
+holdings, cash and totals from the text parser, but its **Account Activity transactions always
+come from the VL parser**, matched to the text currency sections by currency. When the
+self-check fails, the VL fallback path (all-VL sections) is used as today — except it is gated
+too: the gate runs on the VL result's own opening and closing cash and its transactions (Q1,
+Decisions below), so nothing that does not reconcile is ever stored. Before anything is
+stored, a gate must pass **per currency section**:
 
 - stored opening cash + Σ(credits) − Σ(debits) == stored closing cash, to the cent — a naive
   sum over **all** VL transactions of that section, no activity type excluded;
@@ -32,13 +34,17 @@ counts only in these new fields; descriptions stay scrubbed exactly as today.
 
 ## What changes
 
-- `core/utils/import_checks.py` — new pure helper (no Django models):
-  `merge_and_reconcile(text_sections, vl_sections) -> (sections, reasons)`.
-  - Normalises both sides' `currency` with `.upper().strip()`; builds a currency → VL section
-    map. A currency present on one side only, or duplicated on either side, is a reason
-    (currency names only).
-  - Returns copies of the text sections with `transactions` replaced by the matching VL
-    section's transactions, and a list of reasons (empty = gate passed).
+- `core/utils/import_checks.py` — new pure helpers (no Django models):
+  - `reconcile_section(section) -> reasons` — the per-section gate (used by both the text
+    path and the VL fallback path), below.
+  - `merge_and_reconcile(text_sections, vl_sections) -> (sections | None, reasons)`.
+    - Normalises both sides' `currency` with `.upper().strip()`; builds a currency → VL
+      section map. A currency present on one side only, or duplicated on either side, is a
+      reason (currency names only); in that case the first return value is `None`.
+    - Otherwise returns copies of the text sections with `transactions` replaced by the
+      matching VL section's transactions, and a list of reasons: the currency-mismatch
+      reasons plus `reconcile_section` applied to every merged section (empty = gate
+      passed).
   - Gate per section (Decimal, quantised to 0.01): cash opening/closing summed over balance
     rows with `str(account_type).strip().lower() == 'cash'`; no cash row → reason naming the
     field (`balances`) and the currency; else `opening + Σcredit − Σdebit != closing` →
@@ -52,6 +58,10 @@ counts only in these new fields; descriptions stay scrubbed exactly as today.
     `merge_and_reconcile`; non-empty reasons → `reconcile_error` rejection; empty → the merged
     sections become `parsed_list` (pass 1/pass 2 storage unchanged — transactions are stored
     with the section currency as today).
+  - VL fallback path (self-check failed): after the VL parse succeeds, run
+    `reconcile_section` on every VL section (its own cash rows and its own transactions);
+    any reason joins `reconcile_msgs` → `reconcile_error` rejection (Q1). The existing
+    VL-raise / no-sections behaviour is unchanged.
   - New `reconcile_msgs` list alongside `conflict_msgs` / `date_msgs`; verdict priority:
     `conflict` > `date_error` > `reconcile_error` > `duplicate`/`imported`/`error`. The
     rejection path mirrors the conflict/date path: `_log_import(..., 'error', ...)`, return
@@ -79,8 +89,8 @@ None. No model changes.
 
 - The text parser (`imports/parsers_pdf.py`) — no change.
 - The annual path (`_process_annual`), `dedupe_monthly_statements`, `compare_monthly_pdf`.
-- The VL fallback path behaviour (self-check failed → all-VL sections, verdicts as today, no
-  gate — see Open questions).
+- The VL fallback path beyond the gate (self-check failed → all-VL sections; the gate now
+  applies to it too — Q1, Decisions below).
 - `import_csv`, `watch_inbox` beyond reusing this command, scripts, UI.
 
 ## Steps
@@ -90,11 +100,12 @@ None. No model changes.
    section with equal/unequal cash; missing cash row; currency missing on one side; duplicated
    currency; lowercase currency matched.
    Check: `/opt/pm-venv/bin/python -m pytest tests/test_import_checks.py -q`. Commit.
-2. **Wire into `_process_monthly`.** VL call on the text path, merge, gate, `reconcile_msgs`,
-   `reconcile_error` verdict (real run and dry run), JSON log fields `parser_holdings` /
-   `parser_transactions` and per-section `txn_count` / `reconcile`. Update the existing
-   text-first tests in `imports/tests/test_manage_inbox_import.py` whose VL mocks must now
-   reconcile (test fixtures only).
+2. **Wire into `_process_monthly`.** VL call on the text path, merge, gate on both paths
+   (text: merged sections; fallback: the VL sections' own cash and transactions — Q1),
+   `reconcile_msgs`, `reconcile_error` verdict (real run and dry run), JSON log fields
+   `parser_holdings` / `parser_transactions` and per-section `txn_count` / `reconcile`.
+   Update the existing text-first tests in `imports/tests/test_manage_inbox_import.py` whose
+   VL mocks must now reconcile (test fixtures only).
    Check: `/opt/pm-venv/bin/python -m pytest imports/tests/test_manage_inbox_import.py -q` and
    `git grep -n "reconcile_error" core/management/commands/manage_inbox_import.py`. Commit.
 3. **Integration tests** in `imports/tests/test_monthly_txn_reconcile.py` (synthetic text
@@ -107,6 +118,9 @@ None. No model changes.
    - VL raises → rejected `reconcile_error`, nothing stored;
    - a currency section on one side only (text CAD+USD, VL CAD only, and the reverse) →
      rejected;
+   - a fallback file that does not reconcile (self-check failed; the VL sections' own cash
+     and transactions do not balance) → `errors/`, verdict `reconcile_error`, nothing stored
+     (Q1);
    - `--dry-run` on a fully reconciling file: verdict `imported` printed, no rows, no
      `FileImportLog`, no JSON log, file still in the inbox dir.
    Check: `/opt/pm-venv/bin/python -m pytest imports/tests/test_monthly_txn_reconcile.py -q`.
@@ -115,19 +129,21 @@ None. No model changes.
    verdicts). Check: `rg -n "reconcile_error" docs/IMPORT_COMMANDS.md`. Commit.
 5. **Full tests, once:**
    `/opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test`
-   and `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`. Fix fallout, commit.
+   and `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`. Fix fallout (test-only —
+   e.g. other test files that run the real text path now need a reconciling VL mock),
+   commit.
 
 ## Stop conditions
 
 - A change to the text parser, the annual path, `dedupe_monthly_statements` or
   `compare_monthly_pdf` looks necessary → stop and ask (out of scope).
 - A migration seems needed → stop (none expected).
-- The VL fallback path turns out to need the gate to make the flow coherent → stop and ask
-  (Open question 1).
 - A step of this plan turns out wrong → stop; the plan is revised first, not silently changed.
 - `makemigrations --check --settings=portfolio_manager.settings_test` reports changes → stop.
 
 ## Open questions
+
+Answered in **Decisions (tdw, Oct 27)** below.
 
 1. **Does the gate also apply to the VL fallback path (self-check failed)?**
    Recommendation: **no** — "VL fallback as today"; the gate is the text path's cross-check of
@@ -146,3 +162,23 @@ None. No model changes.
    a section with no such row fails the gate with a reason naming `balances` and the currency.
 5. **Existing text-first tests** must now provide a reconciling VL mock (the text path always
    calls VL). Recommendation: update those fixtures in step 2 — test-only change, allowed.
+
+## Decisions (tdw, Oct 27)
+
+Answers to the open questions above:
+
+1. **Gate on the VL fallback path too — yes.** The gate applies to the fallback path as
+   well, using the VL result's own opening and closing cash and its transactions, so nothing
+   that does not reconcile is ever stored. A test for a fallback file that does not
+   reconcile is added (step 3).
+2. **Verdict priority — yes, as recommended:** `conflict` > `date_error` >
+   `reconcile_error` > `duplicate`/`imported`/`error`; all reasons still appear in
+   `error_messages`.
+3. **Scope of "names and counts only" — yes, as recommended:** it governs the **new**
+   fields (parsers, `txn_count`, `reconcile`, reasons); the existing section payload stays
+   as today (descriptions scrubbed as today).
+4. **Cash rows — yes, as recommended:** sum every balance row whose `account_type`
+   lowercases to `cash`; a section with no such row fails the gate with a reason naming
+   `balances` and the currency.
+5. **Existing text-first tests — yes, as recommended:** update those fixtures in step 2 —
+   test-only change.

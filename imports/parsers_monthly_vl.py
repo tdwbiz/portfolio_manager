@@ -643,44 +643,9 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             debit = _to_decimal(tx.get('debit', 0))
             credit = _to_decimal(tx.get('credit', 0))
 
-            # --- Fix BOUGHT: clear credit, ensure cost in debit ---
-            # BOUGHT = money out. The VL model sometimes puts the amount in
-            # credit instead of debit, or leaves both set.
-            if activity == 'BOUGHT':
-                if credit > 0 and debit == 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: BOUGHT moved credit->debit for: %s",
-                        description[:60],
-                    )
-                    debit = credit
-                    credit = Decimal('0')
-                elif credit > 0 and debit > 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: BOUGHT cleared credit for: %s",
-                        description[:60],
-                    )
-                    credit = Decimal('0')
-
-            # --- Fix SOLD: clear debit, ensure proceeds in credit ---
-            # SOLD = money in. The VL model sometimes puts the Opening Balance
-            # amount from the previous row into the debit column of the first
-            # transaction. Also, sometimes proceeds go to debit instead of credit.
-            if activity == 'SOLD':
-                if debit > 0 and credit == 0:
-                    # Proceeds went to wrong column
-                    logger.warning(
-                        "parse_rbc_monthly_vl: SOLD moved debit->credit for: %s",
-                        description[:60],
-                    )
-                    credit = debit
-                    debit = Decimal('0')
-                elif debit > 0 and credit > 0:
-                    # Both set — debit is likely Opening Balance leak
-                    logger.warning(
-                        "parse_rbc_monthly_vl: SOLD cleared debit (opening balance leak) for: %s",
-                        description[:60],
-                    )
-                    debit = Decimal('0')
+            # Amounts are never moved or cleared between the debit and credit
+            # columns (plan vl-interest-columns): a column VL reads wrongly is
+            # caught by the cash gate (opening + credits - debits vs closing).
 
             # --- Fix DIST: per-share rate goes in price, quantity is 0 ---
             # PDF: DIST has per-share rate in RATE column, quantity blank in PDF
@@ -695,31 +660,11 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                         "parse_rbc_monthly_vl: DIST rate->price fix: price=%.4f qty=0 for: %s",
                         price, description[:60],
                     )
-                # Ensure cash is in credit (money in)
-                if debit > 0 and credit == 0:
-                    credit = debit
-                    debit = Decimal('0')
 
             # DIV REIN keeps its printed debit (the whole shares bought with
             # the dividend cash): a reinvested dividend is two PDF rows —
             # DIV REIN (debit) + a DIVIDEND/DIST credit row — and the cash
             # gate needs both amounts (plan vl-fallback-checks, goal 2).
-
-            # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
-            # RBF2010/RBF2014 interest: quantity = new shares earned
-            # The PDF shows quantity and $10 rate, but no real debit/credit
-            if activity == 'INTEREST_RECEIVED':
-                # Clear the $10 rate from price field — it's not a real price
-                if price == Decimal('10.00'):
-                    price = Decimal('0')
-                # Clear any debit/credit that may have been parsed
-                # (interest is reinvested as shares, no cash flow)
-                debit = Decimal('0')
-                credit = Decimal('0')
-                logger.info(
-                    "parse_rbc_monthly_vl: INTEREST fix: qty=%s price=0 for: %s",
-                    quantity, description[:60],
-                )
 
             # --- Fix cash-only transactions: quantity must be 0 ---
             # TFR OUT, TRANSFER, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL,
@@ -733,36 +678,6 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 )
                 quantity = Decimal('0')
                 price = Decimal('0')
-
-            # --- Fix TFR OUT: cash out must be in debit ---
-            if activity == 'TFR OUT':
-                if credit > 0 and debit == 0:
-                    debit = credit
-                    credit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: TFR OUT moved credit->debit for: %s",
-                        description[:60],
-                    )
-
-            # --- Fix DIVIDEND: ensure cash is in credit ---
-            if activity == 'DIVIDEND':
-                if debit > 0 and credit == 0:
-                    credit = debit
-                    debit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: DIVIDEND moved debit->credit for: %s",
-                        description[:60],
-                    )
-
-            # --- Fix WITHDRAWAL: ensure cash is in debit ---
-            if activity == 'WITHDRAWAL':
-                if credit > 0 and debit == 0:
-                    debit = credit
-                    credit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: WITHDRAWAL moved credit->debit for: %s",
-                        description[:60],
-                    )
 
             # --- Validate: cash-in types must have credit > 0 ---
             if activity in CASH_IN_TYPES and debit == 0 and credit == 0:

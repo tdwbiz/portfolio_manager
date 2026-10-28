@@ -319,7 +319,9 @@ class PostProcessingTest(TestCase):
     """Tests for transaction post-processing rules in the VL parser."""
 
     def test_tfr_out_clears_quantity(self):
-        """TFR OUT should have quantity=0 and cash in debit."""
+        """TFR OUT should have quantity=0; the printed amounts stay in their
+        columns (plan vl-interest-columns: no more credit->debit move — a
+        misread column is caught by the cash gate)."""
         from decimal import Decimal
         from datetime import date
         from imports.parsers_monthly_vl import _coerce_response
@@ -341,7 +343,7 @@ class PostProcessingTest(TestCase):
                     'quantity': Decimal('27103.0000'),  # Wrong - should be 0
                     'price': Decimal('0'),
                     'debit': Decimal('0'),
-                    'credit': Decimal('27103.00'),  # Wrong side
+                    'credit': Decimal('27103.00'),
                     'commission': Decimal('0'),
                     'notes': '',
                 }],
@@ -350,8 +352,9 @@ class PostProcessingTest(TestCase):
         result = _coerce_response(raw, '/test.pdf')
         tx = result[0]['transactions'][0]
         self.assertEqual(tx['quantity'], Decimal('0'))
-        self.assertEqual(tx['debit'], Decimal('27103.00'))
-        self.assertEqual(tx['credit'], Decimal('0'))
+        # Amounts untouched: the credit stays in the credit column.
+        self.assertEqual(tx['debit'], Decimal('0'))
+        self.assertEqual(tx['credit'], Decimal('27103.00'))
 
     def test_deposit_clears_quantity(self):
         """DEPOSIT should have quantity=0."""

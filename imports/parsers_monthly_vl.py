@@ -51,7 +51,7 @@ import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 
 from django.conf import settings
 from imports.llm_client import VLClient, VLParseError
@@ -89,9 +89,6 @@ CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', '
 # Activity types that represent cash outflow (money out of the account)
 CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
 
-# Activity types with zero net cash effect
-ZERO_CASH_TYPES = {'DIV REIN', 'INTEREST_RECEIVED', 'ADJUST', 'RTC', 'OPENING BALANCE', 'CLOSING BALANCE'}
-
 
 def normalize_activity_type(raw_type: str, description: str = '') -> str:
     """Normalize and validate an activity type from the VL parser.
@@ -105,19 +102,39 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
     # If already valid, return as-is
     if raw in RBC_ACTIVITY_TYPES:
         return raw
-    
+
+    # Empty activity type (tdw decision, Oct 27): match only the income
+    # wording — never a security name, and never DIVIDEND by default.
+    if not raw:
+        if 'CASH DIV' in desc:
+            return 'DIVIDEND'
+        if re.search(r'\bDIST\b', desc):
+            return 'DIST'
+        logger.warning(
+            "normalize_activity_type: empty activity type with no income "
+            "wording (description %r) — using OTHER",
+            description[:80],
+        )
+        return 'OTHER'
+
     # --- Fix known LLM misclassifications based on description ---
-    
+
+    # RBF savings interest must win over the DIST/REINV rules: a check-1
+    # style savings row is one net-zero INTEREST_RECEIVED row even when its
+    # description mentions reinvestment (Q1, plan vl-fallback-checks).
+    if 'RBC INVESTMENT SAVINGS' in desc:
+        return 'INTEREST_RECEIVED'
+
     # "DIST ON X SHS" in description = cash distribution (money in)
     if 'DIST ON' in desc:
         return 'DIST'
-    
+
     # Dividend reinvestment: description contains "REINV@" or "REINVEST"
     if 'REINV' in desc or 'REINVEST' in desc:
         return 'DIV REIN'
-    
+
     # Interest on RBF savings funds
-    if 'INTEREST' in desc or 'RBC INVESTMENT SAVINGS' in desc:
+    if 'INTEREST' in desc:
         return 'INTEREST_RECEIVED'
     
     # Map common LLM mistakes
@@ -352,7 +369,8 @@ Rules:
 def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     """Parse an RBC monthly statement PDF using the configured VL vision model.
 
-    Falls back to a regex-based parser if the VL model fails after all retries.
+    Hard error on failure — there is no regex fallback: the caller records
+    verdict ``error`` and parks the file in errors/ (plan vl-fallback-checks).
 
     Parameters
     ----------
@@ -368,9 +386,11 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     Raises
     ------
     VLParseError
-        If the VL model fails after all retries AND regex fallback also fails.
+        If the VL model fails after all retries (including a truncated
+        answer: the reason contains 'truncated').
     ValueError
-        If required fields (statement_date, account_number) are missing.
+        If required fields (statement_date, account_number) are missing or
+        the response is invalid.
     """
     base_url = settings.VL_MODEL_BASE_URL
     model = settings.VL_MODEL_NAME
@@ -388,24 +408,17 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
         len(pages_b64),
     )
 
-    try:
-        client = VLClient(
-            base_url=base_url,
-            model=model,
-            api_key=settings.VL_MODEL_API_KEY,
-            timeout=timeout,
-            max_retries=max_retries,
-            max_tokens=settings.VL_MAX_TOKENS,
-            temperature=settings.VL_TEMPERATURE,
-        )
-        raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
-        return _coerce_response(raw, file_path)
-    except (VLParseError, Exception) as exc:
-        logger.warning(
-            "parse_rbc_monthly_vl: VL model failed (%s), falling back to regex parser",
-            exc,
-        )
-        return _parse_rbc_monthly_regex(file_path)
+    client = VLClient(
+        base_url=base_url,
+        model=model,
+        api_key=settings.VL_MODEL_API_KEY,
+        timeout=timeout,
+        max_retries=max_retries,
+        max_tokens=settings.VL_MAX_TOKENS,
+        temperature=settings.VL_TEMPERATURE,
+    )
+    raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
+    return _coerce_response(raw, file_path)
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +431,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
     Limits to VL_MONTHLY_MAX_PAGES (default 0 = unlimited).
     Set to 0 to render all pages, or a specific number to limit.
     """
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     total = len(doc)
     max_pages = settings.VL_MONTHLY_MAX_PAGES
     
@@ -437,7 +450,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
         )
     
     pages_b64 = []
-    matrix = fitz.Matrix(dpi / 72, dpi / 72)
+    matrix = pymupdf.Matrix(dpi / 72, dpi / 72)
     try:
         for i, page in enumerate(doc):  # pyright: ignore[reportArgumentType]
             if max_pages > 0 and i >= max_pages:
@@ -566,8 +579,12 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             if raw_type == 'BUY' and 'DIST ON' in description.upper():
                 activity = 'DIST'
 
-            # Post-fix: if description says "REINV@" or "REINVEST", force to DIV REIN
-            if 'REINV' in description.upper() or 'REINVEST' in description.upper():
+            # Post-fix: if description says "REINV@" or "REINVEST", force to
+            # DIV REIN — savings rows excluded, RBC INVESTMENT SAVINGS wins
+            # (Q1): they stay INTEREST_RECEIVED and must not keep amounts.
+            desc_upper = description.upper()
+            if (('REINV' in desc_upper or 'REINVEST' in desc_upper)
+                    and 'RBC INVESTMENT SAVINGS' not in desc_upper):
                 if activity != 'DIV REIN':
                     logger.warning(
                         "parse_rbc_monthly_vl: corrected %s->DIV REIN for: %s",
@@ -641,17 +658,10 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     credit = debit
                     debit = Decimal('0')
 
-            # --- Fix DIV REIN: net cash = 0, quantity = new shares ---
-            # Dividend reinvestment: dividend immediately used to buy shares
-            if activity == 'DIV REIN':
-                # Clear debit/credit — net cash effect is 0
-                if debit > 0 or credit > 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: DIV REIN cleared debit/credit for: %s",
-                        description[:60],
-                    )
-                debit = Decimal('0')
-                credit = Decimal('0')
+            # DIV REIN keeps its printed debit (the whole shares bought with
+            # the dividend cash): a reinvested dividend is two PDF rows —
+            # DIV REIN (debit) + a DIVIDEND/DIST credit row — and the cash
+            # gate needs both amounts (plan vl-fallback-checks, goal 2).
 
             # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
             # RBF2010/RBF2014 interest: quantity = new shares earned
@@ -760,59 +770,9 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             f"VL model returned sections but none had a valid currency for {file_path}"
         )
 
-    # Post-processing validation: flag suspicious values
-    for section in result:
-        end_total = section.get('end_total_market_value', Decimal('0'))
-        begin_total = section.get('begin_total_market_value', Decimal('0'))
-
-        # Sum up all balance market values for this section
-        balance_sum = sum((b.get('market_value', Decimal('0')) for b in section.get('balances', [])), Decimal('0'))
-
-        # If end_total is suspiciously low but balances sum to a large value,
-        # the VL model likely extracted a single holding instead of the total
-        if end_total < Decimal('1000') and balance_sum > Decimal('1000'):
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f but balances sum to %.2f — "
-                "VL model likely extracted wrong value (single holding vs total)",
-                file_path, section.get('currency', 'CAD'), end_total, balance_sum,
-            )
-            # Attempt to fix: use balance_sum as end_total if it's more reasonable
-            if balance_sum > end_total * 10:  # Only if balance_sum is 10x larger
-                logger.warning(
-                    "parse_rbc_monthly_vl: %s [%s] replacing end_total %.2f with balance_sum %.2f",
-                    file_path, section.get('currency', 'CAD'), end_total, balance_sum,
-                )
-                section['end_total_market_value'] = balance_sum
-
-        # Same check for begin_total
-        if begin_total < Decimal('1000') and balance_sum > Decimal('1000'):
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f but balances sum to %.2f — "
-                "VL model likely extracted wrong value",
-                file_path, section.get('currency', 'CAD'), begin_total, balance_sum,
-            )
-
-        # If end_total is suspiciously HIGH (10x balance sum), the VL model
-        # likely hallucinated an extra digit or merged multiple values
-        if balance_sum > Decimal('0') and end_total > balance_sum * 10:
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f is %.0fx balance_sum %.2f — "
-                "likely VL hallucination; replacing with balance_sum",
-                file_path, section.get('currency', 'CAD'),
-                end_total, end_total / balance_sum, balance_sum,
-            )
-            section['end_total_market_value'] = balance_sum
-
-        # Same for begin_total
-        if balance_sum > Decimal('0') and begin_total > balance_sum * 10:
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f is %.0fx balance_sum %.2f — "
-                "likely VL hallucination; replacing with balance_sum",
-                file_path, section.get('currency', 'CAD'),
-                begin_total, begin_total / balance_sum, balance_sum,
-            )
-            section['begin_total_market_value'] = balance_sum
-
+    # No silent replacement of begin/end totals here: suspicious values are
+    # reported as check reasons by self_check_vl_sections (13d) and the file
+    # is rejected — never patched in place.
     return result
 
 
@@ -843,138 +803,3 @@ def _to_decimal(value) -> Decimal:
         return Decimal('0')
 
 
-# ---------------------------------------------------------------------------
-# Regex fallback parser
-# ---------------------------------------------------------------------------
-
-def _parse_rbc_monthly_regex(file_path: str) -> list[dict]:
-    """Regex-based fallback parser for RBC monthly statements.
-
-    Used when the VL model fails. Extracts what it can from the raw PDF
-    text using pattern matching.
-
-    Parameters
-    ----------
-    file_path:
-        Absolute path to the PDF file.
-
-    Returns
-    -------
-    list[dict]
-        List of section dicts. May be incomplete compared to VL output.
-    """
-    doc = fitz.open(file_path)
-    full_text = '\n'.join([str(page.get_text()) for page in doc])
-    doc.close()
-
-    result = []
-
-    # Extract statement date
-    stmt_date_match = re.search(
-        r'(?:Statement\s+Date|As\s+of\s+Date|Period\s+End)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        full_text, re.IGNORECASE,
-    )
-    statement_date = None
-    if stmt_date_match:
-        date_str = stmt_date_match.group(1).replace('/', '-')
-        parts = date_str.split('-')
-        if len(parts) == 3 and len(parts[0]) == 4:
-            statement_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
-        elif len(parts) == 3:
-            statement_date = date(int(parts[2]), int(parts[0]), int(parts[1]))
-
-    # Extract account number
-    acct_match = re.search(
-        r'(?:Account\s+No\.?|Account\s+Number)[:\s]+(\d[\d\-]+)',
-        full_text, re.IGNORECASE,
-    )
-    account_number = acct_match.group(1) if acct_match else ''
-
-    # Extract FX rate
-    fx_match = re.search(
-        r'Exchange\s+rate\s+1\s+USD\s*=\s*([\d.]+)\s+CAD',
-        full_text, re.IGNORECASE,
-    )
-    fx_rate = Decimal(fx_match.group(1)) if fx_match else Decimal('0')
-
-    # Try to extract currency sections (CAD/USD)
-    # Look for patterns like "CAD" or "USD" followed by holdings
-    currency_sections = re.findall(
-        r'(CAD|USD)\s*\n((?:.*\n)*?)(?=(?:CAD|USD)\s*\n|$)',
-        full_text, re.IGNORECASE,
-    )
-
-    for curr, section_text in currency_sections:
-        curr = curr.upper()
-        section_result = {
-            'statement_date': statement_date,
-            'account_number': account_number,
-            'currency': curr,
-            'last_statement_date': None,
-            'fx_rate': fx_rate if curr == 'USD' else Decimal('0'),
-            'begin_total_market_value': Decimal('0'),
-            'end_total_market_value': Decimal('0'),
-            'balances': [],
-            'transactions': [],
-        }
-
-        # Extract total market values
-        total_match = re.search(
-            r'Total\s+on\s+\w+\s+\$([\d,]+\.?\d*)\s*(?:\d+\.?\d*\s*%)?',
-            section_text, re.IGNORECASE,
-        )
-        if total_match:
-            val = Decimal(total_match.group(1).replace(',', ''))
-            section_result['end_total_market_value'] = val
-
-        # Extract transactions (date, type, symbol, quantity, amount patterns)
-        tx_patterns = [
-            r'(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s+(\w+)\s+(\w+)\s+([\d,]+\.?\d*)\s+([\d.]+)\s+\$?([\d,]+\.?\d*)',
-        ]
-        for tx_pat in tx_patterns:
-            for m in re.finditer(tx_pat, section_text):
-                try:
-                    tx_date_str = m.group(1).replace('/', '-')
-                    tx_parts = tx_date_str.split('-')
-                    if len(tx_parts) == 3 and len(tx_parts[0]) == 4:
-                        tx_date = date(int(tx_parts[0]), int(tx_parts[1]), int(tx_parts[2]))
-                    else:
-                        tx_date = date(int(tx_parts[2]), int(tx_parts[0]), int(tx_parts[1]))
-
-                    section_result['transactions'].append({
-                        'date': tx_date,
-                        'activity_type': m.group(2).upper(),
-                        'description': '',
-                        'symbol': m.group(3),
-                        'quantity': Decimal(m.group(4).replace(',', '')),
-                        'price': Decimal(m.group(5)),
-                        'debit': Decimal('0'),
-                        'credit': Decimal(m.group(6).replace(',', '')),
-                        'currency': curr,
-                        'commission': Decimal('0'),
-                        'notes': '',
-                    })
-                except (ValueError, IndexError):
-                    continue
-
-        result.append(section_result)
-
-    # If no currency sections found, create a default CAD section
-    if not result:
-        result.append({
-            'statement_date': statement_date,
-            'account_number': account_number,
-            'currency': 'CAD',
-            'last_statement_date': None,
-            'fx_rate': Decimal('0'),
-            'begin_total_market_value': Decimal('0'),
-            'end_total_market_value': Decimal('0'),
-            'balances': [],
-            'transactions': [],
-        })
-
-    logger.info(
-        "parse_rbc_monthly_regex: extracted %d section(s) from %s",
-        len(result), file_path,
-    )
-    return result

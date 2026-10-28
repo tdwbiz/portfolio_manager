@@ -6,8 +6,10 @@ file name, JSON log name and payload, stored file_name rows) must be free of
 the number's digit run.
 """
 
+import hashlib
 import io
 import os
+import re
 import tempfile
 from datetime import date
 from decimal import Decimal
@@ -34,8 +36,9 @@ FAKE_PDF_CONTENT = b"%PDF-1.4\nfake statement content for safe-name tests\n"
 
 
 def _monthly_section():
-    """A VL section that passes the 13c-b cash gate: 90.00 opening +
-    10.00 credit == 100.00 closing."""
+    """A VL section that passes the 13c-b cash gate (90.00 opening +
+    10.00 credit == 100.00 closing) and the 13d VL section checks: no
+    holdings, so end total == cash closing (100.00)."""
     return {
         'statement_date': date(2025, 9, 30),
         'last_statement_date': date(2025, 8, 29),
@@ -43,7 +46,7 @@ def _monthly_section():
         'currency': 'CAD',
         'fx_rate': Decimal('1.0000'),
         'begin_total_market_value': Decimal('100.00'),
-        'end_total_market_value': Decimal('105.00'),
+        'end_total_market_value': Decimal('100.00'),
         'transactions': [
             {'date': date(2025, 9, 15), 'activity_type': 'DEPOSIT',
              'description': 'TEST DEPOSIT', 'symbol': '',
@@ -252,6 +255,91 @@ class ManageInboxImportSafeNameTests(TestCase):
             self.assertIn('_ERROR.json', json_names[0])
             self.assertEqual(FileImportLog.objects.get().status, 'error')
             _assert_no_number_anywhere(processed_dir)
+
+
+class ManageInboxImportVerdictSummaryTests(TestCase):
+    """End summary: files counted per verdict — one line per verdict
+    (imported, duplicate, conflict, date_error, reconcile_error,
+    vl_check_error, error) in normal and dry runs, existing lines kept."""
+
+    def setUp(self):
+        from core.models import Account
+
+        self.account = Account.objects.create(
+            name=FAKE_NAME, broker="RBC",
+            fingerprint=fingerprint_account_number(FAKE_NUMBER), last_4="0004",
+        )
+
+    def _populate_inbox(self, inbox_dir):
+        dup_content = b"%PDF-1.4\nfake duplicate content\n"
+        with open(os.path.join(inbox_dir, f'A {FAKE_NUMBER}.pdf'), 'wb') as f:
+            f.write(FAKE_PDF_CONTENT)  # -> imported (mocked VL section)
+        with open(os.path.join(inbox_dir, f'B {FAKE_NUMBER}.pdf'), 'wb') as f:
+            f.write(dup_content)       # -> duplicate (row pre-created below)
+        with open(os.path.join(inbox_dir, f'C {FAKE_NUMBER}.pdf'), 'wb') as f:
+            f.write(b"%PDF-1.4\nunknown content\n")  # -> error (unknown type)
+
+        RbcMonthly.objects.create(
+            account=self.account,
+            file_name='2025-08-31_monthly_ACCOUNT_D_00000000.pdf',
+            statement_date=date(2025, 8, 31),
+            content_hash=hashlib.sha256(dup_content).hexdigest(),
+        )
+
+    def _run(self, inbox_dir, processed_dir, dry_run):
+        args = ['--inbox-dir', inbox_dir]
+        if dry_run:
+            args.append('--dry-run')
+        out = io.StringIO()
+        with patch(
+            'core.management.commands.manage_inbox_import.classify_pdf',
+            side_effect=lambda p: {
+                'A': 'monthly', 'B': 'monthly', 'C': 'unknown',
+            }[os.path.basename(p)[0]],
+        ), patch(
+            'core.management.commands.manage_inbox_import.parse_rbc_monthly_vl',
+            return_value=[_monthly_section()],
+        ):
+            with override_settings(
+                IMPORT_PROCESSED_DIR=processed_dir,
+                IMPORT_JSON_DIR=os.path.join(processed_dir, 'json_logs'),
+            ):
+                call_command('manage_inbox_import', *args, stdout=out)
+        return out.getvalue()
+
+    def _assert_summary(self, logged):
+        summary = logged.split('=== Inbox Import Summary ===')[1]
+        # The existing lines are kept…
+        self.assertIn('PDFs found:', summary)
+        self.assertIn('JSON logs:', summary)
+        # …and there is one line per verdict with the right count.
+        for verdict, expected in (
+            ('imported', 1), ('duplicate', 1), ('conflict', 0),
+            ('date_error', 0), ('reconcile_error', 0),
+            ('vl_check_error', 0), ('error', 1),
+        ):
+            with self.subTest(verdict=verdict):
+                self.assertIsNotNone(
+                    re.search(rf'(?m)^\s+{verdict}:\s+{expected}\s*$', summary),
+                    f'{verdict} line not found in the summary',
+                )
+
+    def test_summary_counts_files_per_verdict(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir = os.path.join(tmpdir, 'processed')
+            os.makedirs(inbox_dir)
+            self._populate_inbox(inbox_dir)
+
+            # Dry run: the per-verdict lines are printed, nothing written…
+            logged = self._run(inbox_dir, processed_dir, dry_run=True)
+            self._assert_summary(logged)
+            self.assertEqual(RbcMonthly.objects.count(), 1)  # only pre-created
+
+            # …and a normal run reports the same per-verdict lines.
+            logged = self._run(inbox_dir, processed_dir, dry_run=False)
+            self._assert_summary(logged)
+            self.assertEqual(RbcMonthly.objects.count(), 2)
 
 
 class ManageInboxImportTextFirstTests(TestCase):

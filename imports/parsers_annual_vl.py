@@ -43,7 +43,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 
 from django.conf import settings
 from imports.llm_client import VLClient, VLParseError
@@ -201,9 +201,9 @@ def _render_pdf_pages(file_path: str, dpi: int, max_pages: int = 0) -> list[str]
     
     max_pages=0 means render all pages.
     """
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     pages_b64 = []
-    matrix = fitz.Matrix(dpi / 72, dpi / 72)
+    matrix = pymupdf.Matrix(dpi / 72, dpi / 72)
     try:
         for i, page in enumerate(doc):
             if max_pages > 0 and i >= max_pages:

@@ -46,10 +46,12 @@ from core.utils.account_fingerprint import (
     scrub_text,
 )
 from core.utils.import_checks import (
+    cash_gate_details,
     content_hash_of,
     is_pdf_content_stored,
     merge_and_reconcile,
     reconcile_section,
+    self_check_vl_sections,
     statement_date_problems,
 )
 from core.utils.safe_names import (
@@ -158,6 +160,10 @@ class Command(BaseCommand):
         imported_holdings = 0
         duplicates = 0
         errors = 0
+        # Per-verdict file counts for the end summary (one line each).
+        verdict_counts = {v: 0 for v in (
+            'imported', 'duplicate', 'conflict', 'date_error',
+            'reconcile_error', 'vl_check_error', 'error')}
 
         for i, pdf_file in enumerate(pdf_files, 1):
             # Content-based hash: the original file name carries the account
@@ -184,6 +190,7 @@ class Command(BaseCommand):
                             'imported; would skip (no classify, no VL call)'
                         ))
                         duplicates += 1
+                        verdict_counts['duplicate'] += 1
                         continue
                     stored_rows = (
                         list(RbcMonthly.objects.filter(content_hash=full_hash))
@@ -218,6 +225,7 @@ class Command(BaseCommand):
                         logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
                     _move_file(pdf_file, processed_dir / safe_name, h8)
                     duplicates += 1
+                    verdict_counts['duplicate'] += 1
                     continue
 
                 # ── Step 1: classify ──────────────────────────────────────────
@@ -274,6 +282,7 @@ class Command(BaseCommand):
                 else:
                     classified_unknown += 1
                     errors += 1
+                    verdict_counts['error'] += 1
                     # Cannot be attributed to an account (or even a type):
                     # safe name with UNKNOWN_ACCOUNT and today's date.
                     safe_name = None if dry_run else safe_file_name(
@@ -310,6 +319,9 @@ class Command(BaseCommand):
                         _move_file(pdf_file, dest, h8)
                     continue
 
+                # One file = one verdict (annual or monthly branch).
+                verdict_counts[verdict] += 1
+
                 # ── Step 3: save JSON log (always) ──────────────────────────
                 if not dry_run:
                     json_path = _json_log_path(json_dir, safe_name, has_error=errs > 0)
@@ -339,6 +351,7 @@ class Command(BaseCommand):
                 reason = scrub_text(str(exc), name_map)[0]
                 logger.error("Unexpected error while processing %s: %s", h8, reason)
                 errors += 1
+                verdict_counts['error'] += 1
                 if dry_run:
                     self.stdout.write(self.style.ERROR(
                         f'  [DRY-RUN] verdict=error — {reason} '
@@ -368,7 +381,11 @@ class Command(BaseCommand):
             f'Holdings recorded:       {imported_holdings}\n'
             f'Duplicates skipped:      {duplicates}\n'
             f'Errors:                  {errors}\n'
-            f'JSON logs:               {json_dir}\n'
+            + ''.join(
+                f'  {verdict + ":":<23}{count}\n'
+                for verdict, count in verdict_counts.items()
+            )
+            + f'JSON logs:               {json_dir}\n'
         ))
 
     # ------------------------------------------------------------------
@@ -556,6 +573,7 @@ class Command(BaseCommand):
         parsers = {'holdings': 'text', 'transactions': 'vl'}
         self_check_reasons: list[str] = []
         reconcile_msgs: list[str] = []
+        vl_check_msgs: list[str] = []
 
         # Text-first (step 12b): deterministic text parser, then self-check;
         # any reason (or a text-parser error) falls back to the VL parser.
@@ -633,6 +651,15 @@ class Command(BaseCommand):
             for sec in parsed_list:
                 reconcile_msgs.extend(reconcile_section(sec))
 
+            # Step 13d: the VL sections were previously stored unchecked —
+            # run the same per-section checks the text path uses (holdings/
+            # totals, dates). Any reason rejects the whole file
+            # as vl_check_error: nothing stored, file to errors/. Reasons
+            # name only fields, currencies and symbols.
+            vl_check_msgs.extend(self_check_vl_sections(
+                parsed_list, today=timezone.now().date(),
+            ))
+
         # A VL error or a currency mismatch (text path) rejects the whole
         # file before any section validation or storage (all-or-nothing).
         if parsed_list is None:
@@ -644,6 +671,19 @@ class Command(BaseCommand):
             return (0, 0, 0, 0, max(1, len(reconcile_msgs)), [], reconcile_msgs,
                     None if dry_run else safe_name, parsers,
                     self_check_reasons, 'reconcile_error')
+
+        # Step 13d: print the cash-gate result per currency section on both
+        # paths (text-merge and VL fallback), in normal and dry runs. Amounts
+        # may be printed; account numbers never appear in these lines.
+        for sec in parsed_list:
+            gate = cash_gate_details(sec)
+            cur = str(sec.get('currency') or 'CAD').upper().strip()
+            self.stdout.write(
+                f"  [{cur}] cash gate: opening {gate['opening']} "
+                f"credits {gate['credits']} debits {gate['debits']} "
+                f"closing {gate['closing']} diff {gate['difference']} "
+                f"{'PASS' if gate['ok'] else 'FAIL'}"
+            )
 
         # Per-section JSON log fields (step 13c-b): transaction count and
         # reconciliation verdict — names and counts only.
@@ -745,11 +785,13 @@ class Command(BaseCommand):
         if dry_run:
             would_import = sum(1 for p in plans if p['action'] == 'import')
             # Verdict priority (Q2, tdw Oct 27): the file-level identity and
-            # date problems are the more actionable reason.
-            if conflict_msgs or date_msgs or reconcile_msgs:
+            # date problems are the more actionable reason; the VL section
+            # check failure (fallback path only) is last.
+            if conflict_msgs or date_msgs or reconcile_msgs or vl_check_msgs:
                 verdict = ('conflict' if conflict_msgs
                            else 'date_error' if date_msgs
-                           else 'reconcile_error')
+                           else 'reconcile_error' if reconcile_msgs
+                           else 'vl_check_error')
             elif file_errors:
                 verdict = 'error'
             elif plans and all(p['action'] == 'duplicate' for p in plans):
@@ -769,32 +811,38 @@ class Command(BaseCommand):
                         f"  [DRY-RUN] Duplicate monthly "
                         f"[{plan['currency']}]: {plan['statement_date']}"
                     ))
+            # Step 13d: print every failed check's reasons in dry run too —
+            # fields/currencies/symbols only.
+            for msg in self_check_reasons + reconcile_msgs + vl_check_msgs:
+                self.stdout.write(self.style.WARNING(f'  [DRY-RUN] {msg}'))
             self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
             return (would_import, 0, 0, 0,
                     len(file_errors) + len(conflict_msgs) + len(date_msgs)
-                    + len(reconcile_msgs),
+                    + len(reconcile_msgs) + len(vl_check_msgs),
                     json_sections,
                     [e['error'] for e in file_errors] + conflict_msgs + date_msgs
-                    + reconcile_msgs,
+                    + reconcile_msgs + vl_check_msgs,
                     safe_name, parsers, self_check_reasons, verdict)
 
-        # A conflict, a date failure or a reconciliation failure rejects the
-        # whole file: nothing from it is stored (all-or-nothing, tdw Oct 27).
-        if conflict_msgs or date_msgs or reconcile_msgs:
+        # A conflict, a date failure, a reconciliation failure or a VL
+        # section-check failure rejects the whole file: nothing from it is
+        # stored (all-or-nothing, tdw Oct 27).
+        if conflict_msgs or date_msgs or reconcile_msgs or vl_check_msgs:
             safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
-            msgs = conflict_msgs + date_msgs + reconcile_msgs
-            # The reconcile reasons were not printed during pass 1 (they come
-            # from the gate), so print them here — fields/currencies only.
-            for msg in reconcile_msgs:
+            msgs = conflict_msgs + date_msgs + reconcile_msgs + vl_check_msgs
+            # The gate and VL-check reasons were not printed during pass 1,
+            # so print them here — fields/currencies only.
+            for msg in reconcile_msgs + vl_check_msgs:
                 self.stderr.write(self.style.ERROR(f'  {msg}'))
             self._log_import(safe_name, 0, 'error', '; '.join(msgs),
                              content_hash=full_hash)
             verdict = ('conflict' if conflict_msgs
                        else 'date_error' if date_msgs
-                       else 'reconcile_error')
+                       else 'reconcile_error' if reconcile_msgs
+                       else 'vl_check_error')
             return (0, 0, 0, 0,
                     len(file_errors) + len(conflict_msgs) + len(date_msgs)
-                    + len(reconcile_msgs),
+                    + len(reconcile_msgs) + len(vl_check_msgs),
                     json_sections,
                     [e['error'] for e in file_errors] + msgs,
                     safe_name, parsers, self_check_reasons, verdict)

@@ -702,15 +702,17 @@ class TestParseRbcPdf(TestCase):
 
     @staticmethod
     def _mock_vl_section():
-        """One valid monthly VL parse section (CAD)."""
+        """One valid monthly VL parse section (CAD) that also passes the 13d
+        VL section checks: no holdings, so begin/end totals equal the cash
+        balance."""
         return {
             'statement_date': date(2025, 9, 30),
             'last_statement_date': date(2025, 8, 29),
             'account_number': '900-00003-1-8',
             'currency': 'CAD',
             'fx_rate': Decimal('1.000000'),
-            'begin_total_market_value': Decimal('1057.19'),
-            'end_total_market_value': Decimal('1057.19'),
+            'begin_total_market_value': Decimal('20.85'),
+            'end_total_market_value': Decimal('20.85'),
             'transactions': [],
             'balances': [
                 {

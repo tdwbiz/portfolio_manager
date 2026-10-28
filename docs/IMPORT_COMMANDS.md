@@ -29,6 +29,35 @@ Options:
 2. Falls back to VL model classification if filename doesn't match
 3. Routes to the correct parser automatically
 
+**Monthly statement verdicts** (per file; `--dry-run` reports the same
+verdicts without writing anything):
+
+| Verdict | Meaning | File goes to |
+|---|---|---|
+| `imported` | All sections passed the checks and were stored | `processed/` |
+| `duplicate` | The file's content (SHA-256) is already stored — nothing new | `processed/` |
+| `conflict` | Same account + date + currency already stored with different content — nothing stored (all-or-nothing) | `processed/errors/` |
+| `date_error` | Statement date failed sanity (missing, in the future, before 2000, or not 1–100 days after the Date of Last Statement on the same PDF) — nothing stored | `processed/errors/` |
+| `reconcile_error` | The VL transactions do not reconcile with the section's cash rows (opening + credits − debits ≠ closing), or the text/VL currency sections don't line up — nothing stored | `processed/errors/` |
+| `vl_check_error` | The file fell back to the VL parser and a VL section failed its checks (holdings + cash ≠ end total, unreadable holding values, date problems) — nothing stored. There is no begin-total check: VL's balances often list only cash for a USD section, and the begin total is checked against the previous month's end in step 14 | `processed/errors/` |
+| `error` | Anything else: the VL model failed or returned invalid JSON (there is no regex fallback), the document type is unknown, or a section could not be attributed to an account | `processed/errors/` |
+
+**End summary:** after the run, the `Inbox Import Summary` counts files per
+verdict — one line each for `imported`, `duplicate`, `conflict`,
+`date_error`, `reconcile_error`, `vl_check_error` and `error` — in normal and
+`--dry-run` runs, alongside the existing record counts.
+
+**Cash gate print lines:** for every currency section of a monthly statement,
+the import prints one line in normal and `--dry-run` runs, e.g.
+`[CAD] cash gate: opening 90.00 credits 10.00 debits 0 closing 100.00 diff 0.00 PASS`
+(opening cash, sum of credits, sum of debits, closing cash, the difference,
+PASS/FAIL). In `--dry-run` runs the reasons of every failed check are printed
+as well (field/currency/symbol names only — never account numbers).
+
+**VL model:** the VL answer limit is `VL_MAX_TOKENS` (default **16384**; set it
+in `.env` to override). A truncated VL answer (`finish_reason=length`) is an
+error whose reason says `truncated` — raise `VL_MAX_TOKENS` if you see it.
+
 ## CSV Import
 
 ### `import_csv`

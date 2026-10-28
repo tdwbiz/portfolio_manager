@@ -251,7 +251,7 @@ VL_MAX_PAGES = int(os.getenv("VL_MAX_PAGES", "3"))
 VL_MONTHLY_MAX_PAGES = int(
     os.getenv("VL_MONTHLY_MAX_PAGES", "0")
 )  # 0 = unlimited — render all pages so holdings on later pages are captured
-VL_MAX_TOKENS = int(os.getenv("VL_MAX_TOKENS", "8192"))
+VL_MAX_TOKENS = int(os.getenv("VL_MAX_TOKENS", "16384"))
 VL_TEMPERATURE = float(os.getenv("VL_TEMPERATURE", "0.1"))
 
 # UI configuration via environment variables

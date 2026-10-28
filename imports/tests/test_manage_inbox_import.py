@@ -34,8 +34,9 @@ FAKE_PDF_CONTENT = b"%PDF-1.4\nfake statement content for safe-name tests\n"
 
 
 def _monthly_section():
-    """A VL section that passes the 13c-b cash gate: 90.00 opening +
-    10.00 credit == 100.00 closing."""
+    """A VL section that passes the 13c-b cash gate (90.00 opening +
+    10.00 credit == 100.00 closing) and the 13d VL section checks: no
+    holdings, so end total == cash closing (100.00)."""
     return {
         'statement_date': date(2025, 9, 30),
         'last_statement_date': date(2025, 8, 29),
@@ -43,7 +44,7 @@ def _monthly_section():
         'currency': 'CAD',
         'fx_rate': Decimal('1.0000'),
         'begin_total_market_value': Decimal('100.00'),
-        'end_total_market_value': Decimal('105.00'),
+        'end_total_market_value': Decimal('100.00'),
         'transactions': [
             {'date': date(2025, 9, 15), 'activity_type': 'DEPOSIT',
              'description': 'TEST DEPOSIT', 'symbol': '',

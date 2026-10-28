@@ -50,6 +50,7 @@ from core.utils.import_checks import (
     is_pdf_content_stored,
     merge_and_reconcile,
     reconcile_section,
+    self_check_vl_sections,
     statement_date_problems,
 )
 from core.utils.safe_names import (
@@ -556,6 +557,7 @@ class Command(BaseCommand):
         parsers = {'holdings': 'text', 'transactions': 'vl'}
         self_check_reasons: list[str] = []
         reconcile_msgs: list[str] = []
+        vl_check_msgs: list[str] = []
 
         # Text-first (step 12b): deterministic text parser, then self-check;
         # any reason (or a text-parser error) falls back to the VL parser.
@@ -632,6 +634,15 @@ class Command(BaseCommand):
             # that does not reconcile is ever stored.
             for sec in parsed_list:
                 reconcile_msgs.extend(reconcile_section(sec))
+
+            # Step 13d: the VL sections were previously stored unchecked —
+            # run the same per-section checks the text path uses (holdings/
+            # totals, dates, begin total). Any reason rejects the whole file
+            # as vl_check_error: nothing stored, file to errors/. Reasons
+            # name only fields, currencies and symbols.
+            vl_check_msgs.extend(self_check_vl_sections(
+                parsed_list, today=timezone.now().date(),
+            ))
 
         # A VL error or a currency mismatch (text path) rejects the whole
         # file before any section validation or storage (all-or-nothing).
@@ -745,11 +756,13 @@ class Command(BaseCommand):
         if dry_run:
             would_import = sum(1 for p in plans if p['action'] == 'import')
             # Verdict priority (Q2, tdw Oct 27): the file-level identity and
-            # date problems are the more actionable reason.
-            if conflict_msgs or date_msgs or reconcile_msgs:
+            # date problems are the more actionable reason; the VL section
+            # check failure (fallback path only) is last.
+            if conflict_msgs or date_msgs or reconcile_msgs or vl_check_msgs:
                 verdict = ('conflict' if conflict_msgs
                            else 'date_error' if date_msgs
-                           else 'reconcile_error')
+                           else 'reconcile_error' if reconcile_msgs
+                           else 'vl_check_error')
             elif file_errors:
                 verdict = 'error'
             elif plans and all(p['action'] == 'duplicate' for p in plans):
@@ -772,29 +785,31 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
             return (would_import, 0, 0, 0,
                     len(file_errors) + len(conflict_msgs) + len(date_msgs)
-                    + len(reconcile_msgs),
+                    + len(reconcile_msgs) + len(vl_check_msgs),
                     json_sections,
                     [e['error'] for e in file_errors] + conflict_msgs + date_msgs
-                    + reconcile_msgs,
+                    + reconcile_msgs + vl_check_msgs,
                     safe_name, parsers, self_check_reasons, verdict)
 
-        # A conflict, a date failure or a reconciliation failure rejects the
-        # whole file: nothing from it is stored (all-or-nothing, tdw Oct 27).
-        if conflict_msgs or date_msgs or reconcile_msgs:
+        # A conflict, a date failure, a reconciliation failure or a VL
+        # section-check failure rejects the whole file: nothing from it is
+        # stored (all-or-nothing, tdw Oct 27).
+        if conflict_msgs or date_msgs or reconcile_msgs or vl_check_msgs:
             safe_name = safe_name or _unattributable_safe_name(pdf_file.name, hash8)
-            msgs = conflict_msgs + date_msgs + reconcile_msgs
-            # The reconcile reasons were not printed during pass 1 (they come
-            # from the gate), so print them here — fields/currencies only.
-            for msg in reconcile_msgs:
+            msgs = conflict_msgs + date_msgs + reconcile_msgs + vl_check_msgs
+            # The gate and VL-check reasons were not printed during pass 1,
+            # so print them here — fields/currencies only.
+            for msg in reconcile_msgs + vl_check_msgs:
                 self.stderr.write(self.style.ERROR(f'  {msg}'))
             self._log_import(safe_name, 0, 'error', '; '.join(msgs),
                              content_hash=full_hash)
             verdict = ('conflict' if conflict_msgs
                        else 'date_error' if date_msgs
-                       else 'reconcile_error')
+                       else 'reconcile_error' if reconcile_msgs
+                       else 'vl_check_error')
             return (0, 0, 0, 0,
                     len(file_errors) + len(conflict_msgs) + len(date_msgs)
-                    + len(reconcile_msgs),
+                    + len(reconcile_msgs) + len(vl_check_msgs),
                     json_sections,
                     [e['error'] for e in file_errors] + msgs,
                     safe_name, parsers, self_check_reasons, verdict)

@@ -694,6 +694,19 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                         description[:60],
                     )
 
+            # DEREGISTRATION FROM ACCOUNT is money INTO this account from a
+            # deregistered RBC account — an inter-account transfer in (same
+            # family as TFR IN). VL labels it WITHDRAWAL; correct the label
+            # to TRANSFER, leave the printed credit untouched
+            # (plan vl-interest-columns, tdw decision Oct 28).
+            if ('DEREGISTRATION' in desc_upper and activity != 'TRANSFER'
+                    and credit > 0 and debit == 0):
+                logger.warning(
+                    "parse_rbc_monthly_vl: DEREGISTRATION credit %s->TRANSFER for: %s",
+                    activity, description[:60],
+                )
+                activity = 'TRANSFER'
+
             # --- Fix cash-only transactions: quantity must be 0 ---
             # TFR OUT, TRANSFER, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL,
             # FEE are cash-only — no shares involved

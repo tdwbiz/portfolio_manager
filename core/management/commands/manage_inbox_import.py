@@ -46,6 +46,7 @@ from core.utils.account_fingerprint import (
     scrub_text,
 )
 from core.utils.import_checks import (
+    cash_gate_details,
     content_hash_of,
     is_pdf_content_stored,
     merge_and_reconcile,
@@ -656,6 +657,19 @@ class Command(BaseCommand):
                     None if dry_run else safe_name, parsers,
                     self_check_reasons, 'reconcile_error')
 
+        # Step 13d: print the cash-gate result per currency section on both
+        # paths (text-merge and VL fallback), in normal and dry runs. Amounts
+        # may be printed; account numbers never appear in these lines.
+        for sec in parsed_list:
+            gate = cash_gate_details(sec)
+            cur = str(sec.get('currency') or 'CAD').upper().strip()
+            self.stdout.write(
+                f"  [{cur}] cash gate: opening {gate['opening']} "
+                f"credits {gate['credits']} debits {gate['debits']} "
+                f"closing {gate['closing']} diff {gate['difference']} "
+                f"{'PASS' if gate['ok'] else 'FAIL'}"
+            )
+
         # Per-section JSON log fields (step 13c-b): transaction count and
         # reconciliation verdict — names and counts only.
         for sec in parsed_list:
@@ -782,6 +796,10 @@ class Command(BaseCommand):
                         f"  [DRY-RUN] Duplicate monthly "
                         f"[{plan['currency']}]: {plan['statement_date']}"
                     ))
+            # Step 13d: print every failed check's reasons in dry run too —
+            # fields/currencies/symbols only.
+            for msg in self_check_reasons + reconcile_msgs + vl_check_msgs:
+                self.stdout.write(self.style.WARNING(f'  [DRY-RUN] {msg}'))
             self.stdout.write(self.style.WARNING(f'  [DRY-RUN] verdict={verdict}'))
             return (would_import, 0, 0, 0,
                     len(file_errors) + len(conflict_msgs) + len(date_msgs)

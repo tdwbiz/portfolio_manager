@@ -191,6 +191,47 @@ class OutOfWindowDropTest(TestCase):
         self.assertEqual(section['out_of_window_dropped'], 1)
 
 
+class NrtWithholdingTest(TestCase):
+    """Plan vl-statement-rows fix 2: a DIVIDEND row can carry the gross
+    amount as CREDIT and the withheld tax (NRT) as DEBIT on the same row.
+    Both amounts must survive coercion, and the cash gate nets them."""
+
+    def test_dividend_keeps_gross_credit_and_nrt_debit(self):
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2021-03-31',
+            'last_statement_date': '2021-02-28',
+            'sections': [{
+                'currency': 'USD',
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1055.66,
+                'balances': [{'account_type': 'Cash', 'opening': 100.00,
+                              'closing': 155.66, 'market_value': 155.66}],
+                'holdings': [],
+                'transactions': [{
+                    'date': '2021-03-15', 'activity_type': 'DIVIDEND',
+                    'description': 'US FUND DIVIDEND NRT', 'symbol': 'USF',
+                    'quantity': 0, 'price': 0,
+                    'debit': 9.82, 'credit': 65.48,
+                    'commission': 0, 'notes': '',
+                }],
+            }],
+        }
+        section = _coerce_response(raw, '/test.pdf')[0]
+        tx = section['transactions'][0]
+        # No zeroing or swapping: gross credit and NRT debit both survive.
+        self.assertEqual(tx['activity_type'], 'DIVIDEND')
+        self.assertEqual(tx['credit'], Decimal('65.48'))
+        self.assertEqual(tx['debit'], Decimal('9.82'))
+        # The cash gate nets them: 100.00 + 65.48 - 9.82 = 155.66.
+        gate = cash_gate_details(section)
+        self.assertTrue(gate['ok'])
+        self.assertEqual(gate['difference'], Decimal('0.00'))
+
+
 class PostProcessingTest(TestCase):
     """Tests for transaction post-processing rules in the VL parser."""
 

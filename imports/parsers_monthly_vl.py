@@ -271,6 +271,10 @@ Rules:
   
   4. **DIVIDEND**: The ACTIVITY column says "DIVIDEND" or "DIV". Cash
      dividend received. CREDIT = cash amount (money in).
+     A single DIVIDEND row can carry BOTH amounts: CREDIT = the gross
+     dividend and DEBIT = the withheld tax marked NRT on the same row.
+     Keep both columns exactly as printed — never zero or move either one;
+     only the net (credit − debit) is the cash actually received.
   
   5. **DIV REIN**: Description contains "REINV@" or "REINVEST".
      Dividend was automatically used to buy more shares. Net cash = 0.

@@ -225,7 +225,7 @@ JSON schema:
       "transactions": [
         {
           "date": "YYYY-MM-DD",
-          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
+          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, INTEREST_PAID, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
           "description": "full description text from statement",
           "symbol": "ticker symbol or empty string",
           "quantity": number or 0,
@@ -243,6 +243,8 @@ JSON schema:
 Rules:
 - All monetary amounts must be positive numbers (debit and credit are both
   positive — debit means money out, credit means money in).
+- Keep every amount in the column it is printed in — never move an amount
+  between debit and credit, and never zero a printed amount.
 - fx_rate is from the line "Exchange rate 1 USD = X.XXXX CAD"; use null if
   not present in the visible pages.
 - statement_date is the "as of" date for this statement (end of month).
@@ -251,8 +253,8 @@ Rules:
 - If there is no USD section in the statement, the sections array contains
   only the CAD section.
 - activity_type must be ONE of these exact values:
-  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT,
-  WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
+  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, INTEREST_PAID,
+  TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
 
 - **CRITICAL: How to classify each activity type from the PDF**
   The PDF "Account Activity" table has columns: DATE | ACTIVITY | DESCRIPTION
@@ -284,17 +286,29 @@ Rules:
      Dividend was automatically used to buy more shares. Net cash = 0.
      quantity = new shares purchased.
   
-  6. **INTEREST_RECEIVED**: Description contains "RBC INVESTMENT SAVINGS" or
-     "INTEREST". This is interest on RBF2010/RBF2014 savings funds.
-     quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
-     is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
-     Net cash effect = 0 (interest reinvested as shares).
+  6. **INTEREST_RECEIVED**: Two cases.
+     a) Savings funds: description contains "RBC INVESTMENT SAVINGS"
+        (or the US label "RBC U.S INVESTMENT SAVINGS"). Interest on
+        RBF2010/RBF2014 savings funds, reinvested at the fixed $10 rate.
+        quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
+        is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
+        Net cash effect = 0 (interest reinvested as shares).
+     b) Cash-balance interest: description like "INT FR ... THRU ... @x% BAL ..."
+        (interest paid on the positive cash balance). This is money IN:
+        keep the printed CREDIT amount, DEBIT = 0.
+  
+  6b. **INTEREST_PAID**: Cash-balance interest CHARGED on a negative cash
+     balance (description like "INT FR ... THRU ... @x% BAL ..." with the
+     amount in the DEBIT column). DEBIT = amount (money out), CREDIT = 0.
+     Keep the amount in the column it is printed in.
   
   7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB** / **DEPOSIT** / **WITHDRAWAL** / **FEE**:
      These are CASH-ONLY transactions. They move money but do NOT involve
      buying/selling shares. **QUANTITY must be 0 for all these types.**
      - TFR OUT: DEBIT = amount transferred out (money out), quantity = 0
      - TRANSFER/CONTRIB/WIRE TFR: CREDIT = inflow (money in), quantity = 0
+     - A "DEREGISTRATION FROM ACCOUNT" row is money IN from a deregistered
+       RBC account — label it TRANSFER with the amount in CREDIT.
      - DEPOSIT: CREDIT = amount deposited (money in), quantity = 0
      - WITHDRAWAL: DEBIT = amount withdrawn (money out), quantity = 0
      - FEE: DEBIT = amount charged, quantity = 0

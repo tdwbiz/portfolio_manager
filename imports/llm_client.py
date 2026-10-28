@@ -104,10 +104,11 @@ class VLClient:
                 elapsed = time.monotonic() - t0
                 choice = response.choices[0]
                 if choice.finish_reason == 'length':
-                    logger.warning(
-                        "VLClient: attempt %d response truncated (finish_reason='length') — "
-                        "output hit max_tokens=%d; consider raising VL_MAX_TOKENS",
-                        attempt, self._max_tokens,
+                    # A truncated answer is unusable: raise so the attempt is
+                    # retried and the final VLParseError names the truncation.
+                    raise VLParseError(
+                        f"VL model output truncated "
+                        f"(finish_reason=length, max_tokens={self._max_tokens})"
                     )
                 text = choice.message.content or ''
                 logger.info("VLClient: attempt %d got response in %.1fs, content=%d chars",

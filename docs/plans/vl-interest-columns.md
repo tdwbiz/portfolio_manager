@@ -161,20 +161,40 @@ No models, no migrations.
   output into commits, logs or the chat; the check script's safe-summary rule
   applies.
 
-## Open questions
+## Open questions (all resolved — see Decisions, Oct 28)
 
 1. **DEPOSIT or TRANSFER for a DEREGISTRATION FROM ACCOUNT credit?**
    Recommended: **TRANSFER** — the money arrives from another RBC account
    that was deregistered (inter-account transfer in, same family as TFR IN);
    DEPOSIT/CONTRIB mean money entered from outside the account family.
+   → Resolved: TRANSFER.
 2. **Add INTEREST_PAID to the VL prompt's allowed values?**
    Recommended: **yes** — the model field already allows it (AGENTS.md choice
    list), and letting VL label margin-interest debits directly reduces
    coercion; the debit-based derivation in `_coerce_response` stays as the
    backstop either way.
+   → Resolved: yes, INTEREST_PAID goes into the prompt; the debit-based
+   derivation stays as backstop.
 3. **Non-savings INTEREST_RECEIVED row with both debit and credit set?**
    Recommended: keep both amounts and the label (gate nets them), same policy
    as DIVIDEND NRT rows; only a pure debit flips the label to INTEREST_PAID.
+   → Resolved: keep both amounts and the label; only a pure debit flips.
 4. **Keep the `INTEREST`-in-description fallback in `normalize_activity_type`?**
    Recommended: **yes** — it only fires for invalid raw labels and the new
    INTEREST_PAID derivation corrects the direction from the printed column.
+   → Resolved: yes, the fallback stays.
+
+## Decisions (tdw, Oct 28)
+
+tdw accepts the recommended answers to all four open questions:
+
+1. A DEREGISTRATION FROM ACCOUNT credit is a **TRANSFER** (inter-account
+   transfer in from a deregistered RBC account), not DEPOSIT/CONTRIB.
+2. **INTEREST_PAID is added** to the VL prompt's allowed values with its
+   short rule; the debit-based derivation in `_coerce_response` stays as the
+   backstop.
+3. A non-savings interest row with both debit and credit set keeps both
+   amounts and the INTEREST_RECEIVED label (the cash gate nets them); only a
+   pure debit flips the label to INTEREST_PAID.
+4. The `INTEREST`-in-description fallback in `normalize_activity_type`
+   stays.

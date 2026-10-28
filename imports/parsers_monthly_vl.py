@@ -369,7 +369,8 @@ Rules:
 def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     """Parse an RBC monthly statement PDF using the configured VL vision model.
 
-    Falls back to a regex-based parser if the VL model fails after all retries.
+    Hard error on failure — there is no regex fallback: the caller records
+    verdict ``error`` and parks the file in errors/ (plan vl-fallback-checks).
 
     Parameters
     ----------
@@ -385,9 +386,11 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
     Raises
     ------
     VLParseError
-        If the VL model fails after all retries AND regex fallback also fails.
+        If the VL model fails after all retries (including a truncated
+        answer: the reason contains 'truncated').
     ValueError
-        If required fields (statement_date, account_number) are missing.
+        If required fields (statement_date, account_number) are missing or
+        the response is invalid.
     """
     base_url = settings.VL_MODEL_BASE_URL
     model = settings.VL_MODEL_NAME
@@ -405,24 +408,17 @@ def parse_rbc_monthly_vl(file_path: str) -> list[dict]:
         len(pages_b64),
     )
 
-    try:
-        client = VLClient(
-            base_url=base_url,
-            model=model,
-            api_key=settings.VL_MODEL_API_KEY,
-            timeout=timeout,
-            max_retries=max_retries,
-            max_tokens=settings.VL_MAX_TOKENS,
-            temperature=settings.VL_TEMPERATURE,
-        )
-        raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
-        return _coerce_response(raw, file_path)
-    except (VLParseError, Exception) as exc:
-        logger.warning(
-            "parse_rbc_monthly_vl: VL model failed (%s), falling back to regex parser",
-            exc,
-        )
-        return _parse_rbc_monthly_regex(file_path)
+    client = VLClient(
+        base_url=base_url,
+        model=model,
+        api_key=settings.VL_MODEL_API_KEY,
+        timeout=timeout,
+        max_retries=max_retries,
+        max_tokens=settings.VL_MAX_TOKENS,
+        temperature=settings.VL_TEMPERATURE,
+    )
+    raw = client.extract_json(pages_b64, EXTRACTION_PROMPT)
+    return _coerce_response(raw, file_path)
 
 
 # ---------------------------------------------------------------------------
@@ -857,138 +853,3 @@ def _to_decimal(value) -> Decimal:
         return Decimal('0')
 
 
-# ---------------------------------------------------------------------------
-# Regex fallback parser
-# ---------------------------------------------------------------------------
-
-def _parse_rbc_monthly_regex(file_path: str) -> list[dict]:
-    """Regex-based fallback parser for RBC monthly statements.
-
-    Used when the VL model fails. Extracts what it can from the raw PDF
-    text using pattern matching.
-
-    Parameters
-    ----------
-    file_path:
-        Absolute path to the PDF file.
-
-    Returns
-    -------
-    list[dict]
-        List of section dicts. May be incomplete compared to VL output.
-    """
-    doc = pymupdf.open(file_path)
-    full_text = '\n'.join([str(page.get_text()) for page in doc])
-    doc.close()
-
-    result = []
-
-    # Extract statement date
-    stmt_date_match = re.search(
-        r'(?:Statement\s+Date|As\s+of\s+Date|Period\s+End)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        full_text, re.IGNORECASE,
-    )
-    statement_date = None
-    if stmt_date_match:
-        date_str = stmt_date_match.group(1).replace('/', '-')
-        parts = date_str.split('-')
-        if len(parts) == 3 and len(parts[0]) == 4:
-            statement_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
-        elif len(parts) == 3:
-            statement_date = date(int(parts[2]), int(parts[0]), int(parts[1]))
-
-    # Extract account number
-    acct_match = re.search(
-        r'(?:Account\s+No\.?|Account\s+Number)[:\s]+(\d[\d\-]+)',
-        full_text, re.IGNORECASE,
-    )
-    account_number = acct_match.group(1) if acct_match else ''
-
-    # Extract FX rate
-    fx_match = re.search(
-        r'Exchange\s+rate\s+1\s+USD\s*=\s*([\d.]+)\s+CAD',
-        full_text, re.IGNORECASE,
-    )
-    fx_rate = Decimal(fx_match.group(1)) if fx_match else Decimal('0')
-
-    # Try to extract currency sections (CAD/USD)
-    # Look for patterns like "CAD" or "USD" followed by holdings
-    currency_sections = re.findall(
-        r'(CAD|USD)\s*\n((?:.*\n)*?)(?=(?:CAD|USD)\s*\n|$)',
-        full_text, re.IGNORECASE,
-    )
-
-    for curr, section_text in currency_sections:
-        curr = curr.upper()
-        section_result = {
-            'statement_date': statement_date,
-            'account_number': account_number,
-            'currency': curr,
-            'last_statement_date': None,
-            'fx_rate': fx_rate if curr == 'USD' else Decimal('0'),
-            'begin_total_market_value': Decimal('0'),
-            'end_total_market_value': Decimal('0'),
-            'balances': [],
-            'transactions': [],
-        }
-
-        # Extract total market values
-        total_match = re.search(
-            r'Total\s+on\s+\w+\s+\$([\d,]+\.?\d*)\s*(?:\d+\.?\d*\s*%)?',
-            section_text, re.IGNORECASE,
-        )
-        if total_match:
-            val = Decimal(total_match.group(1).replace(',', ''))
-            section_result['end_total_market_value'] = val
-
-        # Extract transactions (date, type, symbol, quantity, amount patterns)
-        tx_patterns = [
-            r'(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s+(\w+)\s+(\w+)\s+([\d,]+\.?\d*)\s+([\d.]+)\s+\$?([\d,]+\.?\d*)',
-        ]
-        for tx_pat in tx_patterns:
-            for m in re.finditer(tx_pat, section_text):
-                try:
-                    tx_date_str = m.group(1).replace('/', '-')
-                    tx_parts = tx_date_str.split('-')
-                    if len(tx_parts) == 3 and len(tx_parts[0]) == 4:
-                        tx_date = date(int(tx_parts[0]), int(tx_parts[1]), int(tx_parts[2]))
-                    else:
-                        tx_date = date(int(tx_parts[2]), int(tx_parts[0]), int(tx_parts[1]))
-
-                    section_result['transactions'].append({
-                        'date': tx_date,
-                        'activity_type': m.group(2).upper(),
-                        'description': '',
-                        'symbol': m.group(3),
-                        'quantity': Decimal(m.group(4).replace(',', '')),
-                        'price': Decimal(m.group(5)),
-                        'debit': Decimal('0'),
-                        'credit': Decimal(m.group(6).replace(',', '')),
-                        'currency': curr,
-                        'commission': Decimal('0'),
-                        'notes': '',
-                    })
-                except (ValueError, IndexError):
-                    continue
-
-        result.append(section_result)
-
-    # If no currency sections found, create a default CAD section
-    if not result:
-        result.append({
-            'statement_date': statement_date,
-            'account_number': account_number,
-            'currency': 'CAD',
-            'last_statement_date': None,
-            'fx_rate': Decimal('0'),
-            'begin_total_market_value': Decimal('0'),
-            'end_total_market_value': Decimal('0'),
-            'balances': [],
-            'transactions': [],
-        })
-
-    logger.info(
-        "parse_rbc_monthly_regex: extracted %d section(s) from %s",
-        len(result), file_path,
-    )
-    return result

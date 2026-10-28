@@ -1,16 +1,16 @@
 """Tests for Vision-Language (VL) PDF parsers."""
 
-import os
-import tempfile
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
+from imports.llm_client import VLParseError
+
 
 class ParseRbcMonthlyVLTest(TestCase):
-    """Tests for parse_rbc_monthly_vl regex fallback parser."""
+    """Tests for parse_rbc_monthly_vl (hard error on VL failure — no fallback)."""
 
     @patch("imports.parsers_monthly_vl._render_pdf_pages")
     @patch("imports.parsers_monthly_vl.VLClient")
@@ -47,110 +47,17 @@ class ParseRbcMonthlyVLTest(TestCase):
 
     @patch("imports.parsers_monthly_vl._render_pdf_pages")
     @patch("imports.parsers_monthly_vl.VLClient")
-    def test_vl_failure_falls_back_to_regex(self, mock_client_class, mock_render):
-        """When VL model fails, fall back to regex parser."""
+    def test_vl_failure_raises_without_regex_fallback(self, mock_client_class,
+                                                      mock_render):
+        """When the VL model fails, parse_rbc_monthly_vl re-raises — there is
+        no regex fallback (plan vl-fallback-checks, step 4)."""
         mock_render.return_value = ["fake_image_b64"]
-        mock_client_class.side_effect = Exception("VL model error")
+        mock_client_class.side_effect = VLParseError("VL model error")
 
-        # Create a minimal fake PDF file for regex parser
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            # Minimal valid PDF
-            f.write(b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
-            f.write(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
-            f.write(
-                b"xref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n"
-            )
-            f.write(b"trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n115\n%%EOF")
-            temp_path = f.name
+        from imports.parsers_monthly_vl import parse_rbc_monthly_vl
 
-        try:
-            from imports.parsers_monthly_vl import parse_rbc_monthly_vl
-
-            result = parse_rbc_monthly_vl(temp_path)
-
-            self.assertIsInstance(result, list)
-            self.assertGreaterEqual(len(result), 1)
-            self.assertEqual(result[0]["currency"], "CAD")
-        finally:
-            os.unlink(temp_path)
-
-
-class RegexFallbackTest(TestCase):
-    """Tests for the regex fallback parser."""
-
-    def _create_test_pdf(self, text_content: str) -> str:
-        """Create a minimal PDF with given text content."""
-        import pymupdf
-
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            temp_path = f.name
-
-        doc = pymupdf.open()
-        page = doc.new_page()
-        page.insert_text(pymupdf.Point(72, 72), text_content)
-        doc.save(temp_path)
-        doc.close()
-        return temp_path
-
-    def test_regex_extract_statement_date(self):
-        """Regex parser extracts statement date from PDF text."""
-        text = "RBC Monthly Statement\nAs of Date: 05/31/2024\nAccount: 12345-678901"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.parsers_monthly_vl import _parse_rbc_monthly_regex
-
-            result = _parse_rbc_monthly_regex(path)
-
-            self.assertEqual(len(result), 1)
-            self.assertEqual(result[0]["statement_date"], date(2024, 5, 31))
-        finally:
-            os.unlink(path)
-
-    def test_regex_extract_account_number(self):
-        """Regex parser extracts account number from PDF text."""
-        text = "Account No: 987654-321098\nMonthly Statement"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.parsers_monthly_vl import _parse_rbc_monthly_regex
-
-            result = _parse_rbc_monthly_regex(path)
-
-            self.assertEqual(result[0]["account_number"], "987654-321098")
-        finally:
-            os.unlink(path)
-
-    def test_regex_extract_fx_rate(self):
-        """Regex parser extracts FX rate when USD currency section is found."""
-        text = "USD\nExchange rate 1 USD = 1.3542 CAD\nMonthly Statement"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.parsers_monthly_vl import _parse_rbc_monthly_regex
-
-            result = _parse_rbc_monthly_regex(path)
-
-            # FX rate is only set for USD sections
-            usd_sections = [r for r in result if r["currency"] == "USD"]
-            if usd_sections:
-                self.assertEqual(usd_sections[0]["fx_rate"], Decimal("1.3542"))
-        finally:
-            os.unlink(path)
-
-    def test_regex_default_cad_section(self):
-        """When no currency sections found, default to CAD."""
-        text = "RBC Monthly Statement\nAs of Date: 06/30/2024"
-        path = self._create_test_pdf(text)
-
-        try:
-            from imports.parsers_monthly_vl import _parse_rbc_monthly_regex
-
-            result = _parse_rbc_monthly_regex(path)
-
-            self.assertEqual(result[0]["currency"], "CAD")
-        finally:
-            os.unlink(path)
+        with self.assertRaises(VLParseError):
+            parse_rbc_monthly_vl("/fake/path.pdf")
 
 
 class FilenameHeuristicTest(TestCase):

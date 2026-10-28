@@ -770,59 +770,9 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             f"VL model returned sections but none had a valid currency for {file_path}"
         )
 
-    # Post-processing validation: flag suspicious values
-    for section in result:
-        end_total = section.get('end_total_market_value', Decimal('0'))
-        begin_total = section.get('begin_total_market_value', Decimal('0'))
-
-        # Sum up all balance market values for this section
-        balance_sum = sum((b.get('market_value', Decimal('0')) for b in section.get('balances', [])), Decimal('0'))
-
-        # If end_total is suspiciously low but balances sum to a large value,
-        # the VL model likely extracted a single holding instead of the total
-        if end_total < Decimal('1000') and balance_sum > Decimal('1000'):
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f but balances sum to %.2f — "
-                "VL model likely extracted wrong value (single holding vs total)",
-                file_path, section.get('currency', 'CAD'), end_total, balance_sum,
-            )
-            # Attempt to fix: use balance_sum as end_total if it's more reasonable
-            if balance_sum > end_total * 10:  # Only if balance_sum is 10x larger
-                logger.warning(
-                    "parse_rbc_monthly_vl: %s [%s] replacing end_total %.2f with balance_sum %.2f",
-                    file_path, section.get('currency', 'CAD'), end_total, balance_sum,
-                )
-                section['end_total_market_value'] = balance_sum
-
-        # Same check for begin_total
-        if begin_total < Decimal('1000') and balance_sum > Decimal('1000'):
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f but balances sum to %.2f — "
-                "VL model likely extracted wrong value",
-                file_path, section.get('currency', 'CAD'), begin_total, balance_sum,
-            )
-
-        # If end_total is suspiciously HIGH (10x balance sum), the VL model
-        # likely hallucinated an extra digit or merged multiple values
-        if balance_sum > Decimal('0') and end_total > balance_sum * 10:
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] end_total=%.2f is %.0fx balance_sum %.2f — "
-                "likely VL hallucination; replacing with balance_sum",
-                file_path, section.get('currency', 'CAD'),
-                end_total, end_total / balance_sum, balance_sum,
-            )
-            section['end_total_market_value'] = balance_sum
-
-        # Same for begin_total
-        if balance_sum > Decimal('0') and begin_total > balance_sum * 10:
-            logger.warning(
-                "parse_rbc_monthly_vl: %s [%s] begin_total=%.2f is %.0fx balance_sum %.2f — "
-                "likely VL hallucination; replacing with balance_sum",
-                file_path, section.get('currency', 'CAD'),
-                begin_total, begin_total / balance_sum, balance_sum,
-            )
-            section['begin_total_market_value'] = balance_sum
-
+    # No silent replacement of begin/end totals here: suspicious values are
+    # reported as check reasons by self_check_vl_sections (13d) and the file
+    # is rejected — never patched in place.
     return result
 
 

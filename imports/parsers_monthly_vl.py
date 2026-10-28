@@ -122,7 +122,11 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
     # RBF savings interest must win over the DIST/REINV rules: a check-1
     # style savings row is one net-zero INTEREST_RECEIVED row even when its
     # description mentions reinvestment (Q1, plan vl-fallback-checks).
-    if 'RBC INVESTMENT SAVINGS' in desc:
+    # Match INVESTMENT SAVINGS (not just RBC INVESTMENT SAVINGS) so the US
+    # label "RBC U.S INVESTMENT SAVINGS" stays INTEREST_RECEIVED (plan
+    # vl-statement-rows fix 4). Valid types already returned above, so a
+    # real BOUGHT of the savings fund is never recoded here.
+    if 'INVESTMENT SAVINGS' in desc:
         return 'INTEREST_RECEIVED'
 
     # "DIST ON X SHS" in description = cash distribution (money in)
@@ -616,11 +620,13 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 activity = 'DIST'
 
             # Post-fix: if description says "REINV@" or "REINVEST", force to
-            # DIV REIN — savings rows excluded, RBC INVESTMENT SAVINGS wins
-            # (Q1): they stay INTEREST_RECEIVED and must not keep amounts.
+            # DIV REIN — savings rows excluded, INVESTMENT SAVINGS wins
+            # (Q1; the US label RBC U.S INVESTMENT SAVINGS included, plan
+            # vl-statement-rows fix 4): they stay INTEREST_RECEIVED and must
+            # not keep amounts.
             desc_upper = description.upper()
             if (('REINV' in desc_upper or 'REINVEST' in desc_upper)
-                    and 'RBC INVESTMENT SAVINGS' not in desc_upper):
+                    and 'INVESTMENT SAVINGS' not in desc_upper):
                 if activity != 'DIV REIN':
                     logger.warning(
                         "parse_rbc_monthly_vl: corrected %s->DIV REIN for: %s",

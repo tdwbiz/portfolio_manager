@@ -232,6 +232,89 @@ class NrtWithholdingTest(TestCase):
         self.assertEqual(gate['difference'], Decimal('0.00'))
 
 
+class UsSavingsLabelTest(TestCase):
+    """Plan vl-statement-rows fix 4: US sections print
+    RBC U.S INVESTMENT SAVINGS — the savings rule matches
+    INVESTMENT SAVINGS so US savings interest stays INTEREST_RECEIVED."""
+
+    def test_us_savings_interest_row_is_interest_received(self):
+        from imports.parsers_monthly_vl import normalize_activity_type
+
+        result = normalize_activity_type(
+            'INTEREST',
+            'RBC U.S INVESTMENT SAVINGS ACCOUNT SR A (2014) AS OF 03/31/21 '
+            'REINVEST @ $10.00',
+        )
+        self.assertEqual(result, 'INTEREST_RECEIVED')
+
+    def test_us_savings_coercion_clears_amounts_not_div_rein(self):
+        """A US savings row whose description mentions reinvestment stays
+        INTEREST_RECEIVED (not DIV REIN) with debit/credit cleared."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2021-03-31',
+            'last_statement_date': '2021-02-28',
+            'sections': [{
+                'currency': 'USD',
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1000.00,
+                'balances': [],
+                'holdings': [],
+                'transactions': [{
+                    'date': '2021-03-31', 'activity_type': 'INTEREST',
+                    'description': 'RBC U.S INVESTMENT SAVINGS ACCOUNT '
+                                   'SR A (2014) AS OF 03/31/21 REINVEST @ $10.00',
+                    'symbol': 'RBF2014',
+                    'quantity': 2.067, 'price': 10,
+                    'debit': 0, 'credit': 0,
+                    'commission': 0, 'notes': '',
+                }],
+            }],
+        }
+        tx = _coerce_response(raw, '/test.pdf')[0]['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'INTEREST_RECEIVED')
+        self.assertEqual(tx['debit'], Decimal('0'))
+        self.assertEqual(tx['credit'], Decimal('0'))
+
+    def test_bought_of_us_savings_keeps_bought_and_debit(self):
+        """Extra D: a real purchase of the US savings fund keeps BOUGHT and
+        its debit — the widened match must not recode it."""
+        from imports.parsers_monthly_vl import (
+            _coerce_response, normalize_activity_type,
+        )
+
+        self.assertEqual(
+            normalize_activity_type('BOUGHT', 'RBC U.S INVESTMENT SAVINGS'),
+            'BOUGHT',
+        )
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2021-03-31',
+            'last_statement_date': '2021-02-28',
+            'sections': [{
+                'currency': 'USD',
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1000.00,
+                'balances': [],
+                'holdings': [],
+                'transactions': [{
+                    'date': '2021-03-15', 'activity_type': 'BOUGHT',
+                    'description': 'RBC U.S INVESTMENT SAVINGS',
+                    'symbol': 'RBF2014',
+                    'quantity': 100, 'price': 10,
+                    'debit': 1000.00, 'credit': 0,
+                    'commission': 0, 'notes': '',
+                }],
+            }],
+        }
+        tx = _coerce_response(raw, '/test.pdf')[0]['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'BOUGHT')
+        self.assertEqual(tx['debit'], Decimal('1000.00'))
+        self.assertEqual(tx['credit'], Decimal('0'))
+
+
 class PostProcessingTest(TestCase):
     """Tests for transaction post-processing rules in the VL parser."""
 

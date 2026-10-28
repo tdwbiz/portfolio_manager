@@ -61,10 +61,27 @@ as well (field/currency/symbol names only — never account numbers).
   cash-gate line (counts only, never dates or descriptions).
 - A DIVIDEND row may carry both the gross CREDIT and the NRT withholding
   DEBIT on the same row. Both amounts are kept and the cash gate nets them.
+- The VL parser never moves an amount between the DEBIT and CREDIT columns —
+  amounts stay in the column they are printed in, and the cash gate catches
+  a column the model read wrongly (plan `vl-interest-columns`). Only activity
+  labels may be corrected:
+  - A `DEREGISTRATION FROM ACCOUNT` credit is money into this account from a
+    deregistered RBC account → labelled `TRANSFER` (inter-account transfer
+    in), amount untouched.
+  - Interest on the cash balance (`INT FR … THRU … @…% BAL … AVBAL …`) keeps
+    its printed amount: a pure DEBIT is interest charged on a negative
+    balance → `INTEREST_PAID`; a CREDIT (or both columns, e.g. gross +
+    charge) stays `INTEREST_RECEIVED` and the gate nets it. Only the RBC
+    savings-fund rows (`INVESTMENT SAVINGS`, reinvested at the fixed rate,
+    net cash 0) have their amounts cleared as before.
 - Short option holdings (e.g. `CALL NVDA 07/30/21 210`) have no separate
   symbol; a trailing `-` in quantity, book cost or market value means
   negative, and the holdings self-check applies a ×100 contract multiplier
-  to such rows (signed comparison).
+  to such rows (signed comparison). The full CALL/PUT pattern (underlying,
+  expiry date, strike) must start the security name, but extra text may
+  follow the strike (VL sometimes appends the underlying's name);
+  names that merely start with CALL or PUT (CALLAWAY, PUTNAM) are not
+  options.
 
 **VL model:** the VL answer limit is `VL_MAX_TOKENS` (default **16384**; set it
 in `.env` to override). A truncated VL answer (`finish_reason=length`) is an

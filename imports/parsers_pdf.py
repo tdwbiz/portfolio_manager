@@ -32,12 +32,15 @@ _HOLDING_QTY = re.compile(r'^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?-?$')
 _HOLDING_PRICE = re.compile(r'^\d+(?:\.\d+)?$')
 _HOLDING_MONEY = re.compile(r'^[\d,]+\.\d+-?$')
 _HOLDING_MV = re.compile(r'^\$[\d,]+\.\d+-?$')
-# Option security name — the FULL pattern only (tdw Oct 28, extra A): CALL
-# or PUT, optional space, underlying symbol, expiry date MM/DD/YY and
-# strike. Never a description that merely starts with CALL or PUT, so
-# holdings like CALLAWAY or PUTNAM funds are not read as options.
+# Option security name (tdw Oct 28, extra A + step 6 decision): CALL or
+# PUT, optional space, underlying symbol, expiry date MM/DD/YY and strike
+# must be at the START of the name; extra text may follow the strike (VL
+# sometimes appends the underlying's name, e.g. "CALL NVDA 07/30/21 210
+# NVIDIA CORP"). Never a description that merely starts with CALL or PUT,
+# so holdings like CALLAWAY or PUTNAM funds are not read as options.
 _HOLDING_OPTION = re.compile(
-    r'^(?:CALL|PUT)\s?[A-Z][A-Z0-9.\-]*\s+\d{2}/\d{2}/\d{2}\s+\d+(?:\.\d+)?$',
+    r'^(?:CALL|PUT)\s?[A-Z][A-Z0-9.\-]*\s+\d{2}/\d{2}/\d{2}\s+'
+    r'\d+(?:\.\d+)?(?:\s|$)',
     re.IGNORECASE,
 )
 

@@ -337,6 +337,29 @@ class TestOptionHoldings(TestCase):
         }]
         self.assertEqual(self_check_sections(sections), [])
 
+    def test_self_check_passes_on_option_name_with_trailing_text(self):
+        # Step 6 decision (tdw Oct 28): VL sometimes returns the option
+        # security with extra text after the strike (e.g. the underlying's
+        # name on the next line). The full pattern at the start of the name
+        # must still be recognised, so the ×100 contract multiplier applies
+        # and the 0.1 percent check passes (−4 × 0.010 × 100 = −4.00).
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2021, 6, 30),
+            'holdings': [{
+                'security': 'CALL NVDA 07/30/21 210 NVIDIA CORPORATION',
+                'symbol': '',
+                'quantity': Decimal('-4'), 'book_cost': Decimal('-225.04'),
+                'market_price': Decimal('0.010'),
+                'market_value': Decimal('-4.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('996.00')},
+            ],
+            'end_total_market_value': Decimal('992.00'),
+        }]
+        self.assertEqual(self_check_sections(sections), [])
+
     def test_option_sign_mismatch_fails(self):
         # Extra B: the check compares signed values — a positive market
         # value against negative quantity/price must fail, not abs() away.
@@ -376,6 +399,27 @@ class TestOptionHoldings(TestCase):
             # The $ market value is still readable and stays positive.
             self.assertIsNotNone(h['market_value'])
             self.assertGreater(h['market_value'], 0)
+
+    def test_callaway_name_with_trailing_words_is_not_an_option(self):
+        # Step 6 decision: trailing text after the strike is allowed, but a
+        # name that merely starts with CALL (or PUT) without the expiry+
+        # strike pattern at the start is still not an option — even with
+        # trailing words. The self-check must NOT apply the ×100 multiplier.
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2025, 10, 31),
+            'holdings': [{
+                'security': 'CALLAWAY GOLF INC', 'symbol': 'CGOF',
+                'quantity': Decimal('100'), 'book_cost': Decimal('2500.00'),
+                'market_price': Decimal('25.00'),
+                'market_value': Decimal('2500.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('0.00')},
+            ],
+            'end_total_market_value': Decimal('2500.00'),
+        }]
+        self.assertEqual(self_check_sections(sections), [])
 
 
 # Step 12b test fixtures: full synthetic statements whose holdings + cash

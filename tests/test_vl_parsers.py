@@ -315,11 +315,149 @@ class UsSavingsLabelTest(TestCase):
         self.assertEqual(tx['credit'], Decimal('0'))
 
 
+class InterestAndDeregistrationTest(TestCase):
+    """Plan vl-interest-columns: amounts stay in their printed columns;
+    interest is scoped to savings-fund rows; DEREGISTRATION credits are
+    TRANSFER. Synthetic fixtures only."""
+
+    @staticmethod
+    def _raw(txs, opening, closing, currency='CAD'):
+        return {
+            'account_number': '12345',
+            'statement_date': '2021-08-31',
+            'last_statement_date': '2021-07-31',
+            'sections': [{
+                'currency': currency,
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1000.00,
+                'balances': [{'account_type': 'Cash', 'opening': opening,
+                              'closing': closing, 'market_value': closing}],
+                'holdings': [],
+                'transactions': txs,
+            }],
+        }
+
+    def test_deregistration_credit_is_transfer_and_gate_passes(self):
+        """A DEREGISTRATION FROM ACCOUNT row labelled WITHDRAWAL with the
+        amount in CREDIT is coerced to TRANSFER, the credit is untouched,
+        and the cash gate passes (opening + 4500.00 = closing)."""
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw([{
+            'date': '2021-08-10', 'activity_type': 'WITHDRAWAL',
+            'description': 'DEREGISTRATION FROM ACCOUNT 1234567',
+            'symbol': '', 'quantity': 0, 'price': 0,
+            'debit': 0, 'credit': 4500.00, 'commission': 0, 'notes': '',
+        }], opening=100.00, closing=4600.00)
+        section = _coerce_response(raw, '/test.pdf')[0]
+        tx = section['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'TRANSFER')
+        self.assertEqual(tx['credit'], Decimal('4500.00'))
+        self.assertEqual(tx['debit'], Decimal('0'))
+        gate = cash_gate_details(section)
+        self.assertTrue(gate['ok'])
+        self.assertEqual(gate['difference'], Decimal('0.00'))
+
+    def test_int_fr_debit_is_interest_paid_and_gate_passes(self):
+        """Cash-balance interest charged on a negative balance: raw type
+        INTEREST with the amount in DEBIT becomes INTEREST_PAID, the debit
+        is kept, and the cash gate passes (306.67 - 97.28 = 209.39)."""
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw([{
+            'date': '2021-08-31', 'activity_type': 'INTEREST',
+            'description': 'INT FR 07/22 THRU08/21 @20 3/4% BAL 306- '
+                           'AVBAL 5,519',
+            'symbol': '', 'quantity': 0, 'price': 0,
+            'debit': 97.28, 'credit': 0, 'commission': 0, 'notes': '',
+        }], opening=306.67, closing=209.39)
+        section = _coerce_response(raw, '/test.pdf')[0]
+        tx = section['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'INTEREST_PAID')
+        self.assertEqual(tx['debit'], Decimal('97.28'))
+        self.assertEqual(tx['credit'], Decimal('0'))
+        gate = cash_gate_details(section)
+        self.assertTrue(gate['ok'])
+        self.assertEqual(gate['difference'], Decimal('0.00'))
+
+    def test_int_fr_credit_stays_interest_received_and_gate_passes(self):
+        """The same INT FR wording with the amount in CREDIT stays
+        INTEREST_RECEIVED, the credit is kept, and the gate passes."""
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw([{
+            'date': '2021-08-31', 'activity_type': 'INTEREST',
+            'description': 'INT FR 07/22 THRU08/21 @20 3/4% BAL 5,519 '
+                           'AVBAL 5,531',
+            'symbol': '', 'quantity': 0, 'price': 0,
+            'debit': 0, 'credit': 12.34, 'commission': 0, 'notes': '',
+        }], opening=306.67, closing=319.01)
+        section = _coerce_response(raw, '/test.pdf')[0]
+        tx = section['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'INTEREST_RECEIVED')
+        self.assertEqual(tx['credit'], Decimal('12.34'))
+        self.assertEqual(tx['debit'], Decimal('0'))
+        gate = cash_gate_details(section)
+        self.assertTrue(gate['ok'])
+        self.assertEqual(gate['difference'], Decimal('0.00'))
+
+    def test_savings_fund_row_clears_price_and_amounts(self):
+        """An INVESTMENT SAVINGS row with qty/price 10 and printed
+        debit/credit stays INTEREST_RECEIVED with price, debit and credit
+        cleared (net-zero reinvested shares)."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw([{
+            'date': '2021-08-31', 'activity_type': 'INTEREST',
+            'description': 'RBC INVESTMENT SAVINGS ACCOUNT SR A (2010) '
+                           'AS OF 08/31/21 REINV@C$10.00',
+            'symbol': 'RBF2010',
+            'quantity': 2.067, 'price': 10,
+            'debit': 20.67, 'credit': 20.67, 'commission': 0, 'notes': '',
+        }], opening=100.00, closing=100.00)
+        tx = _coerce_response(raw, '/test.pdf')[0]['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'INTEREST_RECEIVED')
+        self.assertEqual(tx['quantity'], Decimal('2.067'))
+        self.assertEqual(tx['price'], Decimal('0'))
+        self.assertEqual(tx['debit'], Decimal('0'))
+        self.assertEqual(tx['credit'], Decimal('0'))
+
+    def test_bought_and_sold_keep_printed_columns(self):
+        """A BOUGHT row with the amount in CREDIT and a SOLD row with the
+        amount in DEBIT keep their printed columns untouched (the cash gate
+        catches a column VL read wrongly)."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw([
+            {'date': '2021-08-05', 'activity_type': 'BOUGHT',
+             'description': 'BOUGHT 100 SHS TST', 'symbol': 'TST',
+             'quantity': 100, 'price': 10.00,
+             'debit': 0, 'credit': 1000.00, 'commission': 0, 'notes': ''},
+            {'date': '2021-08-20', 'activity_type': 'SOLD',
+             'description': 'SOLD 50 SHS TST', 'symbol': 'TST',
+             'quantity': 50, 'price': 9.00,
+             'debit': 450.00, 'credit': 0, 'commission': 0, 'notes': ''},
+        ], opening=100.00, closing=100.00)
+        txs = _coerce_response(raw, '/test.pdf')[0]['transactions']
+        bought, sold = txs
+        self.assertEqual(bought['activity_type'], 'BOUGHT')
+        self.assertEqual(bought['credit'], Decimal('1000.00'))
+        self.assertEqual(bought['debit'], Decimal('0'))
+        self.assertEqual(sold['activity_type'], 'SOLD')
+        self.assertEqual(sold['debit'], Decimal('450.00'))
+        self.assertEqual(sold['credit'], Decimal('0'))
+
+
 class PostProcessingTest(TestCase):
     """Tests for transaction post-processing rules in the VL parser."""
 
     def test_tfr_out_clears_quantity(self):
-        """TFR OUT should have quantity=0 and cash in debit."""
+        """TFR OUT should have quantity=0; the printed amounts stay in their
+        columns (plan vl-interest-columns: no more credit->debit move — a
+        misread column is caught by the cash gate)."""
         from decimal import Decimal
         from datetime import date
         from imports.parsers_monthly_vl import _coerce_response
@@ -341,7 +479,7 @@ class PostProcessingTest(TestCase):
                     'quantity': Decimal('27103.0000'),  # Wrong - should be 0
                     'price': Decimal('0'),
                     'debit': Decimal('0'),
-                    'credit': Decimal('27103.00'),  # Wrong side
+                    'credit': Decimal('27103.00'),
                     'commission': Decimal('0'),
                     'notes': '',
                 }],
@@ -350,8 +488,9 @@ class PostProcessingTest(TestCase):
         result = _coerce_response(raw, '/test.pdf')
         tx = result[0]['transactions'][0]
         self.assertEqual(tx['quantity'], Decimal('0'))
-        self.assertEqual(tx['debit'], Decimal('27103.00'))
-        self.assertEqual(tx['credit'], Decimal('0'))
+        # Amounts untouched: the credit stays in the credit column.
+        self.assertEqual(tx['debit'], Decimal('0'))
+        self.assertEqual(tx['credit'], Decimal('27103.00'))
 
     def test_deposit_clears_quantity(self):
         """DEPOSIT should have quantity=0."""

@@ -87,7 +87,7 @@ RBC_ACTIVITY_TYPES = {
 CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', 'WIRE TFR'}
 
 # Activity types that represent cash outflow (money out of the account)
-CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
+CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE', 'INTEREST_PAID'}
 
 
 def normalize_activity_type(raw_type: str, description: str = '') -> str:
@@ -225,7 +225,7 @@ JSON schema:
       "transactions": [
         {
           "date": "YYYY-MM-DD",
-          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
+          "activity_type": "ONE OF: BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, INTEREST_PAID, TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE",
           "description": "full description text from statement",
           "symbol": "ticker symbol or empty string",
           "quantity": number or 0,
@@ -243,6 +243,8 @@ JSON schema:
 Rules:
 - All monetary amounts must be positive numbers (debit and credit are both
   positive — debit means money out, credit means money in).
+- Keep every amount in the column it is printed in — never move an amount
+  between debit and credit, and never zero a printed amount.
 - fx_rate is from the line "Exchange rate 1 USD = X.XXXX CAD"; use null if
   not present in the visible pages.
 - statement_date is the "as of" date for this statement (end of month).
@@ -251,8 +253,8 @@ Rules:
 - If there is no USD section in the statement, the sections array contains
   only the CAD section.
 - activity_type must be ONE of these exact values:
-  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, TRANSFER, TFR OUT,
-  WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
+  BOUGHT, SOLD, DIST, DIVIDEND, DIV REIN, INTEREST_RECEIVED, INTEREST_PAID,
+  TRANSFER, TFR OUT, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL, ADJUST, RTC, FEE
 
 - **CRITICAL: How to classify each activity type from the PDF**
   The PDF "Account Activity" table has columns: DATE | ACTIVITY | DESCRIPTION
@@ -284,17 +286,29 @@ Rules:
      Dividend was automatically used to buy more shares. Net cash = 0.
      quantity = new shares purchased.
   
-  6. **INTEREST_RECEIVED**: Description contains "RBC INVESTMENT SAVINGS" or
-     "INTEREST". This is interest on RBF2010/RBF2014 savings funds.
-     quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
-     is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
-     Net cash effect = 0 (interest reinvested as shares).
+  6. **INTEREST_RECEIVED**: Two cases.
+     a) Savings funds: description contains "RBC INVESTMENT SAVINGS"
+        (or the US label "RBC U.S INVESTMENT SAVINGS"). Interest on
+        RBF2010/RBF2014 savings funds, reinvested at the fixed $10 rate.
+        quantity = new shares earned (e.g., 2.067). PRICE = 0 (the $10 rate
+        is fixed and not a meaningful price). DEBIT = 0, CREDIT = 0.
+        Net cash effect = 0 (interest reinvested as shares).
+     b) Cash-balance interest: description like "INT FR ... THRU ... @x% BAL ..."
+        (interest paid on the positive cash balance). This is money IN:
+        keep the printed CREDIT amount, DEBIT = 0.
+  
+  6b. **INTEREST_PAID**: Cash-balance interest CHARGED on a negative cash
+     balance (description like "INT FR ... THRU ... @x% BAL ..." with the
+     amount in the DEBIT column). DEBIT = amount (money out), CREDIT = 0.
+     Keep the amount in the column it is printed in.
   
   7. **TRANSFER** / **TFR OUT** / **WIRE TFR** / **CONTRIB** / **DEPOSIT** / **WITHDRAWAL** / **FEE**:
      These are CASH-ONLY transactions. They move money but do NOT involve
      buying/selling shares. **QUANTITY must be 0 for all these types.**
      - TFR OUT: DEBIT = amount transferred out (money out), quantity = 0
      - TRANSFER/CONTRIB/WIRE TFR: CREDIT = inflow (money in), quantity = 0
+     - A "DEREGISTRATION FROM ACCOUNT" row is money IN from a deregistered
+       RBC account — label it TRANSFER with the amount in CREDIT.
      - DEPOSIT: CREDIT = amount deposited (money in), quantity = 0
      - WITHDRAWAL: DEBIT = amount withdrawn (money out), quantity = 0
      - FEE: DEBIT = amount charged, quantity = 0
@@ -643,44 +657,9 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             debit = _to_decimal(tx.get('debit', 0))
             credit = _to_decimal(tx.get('credit', 0))
 
-            # --- Fix BOUGHT: clear credit, ensure cost in debit ---
-            # BOUGHT = money out. The VL model sometimes puts the amount in
-            # credit instead of debit, or leaves both set.
-            if activity == 'BOUGHT':
-                if credit > 0 and debit == 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: BOUGHT moved credit->debit for: %s",
-                        description[:60],
-                    )
-                    debit = credit
-                    credit = Decimal('0')
-                elif credit > 0 and debit > 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: BOUGHT cleared credit for: %s",
-                        description[:60],
-                    )
-                    credit = Decimal('0')
-
-            # --- Fix SOLD: clear debit, ensure proceeds in credit ---
-            # SOLD = money in. The VL model sometimes puts the Opening Balance
-            # amount from the previous row into the debit column of the first
-            # transaction. Also, sometimes proceeds go to debit instead of credit.
-            if activity == 'SOLD':
-                if debit > 0 and credit == 0:
-                    # Proceeds went to wrong column
-                    logger.warning(
-                        "parse_rbc_monthly_vl: SOLD moved debit->credit for: %s",
-                        description[:60],
-                    )
-                    credit = debit
-                    debit = Decimal('0')
-                elif debit > 0 and credit > 0:
-                    # Both set — debit is likely Opening Balance leak
-                    logger.warning(
-                        "parse_rbc_monthly_vl: SOLD cleared debit (opening balance leak) for: %s",
-                        description[:60],
-                    )
-                    debit = Decimal('0')
+            # Amounts are never moved or cleared between the debit and credit
+            # columns (plan vl-interest-columns): a column VL reads wrongly is
+            # caught by the cash gate (opening + credits - debits vs closing).
 
             # --- Fix DIST: per-share rate goes in price, quantity is 0 ---
             # PDF: DIST has per-share rate in RATE column, quantity blank in PDF
@@ -695,31 +674,52 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                         "parse_rbc_monthly_vl: DIST rate->price fix: price=%.4f qty=0 for: %s",
                         price, description[:60],
                     )
-                # Ensure cash is in credit (money in)
-                if debit > 0 and credit == 0:
-                    credit = debit
-                    debit = Decimal('0')
 
             # DIV REIN keeps its printed debit (the whole shares bought with
             # the dividend cash): a reinvested dividend is two PDF rows —
             # DIV REIN (debit) + a DIVIDEND/DIST credit row — and the cash
             # gate needs both amounts (plan vl-fallback-checks, goal 2).
 
-            # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
-            # RBF2010/RBF2014 interest: quantity = new shares earned
-            # The PDF shows quantity and $10 rate, but no real debit/credit
+            # --- Interest rows (plan vl-interest-columns, step 2) ---
+            # RBC savings funds (description contains INVESTMENT SAVINGS,
+            # e.g. RBF2010/RBF2014 or the US label): interest is reinvested
+            # at the fixed $10 rate — net cash 0, only quantity matters.
+            # Clear price==10 and any parsed debit/credit.
+            # Cash-balance interest (e.g. "INT FR ... THRU ... @x% BAL ..."): 
+            # keep the printed amounts. A pure debit is interest charged on a
+            # negative balance → INTEREST_PAID; a credit (or both columns, 
+            # e.g. gross + charge) stays INTEREST_RECEIVED and the cash gate
+            # nets them — same policy as DIVIDEND NRT rows.
             if activity == 'INTEREST_RECEIVED':
-                # Clear the $10 rate from price field — it's not a real price
-                if price == Decimal('10.00'):
-                    price = Decimal('0')
-                # Clear any debit/credit that may have been parsed
-                # (interest is reinvested as shares, no cash flow)
-                debit = Decimal('0')
-                credit = Decimal('0')
-                logger.info(
-                    "parse_rbc_monthly_vl: INTEREST fix: qty=%s price=0 for: %s",
-                    quantity, description[:60],
+                if 'INVESTMENT SAVINGS' in desc_upper:
+                    # Clear the $10 rate from price field — it's not a real price
+                    if price == Decimal('10.00'):
+                        price = Decimal('0')
+                    debit = Decimal('0')
+                    credit = Decimal('0')
+                    logger.info(
+                        "parse_rbc_monthly_vl: INTEREST (savings) fix: qty=%s price=0 for: %s",
+                        quantity, description[:60],
+                    )
+                elif debit > 0 and credit == 0:
+                    activity = 'INTEREST_PAID'
+                    logger.info(
+                        "parse_rbc_monthly_vl: INTEREST debit-only row -> INTEREST_PAID for: %s",
+                        description[:60],
+                    )
+
+            # DEREGISTRATION FROM ACCOUNT is money INTO this account from a
+            # deregistered RBC account — an inter-account transfer in (same
+            # family as TFR IN). VL labels it WITHDRAWAL; correct the label
+            # to TRANSFER, leave the printed credit untouched
+            # (plan vl-interest-columns, tdw decision Oct 28).
+            if ('DEREGISTRATION' in desc_upper and activity != 'TRANSFER'
+                    and credit > 0 and debit == 0):
+                logger.warning(
+                    "parse_rbc_monthly_vl: DEREGISTRATION credit %s->TRANSFER for: %s",
+                    activity, description[:60],
                 )
+                activity = 'TRANSFER'
 
             # --- Fix cash-only transactions: quantity must be 0 ---
             # TFR OUT, TRANSFER, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL,
@@ -733,36 +733,6 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 )
                 quantity = Decimal('0')
                 price = Decimal('0')
-
-            # --- Fix TFR OUT: cash out must be in debit ---
-            if activity == 'TFR OUT':
-                if credit > 0 and debit == 0:
-                    debit = credit
-                    credit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: TFR OUT moved credit->debit for: %s",
-                        description[:60],
-                    )
-
-            # --- Fix DIVIDEND: ensure cash is in credit ---
-            if activity == 'DIVIDEND':
-                if debit > 0 and credit == 0:
-                    credit = debit
-                    debit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: DIVIDEND moved debit->credit for: %s",
-                        description[:60],
-                    )
-
-            # --- Fix WITHDRAWAL: ensure cash is in debit ---
-            if activity == 'WITHDRAWAL':
-                if credit > 0 and debit == 0:
-                    debit = credit
-                    credit = Decimal('0')
-                    logger.warning(
-                        "parse_rbc_monthly_vl: WITHDRAWAL moved credit->debit for: %s",
-                        description[:60],
-                    )
 
             # --- Validate: cash-in types must have credit > 0 ---
             if activity in CASH_IN_TYPES and debit == 0 and credit == 0:

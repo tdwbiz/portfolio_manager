@@ -80,14 +80,14 @@ class RegexFallbackTest(TestCase):
 
     def _create_test_pdf(self, text_content: str) -> str:
         """Create a minimal PDF with given text content."""
-        import fitz
+        import pymupdf
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             temp_path = f.name
 
-        doc = fitz.open()
+        doc = pymupdf.open()
         page = doc.new_page()
-        page.insert_text(fitz.Point(72, 72), text_content)
+        page.insert_text(pymupdf.Point(72, 72), text_content)
         doc.save(temp_path)
         doc.close()
         return temp_path

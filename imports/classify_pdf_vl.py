@@ -13,7 +13,7 @@ ORM is set up (e.g. during management command arg-parsing).
 import base64
 import logging
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 from django.conf import settings
 
 from imports.llm_client import VLParseError, VLClient
@@ -165,10 +165,10 @@ def classify_pdf(file_path: str) -> str:
 
 def _render_first_page(file_path: str, dpi: int) -> list[str]:
     """Render the first page of a PDF as a base64-encoded PNG list."""
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     try:
         page = doc[0]
-        matrix = fitz.Matrix(dpi / 72, dpi / 72)
+        matrix = pymupdf.Matrix(dpi / 72, dpi / 72)
         pix = page.get_pixmap(matrix=matrix, alpha=False)
         png_bytes = pix.tobytes("png")
         return [base64.b64encode(png_bytes).decode('ascii')]

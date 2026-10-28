@@ -51,7 +51,7 @@ import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 
 from django.conf import settings
 from imports.llm_client import VLClient, VLParseError
@@ -418,7 +418,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
     Limits to VL_MONTHLY_MAX_PAGES (default 0 = unlimited).
     Set to 0 to render all pages, or a specific number to limit.
     """
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     total = len(doc)
     max_pages = settings.VL_MONTHLY_MAX_PAGES
     
@@ -437,7 +437,7 @@ def _render_pdf_pages(file_path: str, dpi: int) -> list[str]:
         )
     
     pages_b64 = []
-    matrix = fitz.Matrix(dpi / 72, dpi / 72)
+    matrix = pymupdf.Matrix(dpi / 72, dpi / 72)
     try:
         for i, page in enumerate(doc):  # pyright: ignore[reportArgumentType]
             if max_pages > 0 and i >= max_pages:
@@ -863,7 +863,7 @@ def _parse_rbc_monthly_regex(file_path: str) -> list[dict]:
     list[dict]
         List of section dicts. May be incomplete compared to VL output.
     """
-    doc = fitz.open(file_path)
+    doc = pymupdf.open(file_path)
     full_text = '\n'.join([str(page.get_text()) for page in doc])
     doc.close()
 

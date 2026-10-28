@@ -1011,8 +1011,8 @@ def _extract_text_from_pdf(file_path: str) -> str:
 
     # Fallback to PyMuPDF
     try:
-        import fitz
-        doc = fitz.open(file_path)
+        import pymupdf
+        doc = pymupdf.open(file_path)
         if doc.page_count == 0:
             doc.close()
             raise ValueError("PDF has no pages")

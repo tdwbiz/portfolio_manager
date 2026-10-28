@@ -367,6 +367,15 @@ Rules:
   Each holding row goes into the "holdings" array — one object per security.
   - Do NOT merge holdings — each row is a separate object.
   - If a row has no ticker symbol, leave symbol empty.
+  - A number ending with a trailing '-' in the quantity, book cost or
+    market value columns is NEGATIVE (a short option position) — return it
+    as a negative number. The price column is never negative.
+  - Option rows have no separate ticker symbol: the security name is the
+    full pattern CALL or PUT + underlying symbol + expiry date (MM/DD/YY)
+    + strike, e.g. "CALL NVDA 07/30/21 210" or "CALLNVDA 07/30/21 210".
+    Leave symbol empty for those rows. A holding that merely starts with
+    CALL or PUT (e.g. a CALLAWAY or PUTNAM fund) is NOT an option — keep
+    its normal symbol.
 
 - Include ALL transactions visible on ALL pages provided.
 """

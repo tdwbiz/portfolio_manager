@@ -959,7 +959,10 @@ def self_check_sections(
       and at most 100 days later (tdw decision, Oct 26);
     - every holding has a readable ``book_cost`` (never 0 as a placeholder);
     - per holding, ``quantity * market_price`` is within 0.1 percent of
-      ``market_value``;
+      ``market_value`` — for a short option (security matching the full
+      CALL/PUT pattern) the quantity is the contract count, so the check
+      uses ``quantity * market_price * 100`` and compares signed values
+      (all negative for a short position);
     - ``sum(holdings.market_value) + cash == end_total_market_value`` to the
       cent.
 
@@ -992,6 +995,15 @@ def self_check_sections(
         mv_sum = Decimal('0')
         for h in section.get('holdings') or []:
             sym = str(h.get('symbol') or '?')
+            # Short option (full CALL/PUT pattern, extra A): the printed
+            # quantity is the contract count, so the check applies the ×100
+            # contract multiplier and compares SIGNED values — all negative
+            # for a short position; a sign mismatch must fail (extra B).
+            multiplier = (
+                Decimal('100')
+                if _HOLDING_OPTION.match(str(h.get('security') or ''))
+                else Decimal('1')
+            )
             qty, price, cost, mv = (h.get('quantity'), h.get('market_price'),
                                     h.get('book_cost'), h.get('market_value'))
             if cost is None:
@@ -1003,7 +1015,7 @@ def self_check_sections(
             if qty is None or price is None:
                 reasons.append(f'{cur} {sym} quantity/market_price unreadable')
                 continue
-            expected = Decimal(qty) * Decimal(price)
+            expected = Decimal(qty) * Decimal(price) * multiplier
             if abs(expected - Decimal(mv)) > _PRICE_TOLERANCE * abs(Decimal(mv)):
                 reasons.append(
                     f'{cur} {sym} quantity*market_price vs market_value '

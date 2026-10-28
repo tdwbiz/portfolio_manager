@@ -317,6 +317,48 @@ class TestOptionHoldings(TestCase):
         self.assertEqual(h['quantity'], Decimal('-4'))
         self.assertEqual(h['market_value'], Decimal('-4.00'))
 
+    def test_self_check_passes_on_option_row(self):
+        # Fix 3b: the check-7 row passes with the ×100 contract multiplier
+        # on signed values (−4 × 0.010 × 100 = −4.00 = market value), and
+        # the holdings+cash sum includes the −4.00.
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2021, 6, 30),
+            'holdings': [{
+                'security': 'CALLNVDA 07/30/21 210', 'symbol': '',
+                'quantity': Decimal('-4'), 'book_cost': Decimal('-225.04'),
+                'market_price': Decimal('0.010'),
+                'market_value': Decimal('-4.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('996.00')},
+            ],
+            'end_total_market_value': Decimal('992.00'),
+        }]
+        self.assertEqual(self_check_sections(sections), [])
+
+    def test_option_sign_mismatch_fails(self):
+        # Extra B: the check compares signed values — a positive market
+        # value against negative quantity/price must fail, not abs() away.
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2021, 6, 30),
+            'holdings': [{
+                'security': 'CALLNVDA 07/30/21 210', 'symbol': '',
+                'quantity': Decimal('-4'), 'book_cost': Decimal('-225.04'),
+                'market_price': Decimal('0.010'),
+                'market_value': Decimal('4.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('996.00')},
+            ],
+            'end_total_market_value': Decimal('1000.00'),
+        }]
+        reasons = self_check_sections(sections)
+        self.assertTrue(
+            any('quantity*market_price' in r for r in reasons), reasons,
+        )
+
     def test_callaway_and_putnam_names_are_not_options(self):
         # Extra A: a description that merely starts with CALL or PUT is not
         # an option — without the expiry+strike pattern the row must fall

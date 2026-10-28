@@ -198,3 +198,20 @@ tdw accepts the recommended answers to all four open questions:
    pure debit flips the label to INTEREST_PAID.
 4. The `INTEREST`-in-description fallback in `normalize_activity_type`
    stays.
+5. **check-7.pdf USD section-check FAIL (step 6, intermittent).** The
+   failure did not reproduce on re-runs (VL is non-deterministic; four
+   further runs of check-7 passed both sections), but the USD section holds
+   a short option row (`CALL NVDA …`, no symbol) and the reported reason —
+   `quantity*market_price vs market_value beyond 0.1 percent` on that row —
+   is exactly what happens when `_HOLDING_OPTION` fails to match because VL
+   appended extra text after the strike (e.g. the underlying's name), so the
+   ×100 contract multiplier is not applied. Decision: option recognition
+   requires the full pattern (CALL/PUT, underlying symbol, expiry date,
+   strike) at the **start** of the security name but allows extra text after
+   the strike; CALLAWAY/PUTNAM names still must not be options. Synthetic
+   tests added in `imports/tests/test_parsers_pdf.py` (trailing-text option
+   name passes with ×100; a CALL-prefixed non-option name keeps ×1).
+   Also: `pm-logs/vl_cash_gate_check.py` now prints the failed
+   section-check reasons when a section fails (the check reasons name only
+   fields, currencies and symbols — never values) and accepts a single file
+   argument (`python pm-logs/vl_cash_gate_check.py check-7.pdf`).

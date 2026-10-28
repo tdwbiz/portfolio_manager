@@ -210,3 +210,14 @@ no model calls):
   SHS") → DIST; anything else → OTHER. Never DIVIDEND by default. Synthetic test:
   an empty-activity row whose security name contains DIVIDEND and no CASH
   DIV/DIST wording must come out OTHER.
+- **No begin-total check in `self_check_vl_sections`** (Q2 withdrawn): VL's
+  balances often list only cash for a USD section — the dry run of f1d2d005
+  passed the text self-check with a USD end total far above 10× VL's balance
+  sum of 594.32 — so the check would reject good old-layout USD files. The
+  begin-total reason and its tests are removed; every other VL check is kept.
+  The begin total is checked against the previous month's end in step 14.
+- **Per-verdict end summary:** `manage_inbox_import` counts files per verdict
+  (`imported`, `duplicate`, `conflict`, `date_error`, `reconcile_error`,
+  `vl_check_error`, `error`) — one line per verdict, in normal and dry runs,
+  keeping the existing summary lines. Covered by a synthetic test (one file
+  each for imported / duplicate / error, dry run and normal run).

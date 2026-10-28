@@ -87,7 +87,7 @@ RBC_ACTIVITY_TYPES = {
 CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', 'WIRE TFR'}
 
 # Activity types that represent cash outflow (money out of the account)
-CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
+CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE', 'INTEREST_PAID'}
 
 
 def normalize_activity_type(raw_type: str, description: str = '') -> str:
@@ -665,6 +665,34 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             # the dividend cash): a reinvested dividend is two PDF rows —
             # DIV REIN (debit) + a DIVIDEND/DIST credit row — and the cash
             # gate needs both amounts (plan vl-fallback-checks, goal 2).
+
+            # --- Interest rows (plan vl-interest-columns, step 2) ---
+            # RBC savings funds (description contains INVESTMENT SAVINGS,
+            # e.g. RBF2010/RBF2014 or the US label): interest is reinvested
+            # at the fixed $10 rate — net cash 0, only quantity matters.
+            # Clear price==10 and any parsed debit/credit.
+            # Cash-balance interest (e.g. "INT FR ... THRU ... @x% BAL ..."): 
+            # keep the printed amounts. A pure debit is interest charged on a
+            # negative balance → INTEREST_PAID; a credit (or both columns, 
+            # e.g. gross + charge) stays INTEREST_RECEIVED and the cash gate
+            # nets them — same policy as DIVIDEND NRT rows.
+            if activity == 'INTEREST_RECEIVED':
+                if 'INVESTMENT SAVINGS' in desc_upper:
+                    # Clear the $10 rate from price field — it's not a real price
+                    if price == Decimal('10.00'):
+                        price = Decimal('0')
+                    debit = Decimal('0')
+                    credit = Decimal('0')
+                    logger.info(
+                        "parse_rbc_monthly_vl: INTEREST (savings) fix: qty=%s price=0 for: %s",
+                        quantity, description[:60],
+                    )
+                elif debit > 0 and credit == 0:
+                    activity = 'INTEREST_PAID'
+                    logger.info(
+                        "parse_rbc_monthly_vl: INTEREST debit-only row -> INTEREST_PAID for: %s",
+                        description[:60],
+                    )
 
             # --- Fix cash-only transactions: quantity must be 0 ---
             # TFR OUT, TRANSFER, WIRE TFR, CONTRIB, DEPOSIT, WITHDRAWAL,

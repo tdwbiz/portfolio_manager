@@ -39,6 +39,12 @@ from core.models import (
     RbcMonthlyTransaction,
 )
 from core.utils.account_fingerprint import fingerprint_account_number
+from core.utils.import_checks import (
+    reconcile_section,
+    self_check_vl_sections,
+)
+from imports.llm_client import VLParseError
+from imports.parsers_monthly_vl import _coerce_response
 
 # Fake account (90000001-90000008 are the reserved test numbers).
 FAKE_NUMBER = "90000004"
@@ -506,3 +512,264 @@ class MonthlyTxnReconcileTests(TestCase):
             self.assertEqual(os.listdir(json_dir) if os.path.isdir(json_dir) else [], [])
             # The file was not moved.
             self.assertEqual(len(os.listdir(inbox_dir)), 1)
+
+    # ── Step 13d: vl_check_error, gate printing, no regex fallback ──────────
+
+    def _fallback_vl_section(self, end_total='1600.00', book_cost='1300.00'):
+        """A VL section for the fallback path that passes the cash gate
+        (90 + 10 - 0 == 100) but whose holdings do not add up to the end
+        total (1400 + 100 != 1600) unless the fixture is fixed."""
+        return {
+            'statement_date': date(2025, 9, 30),
+            'last_statement_date': date(2025, 8, 29),
+            'account_number': FAKE_NUMBER,
+            'currency': 'CAD',
+            'begin_total_market_value': Decimal('500.00'),
+            'end_total_market_value': Decimal(end_total),
+            'balances': [
+                {'account_type': 'Cash', 'opening': Decimal('90.00'),
+                 'closing': Decimal('100.00'), 'market_value': Decimal('100.00')},
+            ],
+            'holdings': [
+                {'security': 'VANGUARD ETF', 'symbol': 'VFV',
+                 'quantity': Decimal('5'), 'book_cost': Decimal(book_cost),
+                 'market_price': Decimal('280.000'),
+                 'market_value': Decimal('1400.00')},
+            ],
+            'transactions': [_vl_transaction(credit='10.00')],
+        }
+
+    def test_fallback_vl_totals_do_not_add_up_dry_run_verdict_vl_check_error(self):
+        # The text self-check fails (forces the fallback); the VL section
+        # passes the cash gate but holdings + cash != end total.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir, out, _err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_sections=[self._fallback_vl_section()], dry_run=True,
+            )
+
+            # The real verdict and the reason are printed…
+            self.assertIn('verdict=vl_check_error', out)
+            self.assertIn('[DRY-RUN] CAD holdings+cash != end_total_market_value',
+                          out)
+            # …and nothing was written: no rows, no log, file not moved.
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            self.assertEqual(FileImportLog.objects.count(), 0)
+            json_dir = os.path.join(processed_dir, 'json_logs')
+            self.assertEqual(os.listdir(json_dir) if os.path.isdir(json_dir) else [], [])
+            self.assertEqual(len(os.listdir(inbox_dir)), 1)
+
+    def test_fallback_vl_unreadable_book_cost_dry_run_verdict_vl_check_error(self):
+        # The VL coercion turns a missing book cost into 0; the check must
+        # treat it as unreadable (Q4).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, _err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_sections=[self._fallback_vl_section(book_cost='0')],
+                dry_run=True,
+            )
+
+            self.assertIn('verdict=vl_check_error', out)
+            self.assertIn('[DRY-RUN] CAD VFV book_cost unreadable', out)
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            self.assertEqual(FileImportLog.objects.count(), 0)
+
+    def test_fallback_vl_totals_do_not_add_up_stores_nothing(self):
+        # Non-dry-run: the file goes to errors/ with a FileImportLog row and
+        # the JSON log carries the verdict and the scrubbed reasons.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, _out, err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_sections=[self._fallback_vl_section()],
+            )
+
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            moved = os.listdir(os.path.join(processed_dir, 'errors'))
+            self.assertEqual(len(moved), 1)
+            log = FileImportLog.objects.get()
+            self.assertEqual(log.status, 'error')
+            self.assertIn('CAD holdings+cash != end_total_market_value',
+                          log.error_message)
+            self.assertIn('CAD holdings+cash != end_total_market_value', err)
+            payload = self._json_log(processed_dir, error=True)
+            self.assertEqual(payload['verdict'], 'vl_check_error')
+
+    def test_fallback_vl_parser_raises_dry_run_verdict_error_no_regex_fallback(self):
+        # There is no regex fallback anymore: the parser function must not
+        # even exist, and a VL failure gives verdict error with a reason.
+        import imports.parsers_monthly_vl as pmv
+
+        self.assertFalse(hasattr(pmv, '_parse_rbc_monthly_regex'))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inbox_dir = os.path.join(tmpdir, 'inbox')
+            processed_dir, out, err = self._run(
+                tmpdir, [self._bad_self_check_text()],
+                vl_side_effect=VLParseError('VL model failed to return valid JSON'),
+                dry_run=True,
+            )
+
+            self.assertIn('Parse error', err)
+            self.assertEqual(RbcMonthly.objects.count(), 0)
+            self.assertEqual(FileImportLog.objects.count(), 0)
+            json_dir = os.path.join(processed_dir, 'json_logs')
+            self.assertEqual(os.listdir(json_dir) if os.path.isdir(json_dir) else [], [])
+            self.assertEqual(len(os.listdir(inbox_dir)), 1)
+
+    def test_dry_run_prints_gate_line_for_every_currency_section(self):
+        text = [_text_section('CAD'),
+                _text_section('USD', opening='40.00', closing='50.00')]
+        vl = [_vl_section('USD'), _vl_section('CAD')]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, _err = self._run(
+                tmpdir, text, vl_sections=vl, dry_run=True,
+            )
+
+            # One gate line per currency section, in the run's output.
+            self.assertIn(
+                '[CAD] cash gate: opening 90.00 credits 10.00 debits 0 '
+                'closing 100.00 diff 0.00 PASS', out)
+            self.assertIn(
+                '[USD] cash gate: opening 40.00 credits 10.00 debits 0 '
+                'closing 50.00 diff 0.00 PASS', out)
+
+    def test_dry_run_prints_failed_gate_line_and_reasons(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir, out, _err = self._run(
+                tmpdir, [_text_section()],
+                vl_sections=[_vl_section(credit='9.99')], dry_run=True,
+            )
+
+            # The gate line shows FAIL with the difference…
+            self.assertIn(
+                '[CAD] cash gate: opening 90.00 credits 9.99 debits 0 '
+                'closing 100.00 diff 0.01 FAIL', out)
+            # …and every failed check's reason is printed in dry run too.
+            self.assertIn('[DRY-RUN] CAD opening + credits - debits != closing',
+                          out)
+            self.assertIn('verdict=reconcile_error', out)
+
+
+class DivReinPairTests(TestCase):
+    """Step 13d, goal 2: a reinvested dividend is two PDF rows — DIV REIN
+    (debit, whole shares bought) + a credit row whose ACTIVITY column may be
+    empty with CASH DIV / DIST only in the description. Both amounts are kept
+    and the section reconciles."""
+
+    def _raw_pair(self, credit_desc='CASH DIV ON 1000 SHS VDY'):
+        return {
+            'account_number': FAKE_NUMBER,
+            'statement_date': '2025-09-30',
+            'sections': [{
+                'currency': 'CAD',
+                'begin_total_market_value': 0,
+                'end_total_market_value': 0,
+                'balances': [
+                    {'account_type': 'Cash', 'opening': 90.00, 'closing': 100.00,
+                     'market_value': 100.00, 'percentage': 5},
+                ],
+                'holdings': [],
+                'transactions': [
+                    {'date': '2025-09-15', 'activity_type': 'DIV REIN',
+                     'description': 'REINV@C$1.00 ON 10 SHS VDY',
+                     'symbol': 'VDY', 'quantity': 10, 'price': 1.00,
+                     'debit': 10.00, 'credit': 0, 'commission': 0, 'notes': ''},
+                    {'date': '2025-09-15', 'activity_type': '',
+                     'description': credit_desc, 'symbol': 'VDY',
+                     'quantity': 0, 'price': 0.01,
+                     'debit': 0, 'credit': 20.00, 'commission': 0, 'notes': ''},
+                ],
+            }],
+        }
+
+    def test_div_rein_pair_keeps_amounts_and_reconciles(self):
+        sections = _coerce_response(self._raw_pair(), '/fake/div_rein.pdf')
+        txs = {tx['activity_type']: tx for tx in sections[0]['transactions']}
+
+        self.assertIn('DIV REIN', txs)
+        self.assertIn('DIVIDEND', txs)
+        # The DIV REIN row keeps its printed debit (no clearing)…
+        self.assertEqual(txs['DIV REIN']['debit'], Decimal('10.00'))
+        self.assertEqual(txs['DIV REIN']['credit'], Decimal('0'))
+        # …the empty-activity CASH DIV row is a credit row…
+        self.assertEqual(txs['DIVIDEND']['credit'], Decimal('20.00'))
+        self.assertEqual(txs['DIVIDEND']['debit'], Decimal('0'))
+        # …and the section reconciles: 90 + 20 - 10 == 100.
+        self.assertEqual(reconcile_section(sections[0]), [])
+
+    def test_div_rein_pair_with_dist_wording(self):
+        sections = _coerce_response(
+            self._raw_pair(credit_desc='VDY DIST ON 1035 SHS'),
+            '/fake/div_rein_dist.pdf',
+        )
+        txs = {tx['activity_type']: tx for tx in sections[0]['transactions']}
+
+        self.assertIn('DIST', txs)
+        self.assertEqual(txs['DIST']['credit'], Decimal('20.00'))
+        self.assertEqual(reconcile_section(sections[0]), [])
+
+    def test_empty_activity_security_name_dividend_is_other(self):
+        # tdw decision (Extra 3): an empty activity type matches only income
+        # wording — a security name containing DIVIDEND comes out OTHER,
+        # never DIVIDEND.
+        raw = self._raw_pair()
+        raw['sections'][0]['transactions'] = [
+            {'date': '2025-09-15', 'activity_type': '',
+             'description': 'DIVIDEND FUND OF CANADA LTD', 'symbol': 'VCD',
+             'quantity': 0, 'price': 0, 'debit': 0, 'credit': 0,
+             'commission': 0, 'notes': ''},
+        ]
+        sections = _coerce_response(raw, '/fake/other.pdf')
+
+        txs = sections[0]['transactions']
+        self.assertEqual(len(txs), 1)
+        self.assertEqual(txs[0]['activity_type'], 'OTHER')
+
+
+class VlSectionCheckTests(TestCase):
+    """Unit tests for self_check_vl_sections (step 13d, Q2/Q4)."""
+
+    def _section(self, begin_total='500.00', end_total='1500.00'):
+        return {
+            'currency': 'CAD',
+            'statement_date': date(2025, 9, 30),
+            'last_statement_date': date(2025, 8, 29),
+            'begin_total_market_value': Decimal(begin_total),
+            'end_total_market_value': Decimal(end_total),
+            'balances': [
+                {'account_type': 'Cash', 'opening': Decimal('90.00'),
+                 'closing': Decimal('100.00'), 'market_value': Decimal('100.00')},
+                {'account_type': 'Common Shares', 'market_value': Decimal('1400.00')},
+            ],
+            'holdings': [
+                {'security': 'VANGUARD ETF', 'symbol': 'VFV',
+                 'quantity': Decimal('5'), 'book_cost': Decimal('1300.00'),
+                 'market_price': Decimal('280.000'),
+                 'market_value': Decimal('1400.00')},
+            ],
+            'transactions': [],
+        }
+
+    def test_begin_total_below_1000_with_larger_balances_fires(self):
+        # begin 500 < 1000 while the balance market values sum to 1500 > 1000.
+        reasons = self_check_vl_sections(
+            [self._section()], today=date(2026, 10, 27),
+        )
+        self.assertIn('CAD begin_total_market_value inconsistent with balances',
+                      reasons)
+
+    def test_begin_total_above_10x_balances_fires(self):
+        # begin 99999 > 10 x 1500.
+        reasons = self_check_vl_sections(
+            [self._section(begin_total='99999.00')], today=date(2026, 10, 27),
+        )
+        self.assertIn('CAD begin_total_market_value inconsistent with balances',
+                      reasons)
+
+    def test_consistent_section_has_no_reasons(self):
+        # begin 1450 is within the heuristic bounds of the 1500 balance sum.
+        reasons = self_check_vl_sections(
+            [self._section(begin_total='1450.00')], today=date(2026, 10, 27),
+        )
+        self.assertEqual(reasons, [])

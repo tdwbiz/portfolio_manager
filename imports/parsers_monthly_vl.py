@@ -49,7 +49,7 @@ statement), matching the shape that manage_inbox_import already expects:
 import base64
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 import pymupdf  # PyMuPDF
 
@@ -293,6 +293,12 @@ Rules:
   
   10. **ADJUST** / **RTC**: Book cost adjustments. No cash effect.
   
+  **CRITICAL: ignore the "Trades For Future Settlement" table.** Below the
+  Account Activity table some statements print a second table titled
+  "Trades For Future Settlement" listing trades that settle AFTER the
+  statement date. Do NOT include any row from that table as a transaction —
+  only rows of the Account Activity table itself are transactions.
+
   **IMPORTANT: Do NOT include "Opening Balance" or "Closing Balance" as
   transactions.** These are balance summary lines, not transactions.
   The Opening Balance line appears at the TOP of the Account Activity table.
@@ -491,6 +497,16 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             f"VL model returned no sections (currency sections) for {file_path}: {raw}"
         )
 
+    # Date window for transactions (plan vl-statement-rows, fix 1): a
+    # transaction dated outside the statement's own window — e.g. a
+    # "Trades For Future Settlement" row or a misread year — is dropped.
+    # Only the count is logged and returned; never dates or descriptions.
+    if last_statement_date is not None:
+        window_start = last_statement_date
+    else:
+        # Same 100-day gap bound as statement_date_problems (Q1, tdw Oct 28).
+        window_start = statement_date - timedelta(days=100)
+
     result = []
     for sec in sections_raw:
         currency = str(sec.get('currency') or 'CAD').upper().strip()
@@ -526,6 +542,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             })
 
         transactions = []
+        dropped_out_of_window = 0
         for tx in sec.get('transactions') or []:
             tx_date_str = tx.get('date')
             if not tx_date_str:
@@ -541,6 +558,12 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     "parse_rbc_monthly_vl: unparseable transaction date %r — skipping",
                     tx_date_str,
                 )
+                continue
+
+            # Drop rows dated outside the statement window (future-settlement
+            # trades, misread years). Count only — never the row itself.
+            if tx_date < window_start or tx_date > statement_date:
+                dropped_out_of_window += 1
                 continue
 
             raw_type = str(tx.get('activity_type') or '').upper().strip()
@@ -752,6 +775,13 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 'notes':         str(tx.get('notes') or ''),
             })
 
+        if dropped_out_of_window:
+            logger.info(
+                "parse_rbc_monthly_vl: %s section: %d transaction(s) dated "
+                "outside the statement window dropped",
+                currency, dropped_out_of_window,
+            )
+
         result.append({
             'statement_date':            statement_date,
             'account_number':            account_number,
@@ -763,6 +793,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             'balances':            balances,
             'holdings':            holdings,
             'transactions':        transactions,
+            'out_of_window_dropped': dropped_out_of_window,
         })
 
     if not result:

@@ -110,6 +110,87 @@ class FilenameHeuristicTest(TestCase):
         self.assertEqual(result, "annual")
 
 
+class OutOfWindowDropTest(TestCase):
+    """Plan vl-statement-rows fix 1: transactions dated outside the
+    statement's own window (future-settlement trades, misread years) are
+    dropped; only the count is kept — never dates or descriptions."""
+
+    @staticmethod
+    def _raw(statement_date, last_statement_date, txs):
+        return {
+            'account_number': '12345',
+            'statement_date': statement_date,
+            'last_statement_date': last_statement_date,
+            'sections': [{
+                'currency': 'CAD',
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1000.00,
+                'balances': [{'account_type': 'Cash', 'opening': 50.00,
+                              'closing': 50.00, 'market_value': 50.00}],
+                'holdings': [],
+                'transactions': txs,
+            }],
+        }
+
+    @staticmethod
+    def _bought(tx_date):
+        return {
+            'date': tx_date, 'activity_type': 'BOUGHT',
+            'description': 'FUTURE SETTLEMENT TRADE', 'symbol': 'TST',
+            'quantity': 16, 'price': 51.380, 'debit': 832.03, 'credit': 0,
+            'commission': 0, 'notes': '',
+        }
+
+    def test_future_settlement_row_dropped_and_gate_passes(self):
+        """A DEC. 02 BOUGHT on a Nov 30 2020 statement (last Oct 31) is
+        dropped, the count is 1 and the cash gate passes."""
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw('2020-11-30', '2020-10-31',
+                        [self._bought('2020-12-02')])
+        section = _coerce_response(raw, '/test.pdf')[0]
+        self.assertEqual(section['transactions'], [])
+        self.assertEqual(section['out_of_window_dropped'], 1)
+        self.assertTrue(cash_gate_details(section)['ok'])
+
+    def test_same_year_january_misread_on_december_statement_dropped(self):
+        """A Jan 02 row read as the same year on a Dec 31 statement is
+        before the window start and dropped."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw('2020-12-31', '2020-11-30',
+                        [self._bought('2020-01-02')])
+        section = _coerce_response(raw, '/test.pdf')[0]
+        self.assertEqual(section['transactions'], [])
+        self.assertEqual(section['out_of_window_dropped'], 1)
+
+    def test_in_window_row_kept(self):
+        """A row inside the window is kept and the count stays 0."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw('2020-11-30', '2020-10-31',
+                        [self._bought('2020-11-15')])
+        section = _coerce_response(raw, '/test.pdf')[0]
+        self.assertEqual(len(section['transactions']), 1)
+        self.assertEqual(section['out_of_window_dropped'], 0)
+
+    def test_no_last_statement_date_uses_100_day_bound(self):
+        """Without last_statement_date the lower bound is statement_date −
+        100 days (Q1): Dec 31 → Sep 2, so a Sep 01 row is dropped and an
+        Oct 01 row is kept."""
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = self._raw('2020-12-31', None,
+                        [self._bought('2020-09-01'),
+                         self._bought('2020-10-01')])
+        section = _coerce_response(raw, '/test.pdf')[0]
+        self.assertEqual(len(section['transactions']), 1)
+        self.assertEqual(section['transactions'][0]['date'].isoformat(),
+                         '2020-10-01')
+        self.assertEqual(section['out_of_window_dropped'], 1)
+
+
 class PostProcessingTest(TestCase):
     """Tests for transaction post-processing rules in the VL parser."""
 

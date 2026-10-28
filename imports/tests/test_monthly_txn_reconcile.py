@@ -728,14 +728,20 @@ class DivReinPairTests(TestCase):
 
 
 class VlSectionCheckTests(TestCase):
-    """Unit tests for self_check_vl_sections (step 13d, Q2/Q4)."""
+    """Unit tests for self_check_vl_sections (step 13d, Q4).
 
-    def _section(self, begin_total='500.00', end_total='1500.00'):
+    There is no begin-total check: VL's balances often list only cash for a
+    USD section, so a begin total far above the balance sum is normal there
+    (the begin total is checked against the previous month's end in step 14).
+    """
+
+    def _section(self, end_total='1500.00'):
         return {
             'currency': 'CAD',
             'statement_date': date(2025, 9, 30),
             'last_statement_date': date(2025, 8, 29),
-            'begin_total_market_value': Decimal(begin_total),
+            # Far above the 1500.00 balance sum: must NOT be flagged.
+            'begin_total_market_value': Decimal('99999.00'),
             'end_total_market_value': Decimal(end_total),
             'balances': [
                 {'account_type': 'Cash', 'opening': Decimal('90.00'),
@@ -751,25 +757,10 @@ class VlSectionCheckTests(TestCase):
             'transactions': [],
         }
 
-    def test_begin_total_below_1000_with_larger_balances_fires(self):
-        # begin 500 < 1000 while the balance market values sum to 1500 > 1000.
+    def test_consistent_section_has_no_reasons(self):
+        # end total 1500 = holdings 1400 + cash 100; the begin total is
+        # not checked (see class docstring).
         reasons = self_check_vl_sections(
             [self._section()], today=date(2026, 10, 27),
-        )
-        self.assertIn('CAD begin_total_market_value inconsistent with balances',
-                      reasons)
-
-    def test_begin_total_above_10x_balances_fires(self):
-        # begin 99999 > 10 x 1500.
-        reasons = self_check_vl_sections(
-            [self._section(begin_total='99999.00')], today=date(2026, 10, 27),
-        )
-        self.assertIn('CAD begin_total_market_value inconsistent with balances',
-                      reasons)
-
-    def test_consistent_section_has_no_reasons(self):
-        # begin 1450 is within the heuristic bounds of the 1500 balance sum.
-        reasons = self_check_vl_sections(
-            [self._section(begin_total='1450.00')], today=date(2026, 10, 27),
         )
         self.assertEqual(reasons, [])

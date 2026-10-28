@@ -638,7 +638,7 @@ class Command(BaseCommand):
 
             # Step 13d: the VL sections were previously stored unchecked —
             # run the same per-section checks the text path uses (holdings/
-            # totals, dates, begin total). Any reason rejects the whole file
+            # totals, dates). Any reason rejects the whole file
             # as vl_check_error: nothing stored, file to errors/. Reasons
             # name only fields, currencies and symbols.
             vl_check_msgs.extend(self_check_vl_sections(

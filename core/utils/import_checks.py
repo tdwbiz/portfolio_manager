@@ -175,11 +175,12 @@ def self_check_vl_sections(sections, *, today) -> list[str]:
       ``market_price`` / ``market_value`` so "unreadable" still fires (a
       missing number arrives as 0, tdw decision Q4);
     - the date checks of :func:`statement_date_problems` with the section's
-      own *Date of Last Statement*;
-    - a begin-total reason, ``begin_total_market_value inconsistent with
-      balances``, when the old heuristic conditions fire (begin total < 1000
-      while the balance market values sum to > 1000, or begin total > 10×
-      that sum) — reported only, the value is never replaced (Q2).
+      own *Date of Last Statement*.
+
+    There is deliberately no begin-total check: VL's balances often list
+    only cash for a USD section, so a begin total far above the balance sum
+    is normal there; the begin total is checked against the previous
+    month's end in step 14 instead.
 
     Reasons name only fields, currencies and symbols — never values.
     """
@@ -205,19 +206,6 @@ def self_check_vl_sections(sections, *, today) -> list[str]:
             last_known=section.get('last_statement_date'),
         )
         reasons.extend(f'{cur} {problem}' for problem in problems)
-
-        begin_total = Decimal(section.get('begin_total_market_value') or 0)
-        balance_sum = sum(
-            (Decimal(b.get('market_value') or 0)
-             for b in section.get('balances') or []),
-            Decimal('0'),
-        )
-        if ((begin_total < Decimal('1000') and balance_sum > Decimal('1000'))
-                or (balance_sum > Decimal('0')
-                    and begin_total > balance_sum * 10)):
-            reasons.append(
-                f'{cur} begin_total_market_value inconsistent with balances'
-            )
     return reasons
 
 

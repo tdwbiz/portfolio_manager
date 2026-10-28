@@ -160,6 +160,10 @@ class Command(BaseCommand):
         imported_holdings = 0
         duplicates = 0
         errors = 0
+        # Per-verdict file counts for the end summary (one line each).
+        verdict_counts = {v: 0 for v in (
+            'imported', 'duplicate', 'conflict', 'date_error',
+            'reconcile_error', 'vl_check_error', 'error')}
 
         for i, pdf_file in enumerate(pdf_files, 1):
             # Content-based hash: the original file name carries the account
@@ -186,6 +190,7 @@ class Command(BaseCommand):
                             'imported; would skip (no classify, no VL call)'
                         ))
                         duplicates += 1
+                        verdict_counts['duplicate'] += 1
                         continue
                     stored_rows = (
                         list(RbcMonthly.objects.filter(content_hash=full_hash))
@@ -220,6 +225,7 @@ class Command(BaseCommand):
                         logger.warning("Could not write JSON log for %s: %s", safe_name, exc)
                     _move_file(pdf_file, processed_dir / safe_name, h8)
                     duplicates += 1
+                    verdict_counts['duplicate'] += 1
                     continue
 
                 # ── Step 1: classify ──────────────────────────────────────────
@@ -276,6 +282,7 @@ class Command(BaseCommand):
                 else:
                     classified_unknown += 1
                     errors += 1
+                    verdict_counts['error'] += 1
                     # Cannot be attributed to an account (or even a type):
                     # safe name with UNKNOWN_ACCOUNT and today's date.
                     safe_name = None if dry_run else safe_file_name(
@@ -312,6 +319,9 @@ class Command(BaseCommand):
                         _move_file(pdf_file, dest, h8)
                     continue
 
+                # One file = one verdict (annual or monthly branch).
+                verdict_counts[verdict] += 1
+
                 # ── Step 3: save JSON log (always) ──────────────────────────
                 if not dry_run:
                     json_path = _json_log_path(json_dir, safe_name, has_error=errs > 0)
@@ -341,6 +351,7 @@ class Command(BaseCommand):
                 reason = scrub_text(str(exc), name_map)[0]
                 logger.error("Unexpected error while processing %s: %s", h8, reason)
                 errors += 1
+                verdict_counts['error'] += 1
                 if dry_run:
                     self.stdout.write(self.style.ERROR(
                         f'  [DRY-RUN] verdict=error — {reason} '
@@ -370,7 +381,11 @@ class Command(BaseCommand):
             f'Holdings recorded:       {imported_holdings}\n'
             f'Duplicates skipped:      {duplicates}\n'
             f'Errors:                  {errors}\n'
-            f'JSON logs:               {json_dir}\n'
+            + ''.join(
+                f'  {verdict + ":":<23}{count}\n'
+                for verdict, count in verdict_counts.items()
+            )
+            + f'JSON logs:               {json_dir}\n'
         ))
 
     # ------------------------------------------------------------------

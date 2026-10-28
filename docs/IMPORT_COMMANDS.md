@@ -39,8 +39,13 @@ verdicts without writing anything):
 | `conflict` | Same account + date + currency already stored with different content — nothing stored (all-or-nothing) | `processed/errors/` |
 | `date_error` | Statement date failed sanity (missing, in the future, before 2000, or not 1–100 days after the Date of Last Statement on the same PDF) — nothing stored | `processed/errors/` |
 | `reconcile_error` | The VL transactions do not reconcile with the section's cash rows (opening + credits − debits ≠ closing), or the text/VL currency sections don't line up — nothing stored | `processed/errors/` |
-| `vl_check_error` | The file fell back to the VL parser and a VL section failed its checks (holdings + cash ≠ end total, unreadable holding values, date problems, begin total inconsistent with balances) — nothing stored | `processed/errors/` |
+| `vl_check_error` | The file fell back to the VL parser and a VL section failed its checks (holdings + cash ≠ end total, unreadable holding values, date problems) — nothing stored. There is no begin-total check: VL's balances often list only cash for a USD section, and the begin total is checked against the previous month's end in step 14 | `processed/errors/` |
 | `error` | Anything else: the VL model failed or returned invalid JSON (there is no regex fallback), the document type is unknown, or a section could not be attributed to an account | `processed/errors/` |
+
+**End summary:** after the run, the `Inbox Import Summary` counts files per
+verdict — one line each for `imported`, `duplicate`, `conflict`,
+`date_error`, `reconcile_error`, `vl_check_error` and `error` — in normal and
+`--dry-run` runs, alongside the existing record counts.
 
 **Cash gate print lines:** for every currency section of a monthly statement,
 the import prints one line in normal and `--dry-run` runs, e.g.

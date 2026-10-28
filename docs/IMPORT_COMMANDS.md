@@ -54,6 +54,18 @@ the import prints one line in normal and `--dry-run` runs, e.g.
 PASS/FAIL). In `--dry-run` runs the reasons of every failed check are printed
 as well (field/currency/symbol names only — never account numbers).
 
+**Monthly statement row rules:**
+- The "Trades For Future Settlement" table below Account Activity is ignored,
+  and any transaction dated outside the statement's own window is dropped
+  before the cash gate; the per-section drop count is printed next to the
+  cash-gate line (counts only, never dates or descriptions).
+- A DIVIDEND row may carry both the gross CREDIT and the NRT withholding
+  DEBIT on the same row. Both amounts are kept and the cash gate nets them.
+- Short option holdings (e.g. `CALL NVDA 07/30/21 210`) have no separate
+  symbol; a trailing `-` in quantity, book cost or market value means
+  negative, and the holdings self-check applies a ×100 contract multiplier
+  to such rows (signed comparison).
+
 **VL model:** the VL answer limit is `VL_MAX_TOKENS` (default **16384**; set it
 in `.env` to override). A truncated VL answer (`finish_reason=length`) is an
 error whose reason says `truncated` — raise `VL_MAX_TOKENS` if you see it.

@@ -574,6 +574,9 @@ class Command(BaseCommand):
         self_check_reasons: list[str] = []
         reconcile_msgs: list[str] = []
         vl_check_msgs: list[str] = []
+        # Per-currency count of VL transactions dropped as out-of-window
+        # (plan vl-statement-rows, fix 1; printed counts only, tdw Oct 28).
+        dropped_by_cur: dict[str, int] = {}
 
         # Text-first (step 12b): deterministic text parser, then self-check;
         # any reason (or a text-parser error) falls back to the VL parser.
@@ -604,6 +607,11 @@ class Command(BaseCommand):
                 logger.warning("VL call failed on the text path for %s: %s", hash8, vl_error)
                 reconcile_msgs.append(vl_error)
             else:
+                dropped_by_cur = {
+                    str(s.get('currency') or 'CAD').upper().strip():
+                    int(s.get('out_of_window_dropped') or 0)
+                    for s in (vl_sections or [])
+                }
                 if not vl_sections:
                     # A VL result of None or [] leaves nothing to merge; the
                     # rejection must carry a reason, never an empty one.
@@ -645,6 +653,12 @@ class Command(BaseCommand):
                 safe_name = _unattributable_safe_name(pdf_file.name, hash8)
                 return (0, 0, 0, 0, 1, [], [empty_msg], safe_name,
                         parsers, self_check_reasons, 'error')
+            dropped_by_cur = {
+                str(s.get('currency') or 'CAD').upper().strip():
+                int(s.get('out_of_window_dropped') or 0)
+                for s in parsed_list
+            }
+
             # Step 13c-b (Q1, tdw Oct 27): the fallback is gated too — on
             # the VL result's own cash rows and transactions, so nothing
             # that does not reconcile is ever stored.
@@ -683,6 +697,12 @@ class Command(BaseCommand):
                 f"credits {gate['credits']} debits {gate['debits']} "
                 f"closing {gate['closing']} diff {gate['difference']} "
                 f"{'PASS' if gate['ok'] else 'FAIL'}"
+            )
+            # Out-of-window drop count per section — counts only, never
+            # dates or descriptions (tdw Oct 28, extra D).
+            self.stdout.write(
+                f"  [{cur}] out-of-window transactions dropped: "
+                f"{dropped_by_cur.get(cur, 0)}"
             )
 
         # Per-section JSON log fields (step 13c-b): transaction count and

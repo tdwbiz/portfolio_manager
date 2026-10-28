@@ -49,7 +49,7 @@ statement), matching the shape that manage_inbox_import already expects:
 import base64
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 import pymupdf  # PyMuPDF
 
@@ -122,7 +122,11 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
     # RBF savings interest must win over the DIST/REINV rules: a check-1
     # style savings row is one net-zero INTEREST_RECEIVED row even when its
     # description mentions reinvestment (Q1, plan vl-fallback-checks).
-    if 'RBC INVESTMENT SAVINGS' in desc:
+    # Match INVESTMENT SAVINGS (not just RBC INVESTMENT SAVINGS) so the US
+    # label "RBC U.S INVESTMENT SAVINGS" stays INTEREST_RECEIVED (plan
+    # vl-statement-rows fix 4). Valid types already returned above, so a
+    # real BOUGHT of the savings fund is never recoded here.
+    if 'INVESTMENT SAVINGS' in desc:
         return 'INTEREST_RECEIVED'
 
     # "DIST ON X SHS" in description = cash distribution (money in)
@@ -271,6 +275,10 @@ Rules:
   
   4. **DIVIDEND**: The ACTIVITY column says "DIVIDEND" or "DIV". Cash
      dividend received. CREDIT = cash amount (money in).
+     A single DIVIDEND row can carry BOTH amounts: CREDIT = the gross
+     dividend and DEBIT = the withheld tax marked NRT on the same row.
+     Keep both columns exactly as printed — never zero or move either one;
+     only the net (credit − debit) is the cash actually received.
   
   5. **DIV REIN**: Description contains "REINV@" or "REINVEST".
      Dividend was automatically used to buy more shares. Net cash = 0.
@@ -293,6 +301,12 @@ Rules:
   
   10. **ADJUST** / **RTC**: Book cost adjustments. No cash effect.
   
+  **CRITICAL: ignore the "Trades For Future Settlement" table.** Below the
+  Account Activity table some statements print a second table titled
+  "Trades For Future Settlement" listing trades that settle AFTER the
+  statement date. Do NOT include any row from that table as a transaction —
+  only rows of the Account Activity table itself are transactions.
+
   **IMPORTANT: Do NOT include "Opening Balance" or "Closing Balance" as
   transactions.** These are balance summary lines, not transactions.
   The Opening Balance line appears at the TOP of the Account Activity table.
@@ -357,6 +371,15 @@ Rules:
   Each holding row goes into the "holdings" array — one object per security.
   - Do NOT merge holdings — each row is a separate object.
   - If a row has no ticker symbol, leave symbol empty.
+  - A number ending with a trailing '-' in the quantity, book cost or
+    market value columns is NEGATIVE (a short option position) — return it
+    as a negative number. The price column is never negative.
+  - Option rows have no separate ticker symbol: the security name is the
+    full pattern CALL or PUT + underlying symbol + expiry date (MM/DD/YY)
+    + strike, e.g. "CALL NVDA 07/30/21 210" or "CALLNVDA 07/30/21 210".
+    Leave symbol empty for those rows. A holding that merely starts with
+    CALL or PUT (e.g. a CALLAWAY or PUTNAM fund) is NOT an option — keep
+    its normal symbol.
 
 - Include ALL transactions visible on ALL pages provided.
 """
@@ -491,6 +514,16 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             f"VL model returned no sections (currency sections) for {file_path}: {raw}"
         )
 
+    # Date window for transactions (plan vl-statement-rows, fix 1): a
+    # transaction dated outside the statement's own window — e.g. a
+    # "Trades For Future Settlement" row or a misread year — is dropped.
+    # Only the count is logged and returned; never dates or descriptions.
+    if last_statement_date is not None:
+        window_start = last_statement_date
+    else:
+        # Same 100-day gap bound as statement_date_problems (Q1, tdw Oct 28).
+        window_start = statement_date - timedelta(days=100)
+
     result = []
     for sec in sections_raw:
         currency = str(sec.get('currency') or 'CAD').upper().strip()
@@ -526,6 +559,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             })
 
         transactions = []
+        dropped_out_of_window = 0
         for tx in sec.get('transactions') or []:
             tx_date_str = tx.get('date')
             if not tx_date_str:
@@ -541,6 +575,12 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     "parse_rbc_monthly_vl: unparseable transaction date %r — skipping",
                     tx_date_str,
                 )
+                continue
+
+            # Drop rows dated outside the statement window (future-settlement
+            # trades, misread years). Count only — never the row itself.
+            if tx_date < window_start or tx_date > statement_date:
+                dropped_out_of_window += 1
                 continue
 
             raw_type = str(tx.get('activity_type') or '').upper().strip()
@@ -580,11 +620,13 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 activity = 'DIST'
 
             # Post-fix: if description says "REINV@" or "REINVEST", force to
-            # DIV REIN — savings rows excluded, RBC INVESTMENT SAVINGS wins
-            # (Q1): they stay INTEREST_RECEIVED and must not keep amounts.
+            # DIV REIN — savings rows excluded, INVESTMENT SAVINGS wins
+            # (Q1; the US label RBC U.S INVESTMENT SAVINGS included, plan
+            # vl-statement-rows fix 4): they stay INTEREST_RECEIVED and must
+            # not keep amounts.
             desc_upper = description.upper()
             if (('REINV' in desc_upper or 'REINVEST' in desc_upper)
-                    and 'RBC INVESTMENT SAVINGS' not in desc_upper):
+                    and 'INVESTMENT SAVINGS' not in desc_upper):
                 if activity != 'DIV REIN':
                     logger.warning(
                         "parse_rbc_monthly_vl: corrected %s->DIV REIN for: %s",
@@ -752,6 +794,13 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                 'notes':         str(tx.get('notes') or ''),
             })
 
+        if dropped_out_of_window:
+            logger.info(
+                "parse_rbc_monthly_vl: %s section: %d transaction(s) dated "
+                "outside the statement window dropped",
+                currency, dropped_out_of_window,
+            )
+
         result.append({
             'statement_date':            statement_date,
             'account_number':            account_number,
@@ -763,6 +812,7 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             'balances':            balances,
             'holdings':            holdings,
             'transactions':        transactions,
+            'out_of_window_dropped': dropped_out_of_window,
         })
 
     if not result:

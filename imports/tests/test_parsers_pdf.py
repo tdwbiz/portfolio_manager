@@ -266,6 +266,118 @@ class TestAssetReviewHoldings(TestCase):
         self.assertIsNone(vfv['quantity'])
 
 
+# Plan vl-statement-rows fix 3a: Asset Review tables with option rows.
+# The option row carries no separate symbol token — the security is the
+# full CALL/PUT pattern and the fixed columns are QTY PRICE BOOK_COST $MV,
+# a trailing '-' marking a negative (short position). Fake numbers only.
+def _asset_review_text(rows: str) -> str:
+    return (
+        "RRSP Statement OCT 31 2025\n"
+        "Your Account Number: 900-00007-1-8\n"
+        "Date of Last Statement: SEPT 30 2025\n"
+        "\n" + "-" * 80 + "\n"
+        "Asset Review  ( Exchange rate 1USD = 1.40000 CAD as of OCT 31, 2025 )\n"
+        + "-" * 80 + "\n"
+        "SECURITY QUANTITY MKT. PRICE BOOK COST MARKET VALUE\n"
+        "SYMBOL SEGREGATED RATE\n"
+        + rows
+        + "\n" + "-" * 80 + "\n"
+        "Account Activity\n"
+    )
+
+
+class TestOptionHoldings(TestCase):
+    """Plan vl-statement-rows fix 3a: trailing-minus values and the option
+    four-token layout in _parse_asset_review (full pattern only, extra A)."""
+
+    def test_option_row_parsed_as_negative(self):
+        text = _asset_review_text(
+            "CALL NVDA 07/30/21 210 4- 0.010 225.04- $4.00-\n"
+        )
+        holdings = parse_rbc_pdf(text)['holdings']
+        self.assertEqual(len(holdings), 1)
+        h = holdings[0]
+        self.assertEqual(h['security'], 'CALL NVDA 07/30/21 210')
+        self.assertEqual(h['symbol'], '')
+        self.assertEqual(h['quantity'], Decimal('-4'))
+        self.assertEqual(h['market_price'], Decimal('0.010'))
+        self.assertEqual(h['book_cost'], Decimal('-225.04'))
+        self.assertEqual(h['market_value'], Decimal('-4.00'))
+
+    def test_option_row_glued_call_prefix(self):
+        # The check-7 layout: CALL glued to the underlying, no space.
+        text = _asset_review_text(
+            "CALLNVDA 07/30/21 210 4- 0.010 225.04- $4.00-\n"
+        )
+        holdings = parse_rbc_pdf(text)['holdings']
+        self.assertEqual(len(holdings), 1)
+        h = holdings[0]
+        self.assertEqual(h['security'], 'CALLNVDA 07/30/21 210')
+        self.assertEqual(h['symbol'], '')
+        self.assertEqual(h['quantity'], Decimal('-4'))
+        self.assertEqual(h['market_value'], Decimal('-4.00'))
+
+    def test_self_check_passes_on_option_row(self):
+        # Fix 3b: the check-7 row passes with the ×100 contract multiplier
+        # on signed values (−4 × 0.010 × 100 = −4.00 = market value), and
+        # the holdings+cash sum includes the −4.00.
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2021, 6, 30),
+            'holdings': [{
+                'security': 'CALLNVDA 07/30/21 210', 'symbol': '',
+                'quantity': Decimal('-4'), 'book_cost': Decimal('-225.04'),
+                'market_price': Decimal('0.010'),
+                'market_value': Decimal('-4.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('996.00')},
+            ],
+            'end_total_market_value': Decimal('992.00'),
+        }]
+        self.assertEqual(self_check_sections(sections), [])
+
+    def test_option_sign_mismatch_fails(self):
+        # Extra B: the check compares signed values — a positive market
+        # value against negative quantity/price must fail, not abs() away.
+        sections = [{
+            'currency': 'USD',
+            'statement_date': date(2021, 6, 30),
+            'holdings': [{
+                'security': 'CALLNVDA 07/30/21 210', 'symbol': '',
+                'quantity': Decimal('-4'), 'book_cost': Decimal('-225.04'),
+                'market_price': Decimal('0.010'),
+                'market_value': Decimal('4.00'),
+            }],
+            'balances': [
+                {'account_type': 'Cash', 'market_value': Decimal('996.00')},
+            ],
+            'end_total_market_value': Decimal('1000.00'),
+        }]
+        reasons = self_check_sections(sections)
+        self.assertTrue(
+            any('quantity*market_price' in r for r in reasons), reasons,
+        )
+
+    def test_callaway_and_putnam_names_are_not_options(self):
+        # Extra A: a description that merely starts with CALL or PUT is not
+        # an option — without the expiry+strike pattern the row must fall
+        # back to unreadable (None), never to the option four-token layout.
+        text = _asset_review_text(
+            "CALLAWAYGOLFINC 100 25.000 2,500.00 $2,500.00\n"
+            "PUTNAMBALMUTFUND 50 12.000 600.00 $600.00\n"
+        )
+        holdings = parse_rbc_pdf(text)['holdings']
+        self.assertEqual(len(holdings), 2)
+        for h in holdings:
+            self.assertIsNone(h['quantity'])
+            self.assertIsNone(h['book_cost'])
+            self.assertIsNone(h['market_price'])
+            # The $ market value is still readable and stays positive.
+            self.assertIsNotNone(h['market_value'])
+            self.assertGreater(h['market_value'], 0)
+
+
 # Step 12b test fixtures: full synthetic statements whose holdings + cash
 # reconcile to the end total (fake numbers only). Layout mimics the real
 # statements: date pair at the top, "Total on …" footer lines in the Asset

@@ -26,10 +26,20 @@ ACCOUNT_ACTIVITY_HEADER = re.compile(r'Account\s+Activity', re.IGNORECASE)
 ASSET_REVIEW_TABLE_HEADER = re.compile(r'SECURITY\s+QUANTITY', re.IGNORECASE)
 HOLDINGS_FOOTNOTES_HEADER = re.compile(r'^\s*FOOTNOTES\b', re.IGNORECASE)
 _HOLDING_SYMBOL = re.compile(r'^[A-Z][A-Z0-9.\-]{1,9}$')
-_HOLDING_QTY = re.compile(r'^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$')
+# A trailing '-' marks a negative value (short option position) in the
+# quantity, book cost and market value columns — never in the price column.
+_HOLDING_QTY = re.compile(r'^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?-?$')
 _HOLDING_PRICE = re.compile(r'^\d+(?:\.\d+)?$')
-_HOLDING_MONEY = re.compile(r'^[\d,]+\.\d+$')
-_HOLDING_MV = re.compile(r'^\$[\d,]+\.\d+$')
+_HOLDING_MONEY = re.compile(r'^[\d,]+\.\d+-?$')
+_HOLDING_MV = re.compile(r'^\$[\d,]+\.\d+-?$')
+# Option security name — the FULL pattern only (tdw Oct 28, extra A): CALL
+# or PUT, optional space, underlying symbol, expiry date MM/DD/YY and
+# strike. Never a description that merely starts with CALL or PUT, so
+# holdings like CALLAWAY or PUTNAM funds are not read as options.
+_HOLDING_OPTION = re.compile(
+    r'^(?:CALL|PUT)\s?[A-Z][A-Z0-9.\-]*\s+\d{2}/\d{2}/\d{2}\s+\d+(?:\.\d+)?$',
+    re.IGNORECASE,
+)
 
 # Metadata patterns
 FX_RATE_PATTERN = re.compile(
@@ -593,10 +603,15 @@ def _parse_asset_review(text: str) -> list[dict[str, Any]]:
     def _decimal(pattern: re.Pattern, value: str) -> Decimal | None:
         if not pattern.match(value):
             return None
+        # A trailing '-' negates the value (short option position).
+        negative = value.endswith('-')
         try:
-            return Decimal(value.replace('$', '').replace(',', ''))
+            result = Decimal(
+                value.replace('$', '').replace(',', '').rstrip('-')
+            )
         except InvalidOperation:
             return None
+        return -result if negative else result
 
     holdings: list[dict[str, Any]] = []
     for line in lines[start + 1:end]:
@@ -619,6 +634,25 @@ def _parse_asset_review(text: str) -> list[dict[str, Any]]:
                 holdings.append({
                     'security': ' '.join(tokens[:-5]),
                     'symbol': symbol_s,
+                    'quantity': _decimal(_HOLDING_QTY, qty_s),
+                    'book_cost': _decimal(_HOLDING_MONEY, cost_s),
+                    'market_price': _decimal(_HOLDING_PRICE, price_s),
+                    'market_value': _decimal(_HOLDING_MV, mv_s),
+                })
+                continue
+            # Option row: the description is the full CALL/PUT pattern (no
+            # separate symbol token) and the fixed columns are the four
+            # QTY PRICE BOOK_COST $MARKET_VALUE — a trailing '-' on any of
+            # them marks a negative (short position).
+            desc = ' '.join(tokens[:-4])
+            qty_s, price_s, cost_s, mv_s = tokens[-4:]
+            if (_HOLDING_OPTION.match(desc)
+                    and _HOLDING_QTY.match(qty_s)
+                    and _HOLDING_PRICE.match(price_s)
+                    and _HOLDING_MONEY.match(cost_s)):
+                holdings.append({
+                    'security': desc,
+                    'symbol': '',
                     'quantity': _decimal(_HOLDING_QTY, qty_s),
                     'book_cost': _decimal(_HOLDING_MONEY, cost_s),
                     'market_price': _decimal(_HOLDING_PRICE, price_s),
@@ -925,7 +959,10 @@ def self_check_sections(
       and at most 100 days later (tdw decision, Oct 26);
     - every holding has a readable ``book_cost`` (never 0 as a placeholder);
     - per holding, ``quantity * market_price`` is within 0.1 percent of
-      ``market_value``;
+      ``market_value`` — for a short option (security matching the full
+      CALL/PUT pattern) the quantity is the contract count, so the check
+      uses ``quantity * market_price * 100`` and compares signed values
+      (all negative for a short position);
     - ``sum(holdings.market_value) + cash == end_total_market_value`` to the
       cent.
 
@@ -958,6 +995,15 @@ def self_check_sections(
         mv_sum = Decimal('0')
         for h in section.get('holdings') or []:
             sym = str(h.get('symbol') or '?')
+            # Short option (full CALL/PUT pattern, extra A): the printed
+            # quantity is the contract count, so the check applies the ×100
+            # contract multiplier and compares SIGNED values — all negative
+            # for a short position; a sign mismatch must fail (extra B).
+            multiplier = (
+                Decimal('100')
+                if _HOLDING_OPTION.match(str(h.get('security') or ''))
+                else Decimal('1')
+            )
             qty, price, cost, mv = (h.get('quantity'), h.get('market_price'),
                                     h.get('book_cost'), h.get('market_value'))
             if cost is None:
@@ -969,7 +1015,7 @@ def self_check_sections(
             if qty is None or price is None:
                 reasons.append(f'{cur} {sym} quantity/market_price unreadable')
                 continue
-            expected = Decimal(qty) * Decimal(price)
+            expected = Decimal(qty) * Decimal(price) * multiplier
             if abs(expected - Decimal(mv)) > _PRICE_TOLERANCE * abs(Decimal(mv)):
                 reasons.append(
                     f'{cur} {sym} quantity*market_price vs market_value '

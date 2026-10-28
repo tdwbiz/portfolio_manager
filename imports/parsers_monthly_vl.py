@@ -89,9 +89,6 @@ CASH_IN_TYPES = {'SOLD', 'DIVIDEND', 'DIST', 'TRANSFER', 'CONTRIB', 'DEPOSIT', '
 # Activity types that represent cash outflow (money out of the account)
 CASH_OUT_TYPES = {'BOUGHT', 'WITHDRAWAL', 'TFR OUT', 'FEE'}
 
-# Activity types with zero net cash effect
-ZERO_CASH_TYPES = {'DIV REIN', 'INTEREST_RECEIVED', 'ADJUST', 'RTC', 'OPENING BALANCE', 'CLOSING BALANCE'}
-
 
 def normalize_activity_type(raw_type: str, description: str = '') -> str:
     """Normalize and validate an activity type from the VL parser.
@@ -105,19 +102,39 @@ def normalize_activity_type(raw_type: str, description: str = '') -> str:
     # If already valid, return as-is
     if raw in RBC_ACTIVITY_TYPES:
         return raw
-    
+
+    # Empty activity type (tdw decision, Oct 27): match only the income
+    # wording — never a security name, and never DIVIDEND by default.
+    if not raw:
+        if 'CASH DIV' in desc:
+            return 'DIVIDEND'
+        if re.search(r'\bDIST\b', desc):
+            return 'DIST'
+        logger.warning(
+            "normalize_activity_type: empty activity type with no income "
+            "wording (description %r) — using OTHER",
+            description[:80],
+        )
+        return 'OTHER'
+
     # --- Fix known LLM misclassifications based on description ---
-    
+
+    # RBF savings interest must win over the DIST/REINV rules: a check-1
+    # style savings row is one net-zero INTEREST_RECEIVED row even when its
+    # description mentions reinvestment (Q1, plan vl-fallback-checks).
+    if 'RBC INVESTMENT SAVINGS' in desc:
+        return 'INTEREST_RECEIVED'
+
     # "DIST ON X SHS" in description = cash distribution (money in)
     if 'DIST ON' in desc:
         return 'DIST'
-    
+
     # Dividend reinvestment: description contains "REINV@" or "REINVEST"
     if 'REINV' in desc or 'REINVEST' in desc:
         return 'DIV REIN'
-    
+
     # Interest on RBF savings funds
-    if 'INTEREST' in desc or 'RBC INVESTMENT SAVINGS' in desc:
+    if 'INTEREST' in desc:
         return 'INTEREST_RECEIVED'
     
     # Map common LLM mistakes
@@ -566,8 +583,12 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             if raw_type == 'BUY' and 'DIST ON' in description.upper():
                 activity = 'DIST'
 
-            # Post-fix: if description says "REINV@" or "REINVEST", force to DIV REIN
-            if 'REINV' in description.upper() or 'REINVEST' in description.upper():
+            # Post-fix: if description says "REINV@" or "REINVEST", force to
+            # DIV REIN — savings rows excluded, RBC INVESTMENT SAVINGS wins
+            # (Q1): they stay INTEREST_RECEIVED and must not keep amounts.
+            desc_upper = description.upper()
+            if (('REINV' in desc_upper or 'REINVEST' in desc_upper)
+                    and 'RBC INVESTMENT SAVINGS' not in desc_upper):
                 if activity != 'DIV REIN':
                     logger.warning(
                         "parse_rbc_monthly_vl: corrected %s->DIV REIN for: %s",
@@ -641,17 +662,10 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
                     credit = debit
                     debit = Decimal('0')
 
-            # --- Fix DIV REIN: net cash = 0, quantity = new shares ---
-            # Dividend reinvestment: dividend immediately used to buy shares
-            if activity == 'DIV REIN':
-                # Clear debit/credit — net cash effect is 0
-                if debit > 0 or credit > 0:
-                    logger.warning(
-                        "parse_rbc_monthly_vl: DIV REIN cleared debit/credit for: %s",
-                        description[:60],
-                    )
-                debit = Decimal('0')
-                credit = Decimal('0')
+            # DIV REIN keeps its printed debit (the whole shares bought with
+            # the dividend cash): a reinvested dividend is two PDF rows —
+            # DIV REIN (debit) + a DIVIDEND/DIST credit row — and the cash
+            # gate needs both amounts (plan vl-fallback-checks, goal 2).
 
             # --- Fix INTEREST_RECEIVED: only quantity matters, clear price/debit/credit ---
             # RBF2010/RBF2014 interest: quantity = new shares earned

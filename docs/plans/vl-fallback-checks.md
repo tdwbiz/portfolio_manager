@@ -39,9 +39,11 @@ PDFs found:
     debit/credit; drop DIV REIN from `ZERO_CASH_TYPES` (constant is otherwise
     unused — delete it).
   - `normalize_activity_type`: empty `raw_type` must not partial-match everything
-    (`'' in valid` is always True today). Add description fallback for empty type:
-    `DIST` in description → DIST, else `DIV` → DIVIDEND (the credit row of a
-    DIV REIN pair). Check-1 style RBC savings rows: make the
+    (`'' in valid` is always True today). Add description fallback for empty type
+    (Decisions, Extra 3): match only income wording, never security names —
+    `CASH DIV` → DIVIDEND (the credit row of a DIV REIN pair), `DIST` as a
+    separate word (as in "DIST ON 1035 SHS") → DIST, anything else → OTHER;
+    never DIVIDEND by default. Check-1 style RBC savings rows: make the
     `RBC INVESTMENT SAVINGS` → INTEREST_RECEIVED rule win over the `REINV` →
     DIV REIN rule (see Open questions Q1). The INTEREST_RECEIVED fix (clears
     price/debit/credit) stays: RBF2010/RBF2014 interest is one net-zero row on the
@@ -151,6 +153,9 @@ no model calls):
 - Two-row DIV REIN pair reconciles: `_coerce_response` keeps the DIV REIN debit and
   the DIVIDEND/DIST credit (second row with empty `activity_type`, "CASH DIV …"
   description → credit row), and `reconcile_section` on the section returns [].
+- Empty activity type, no income wording: a row whose security name contains
+  DIVIDEND but whose description has no CASH DIV/DIST wording comes out OTHER,
+  never DIVIDEND (Decisions, Extra 3).
 - VL totals that do not add up (holdings + cash ≠ end_total, or unreadable
   book_cost) → command dry-run verdict `vl_check_error`, nothing stored.
 - VL parser raises (or invalid JSON) → dry-run verdict `error` with a reason; a
@@ -197,3 +202,11 @@ no model calls):
   **Recommendation: yes** — map 0 to None for book_cost/quantity/market_price/
   market_value before delegating to `self_check_sections`; a real holding with
   zero book cost is rare and can be handled when it actually appears.
+
+## Decisions (tdw, Oct 27)
+
+- **Extra 3 — empty activity type:** match only the income wording, not security
+  names: "CASH DIV" → DIVIDEND; "DIST" as a separate word (as in "DIST ON 1035
+  SHS") → DIST; anything else → OTHER. Never DIVIDEND by default. Synthetic test:
+  an empty-activity row whose security name contains DIVIDEND and no CASH
+  DIV/DIST wording must come out OTHER.

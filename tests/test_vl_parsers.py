@@ -175,20 +175,72 @@ class OutOfWindowDropTest(TestCase):
         self.assertEqual(len(section['transactions']), 1)
         self.assertEqual(section['out_of_window_dropped'], 0)
 
-    def test_no_last_statement_date_uses_100_day_bound(self):
+    def test_no_last_statement_date_uses_160_day_bound(self):
         """Without last_statement_date the lower bound is statement_date −
-        100 days (Q1): Dec 31 → Sep 2, so a Sep 01 row is dropped and an
-        Oct 01 row is kept."""
+        160 days (plan vl-window-backdated; deliberately wider than the
+        1–100-day statement_date_problems gap): Dec 31 2020 → Jul 24 2020,
+        so a Jul 23 row is dropped and a Jul 25 row is kept."""
         from imports.parsers_monthly_vl import _coerce_response
 
         raw = self._raw('2020-12-31', None,
-                        [self._bought('2020-09-01'),
-                         self._bought('2020-10-01')])
+                        [self._bought('2020-07-23'),
+                         self._bought('2020-07-25')])
         section = _coerce_response(raw, '/test.pdf')[0]
         self.assertEqual(len(section['transactions']), 1)
         self.assertEqual(section['transactions'][0]['date'].isoformat(),
-                         '2020-10-01')
+                         '2020-07-25')
         self.assertEqual(section['out_of_window_dropped'], 1)
+
+    def test_backdated_rows_kept_and_gate_passes(self):
+        """Plan vl-window-backdated: RBC prints back-dated rows inside a
+        monthly statement (the Nov 30 2018 spin-off statement lists two
+        OCT. 29 rows "AS OF 10/29/18"). Both survive the widened window
+        (last_statement_date − 60 days); only the CASH-LIEU row is kept —
+        the 0/0 spin-off DIST row is skipped by the existing zero-amount
+        rule (tdw, Oct 29) — and the cash gate passes:
+        698.97 + 10.96 = 709.93."""
+        from core.utils.import_checks import cash_gate_details
+        from imports.parsers_monthly_vl import _coerce_response
+
+        raw = {
+            'account_number': '12345',
+            'statement_date': '2018-11-30',
+            'last_statement_date': '2018-10-31',
+            'sections': [{
+                'currency': 'CAD',
+                'begin_total_market_value': 1000.00,
+                'end_total_market_value': 1000.00,
+                'balances': [{'account_type': 'Cash', 'opening': 698.97,
+                              'closing': 709.93, 'market_value': 698.97}],
+                'holdings': [],
+                'transactions': [
+                    {'date': '2018-10-29', 'activity_type': 'DISTRIB',
+                     'description': ('DISTRIB 20 SHS RESIDEO FROM HONEYWELL '
+                                     'AS OF 10/29/18'),
+                     'symbol': '', 'quantity': 20, 'price': 0,
+                     'debit': 0, 'credit': 0,
+                     'commission': 0, 'notes': ''},
+                    {'date': '2018-10-29', 'activity_type': 'CASH-LIEU',
+                     'description': ('CASH-LIEU FOR FRACTIONAL SHARE '
+                                     'AS OF 10/29/18'),
+                     'symbol': '', 'quantity': 0, 'price': 0,
+                     'debit': 0, 'credit': 10.96,
+                     'commission': 0, 'notes': ''},
+                ],
+            }],
+        }
+        section = _coerce_response(raw, '/test.pdf')[0]
+        # Only the CASH-LIEU row is kept: the spin-off row labels DIST
+        # (partial match) and has zero debit and credit, so it is skipped
+        # by the existing zero-amount rule. Keeping zero-cash security rows
+        # (spin-offs, DLR journals) is a later step.
+        self.assertEqual(len(section['transactions']), 1)
+        tx = section['transactions'][0]
+        self.assertEqual(tx['activity_type'], 'OTHER')
+        self.assertEqual(tx['credit'], Decimal('10.96'))
+        self.assertEqual(tx['debit'], Decimal('0'))
+        self.assertEqual(section['out_of_window_dropped'], 0)
+        self.assertTrue(cash_gate_details(section)['ok'])
 
 
 class NrtWithholdingTest(TestCase):

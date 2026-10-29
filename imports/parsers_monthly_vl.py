@@ -528,15 +528,19 @@ def _coerce_response(raw: dict, file_path: str) -> list[dict]:
             f"VL model returned no sections (currency sections) for {file_path}: {raw}"
         )
 
-    # Date window for transactions (plan vl-statement-rows, fix 1): a
-    # transaction dated outside the statement's own window — e.g. a
-    # "Trades For Future Settlement" row or a misread year — is dropped.
-    # Only the count is logged and returned; never dates or descriptions.
+    # Date window for transactions (plan vl-statement-rows fix 1, lower
+    # bound widened in plan vl-window-backdated): a transaction dated
+    # outside the window — e.g. a "Trades For Future Settlement" row or a
+    # misread year — is dropped. The lower bound is deliberately WIDER than
+    # the 1–100-day statement_date_problems gap check (a different rule: row
+    # inclusion, not statement-date sanity) so RBC's back-dated rows
+    # (spin-off distributions, cash-in-lieu printed "AS OF" the previous
+    # month) survive; the upper bound stays at the statement date. Only the
+    # count is logged and returned; never dates or descriptions.
     if last_statement_date is not None:
-        window_start = last_statement_date
+        window_start = last_statement_date - timedelta(days=60)
     else:
-        # Same 100-day gap bound as statement_date_problems (Q1, tdw Oct 28).
-        window_start = statement_date - timedelta(days=100)
+        window_start = statement_date - timedelta(days=160)
 
     result = []
     for sec in sections_raw:

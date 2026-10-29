@@ -95,7 +95,9 @@ In `tests/test_vl_parsers.py::OutOfWindowDropTest`:
    - cash in lieu: `activity_type='CASH-LIEU'`, description
      'CASH-LIEU FOR FRACTIONAL SHARE AS OF 10/29/18', credit 10.96,
      debit 0.
-   Assert: both rows kept, `out_of_window_dropped == 0`, and
+   Assert: only the CASH-LIEU row kept (`len == 1`, credit 10.96
+   untouched — the 0/0 spin-off DIST row is skipped by the existing
+   zero-amount rule, decision 4), `out_of_window_dropped == 0`, and
    `cash_gate_details(section)['ok']` is True (698.97 + 10.96 = 709.93).
 2. **Update** `test_no_last_statement_date_uses_100_day_bound` → 160-day
    bound: Dec 31 2020 − 160 = Jul 24 2020, so a Jul 23 row is dropped and
@@ -187,3 +189,10 @@ tdw accepts the recommended answers to all three open questions:
 3. **Lower bound inclusive** ("on or after"). The 160-day test uses
    Jul 23 dropped / Jul 25 kept to avoid a brittle exact-boundary
    assertion.
+4. **Option 1: the back-dated test asserts only the CASH-LIEU row is
+   kept** (`len == 1`, its credit 10.96 untouched,
+   `out_of_window_dropped == 0`); the cash gate passes
+   698.97 + 10.96 = 709.93. The 0/0 spin-off DIST row is skipped by the
+   existing zero-amount rule (DIST ∈ CASH_IN_TYPES with debit == credit ==
+   0) — known, stays as is. Keeping zero-cash security rows such as
+   spin-offs and the DLR journals is a later step.

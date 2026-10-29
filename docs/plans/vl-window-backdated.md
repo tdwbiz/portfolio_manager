@@ -153,18 +153,37 @@ End of implementation, full suites once:
 - A step turns out wrong or a label behaves differently than analysed above
   → stop and report; the plan is revised first (README rule).
 
-## Open questions
+## Open questions (all decided — see Decisions below)
 
 1. Should `CASH-LIEU` be mapped to `DIST` (or a new type) instead of
-   `OTHER`? **Recommended: no.** The cash gate is type-agnostic and keeps
+   `OTHER`? **Decided: no** (tdw accepted the recommendation). The cash gate is type-agnostic and keeps
    the credit; `OTHER` only warns in the ledger path, and the CSV Activity
    import (master for transactions) is untouched. Revisit only if step 5
    shows the VL emits a label that gets dropped.
 2. Should the fallback stay aligned with the 1–100-day
-   `statement_date_problems` gap? **Recommended: no** — the 160-day window
+   `statement_date_problems` gap? **Decided: no** (tdw accepted the
+   recommendation) — the 160-day window
    bound is a different rule (row inclusion, not statement-date sanity)
    and must be wider to catch back-dated rows; the plan says so in the
    comment and in IMPORT_COMMANDS.md.
-3. Is the lower bound inclusive ("on or after")? **Recommended: yes**, as
-   the task states; the 160-day test uses Jul 23 dropped / Jul 25 kept to
-   avoid a brittle exact-boundary assertion.
+3. Is the lower bound inclusive ("on or after")? **Decided: yes** (tdw
+   accepted the recommendation), as the task states; the 160-day test uses
+   Jul 23 dropped / Jul 25 kept to avoid a brittle exact-boundary assertion.
+
+## Decisions (tdw, Oct 29)
+
+tdw accepts the recommended answers to all three open questions:
+
+1. **No `CASH-LIEU` label change.** It stays labelled `OTHER` (with a
+   warning log). The cash gate is type-agnostic and keeps the credit;
+   `OTHER` only warns in the ledger path, and the CSV Activity import
+   (master for transactions) is untouched. Revisit only if step 5 shows the
+   VL emits a label that gets dropped.
+2. **No alignment with `statement_date_problems`.** The 160-day fallback
+   bound stays a separate rule (row inclusion, not statement-date sanity)
+   and is deliberately wider than the 1–100-day gap check so back-dated
+   rows survive; the comment in `_coerce_response` and
+   `docs/IMPORT_COMMANDS.md` say so.
+3. **Lower bound inclusive** ("on or after"). The 160-day test uses
+   Jul 23 dropped / Jul 25 kept to avoid a brittle exact-boundary
+   assertion.

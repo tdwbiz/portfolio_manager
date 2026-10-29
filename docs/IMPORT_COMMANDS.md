@@ -58,7 +58,14 @@ as well (field/currency/symbol names only — never account numbers).
 - The "Trades For Future Settlement" table below Account Activity is ignored,
   and any transaction dated outside the statement's own window is dropped
   before the cash gate; the per-section drop count is printed next to the
-  cash-gate line (counts only, never dates or descriptions).
+  cash-gate line (counts only, never dates or descriptions). The window
+  starts **60 days before the Date of Last Statement** (or **160 days before
+  the statement date** when no last-statement date is printed) so back-dated
+  rows RBC prints inside a monthly statement — spin-off distributions and
+  cash-in-lieu credits printed "AS OF" the previous month — are kept; this
+  bound is deliberately wider than the 1–100-day statement-date gap check.
+  The upper bound is unchanged: rows dated after the statement date (e.g.
+  future-settlement trades) are still dropped (plan `vl-window-backdated`).
 - A DIVIDEND row may carry both the gross CREDIT and the NRT withholding
   DEBIT on the same row. Both amounts are kept and the cash gate nets them.
 - The VL parser never moves an amount between the DEBIT and CREDIT columns —

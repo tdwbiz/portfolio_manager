@@ -263,7 +263,7 @@ class RbcCsvParserTests(TestCase):
             ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
              '10', '166.62', 'October 10, 2025', '90000001',
              '-1666.20', 'CAD'],
-            ['October 15, 2025', 'Div Reinvest', 'RBF2010', 'RBF 2010',
+            ['October 15, 2025', 'Dividends', 'RBF2010', 'RBF 2010',
              '100', '10.00', 'October 17, 2025', '90000001',
              '1000.00', 'CAD'],
         ])

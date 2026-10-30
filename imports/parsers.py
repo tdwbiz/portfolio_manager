@@ -77,19 +77,37 @@ _RBC_TYPE_MAP: dict[str, tuple[str, str]] = {
 }
 
 
-def _normalize_type(raw: str, type_map: dict[str, tuple[str, str]]) -> tuple[str, str]:
+def _normalize_type(raw: str, type_map: dict[str, tuple[str, str]],
+                    auto_create: bool = True) -> tuple[str | None, str | None]:
     """Return (code, label) for a raw broker type string.
 
-    Uses the TransactionType registry to auto-create unknown types.
-    Falls back to a sanitised uppercase code for any unknown type so that
-    future broker inventions are stored without requiring a code change.
+    When ``auto_create`` is true (IB path), unknown types fall back to a
+    sanitised uppercase code and the TransactionType registry auto-creates
+    them, so future broker inventions are stored without a code change.
+
+    When ``auto_create`` is false (RBC path), an activity string not in
+    ``type_map`` returns ``(None, None)`` — the caller rejects the row
+    instead of inventing a type (plan step 4).
     """
     from core.models import TransactionType
 
     if raw in type_map:
         code, label = type_map[raw]
-        TransactionType.auto_create_or_get(code, label)
+        if auto_create:
+            TransactionType.auto_create_or_get(code, label)
         return (code, label)
+
+    # Case-insensitive fallback (e.g. 'buy' → 'Buy').
+    key = raw.strip().lower()
+    for map_key, mapped in type_map.items():
+        if map_key.lower() == key:
+            code, label = mapped
+            if auto_create:
+                TransactionType.auto_create_or_get(code, label)
+            return (code, label)
+
+    if not auto_create:
+        return (None, None)
 
     code = re.sub(r'[^A-Z0-9]', '_', raw.upper())[:20].strip('_') or 'OTHER'
     label = raw
@@ -586,7 +604,16 @@ def parse_rbc_csv(file_path: str,
                             amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
                     continue
 
-                type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
+                # RBC path: never invent a TransactionType — an activity
+                # string not in _RBC_TYPE_MAP rejects the row (plan step 4).
+                type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP,
+                                                        auto_create=False)
+                if type_code is None:
+                    logger.warning("Row %d: Unknown activity type '%s'", row_num, activity)
+                    _reject('Unknown activity type: ' + activity, date=_cell('date'),
+                            symbol=_cell('symbol'), quantity=_cell('quantity'), price=_cell('price'),
+                            amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
+                    continue
 
                 trade_date = parse_csv_date(_cell('date'))
                 if trade_date is None:

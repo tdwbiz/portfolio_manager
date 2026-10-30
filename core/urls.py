@@ -42,7 +42,11 @@ from .views_reports import (
 )
 
 # Exception views
-from .views_exceptions import exception_detail, exceptions_list
+from .views_exceptions import (
+    exception_detail,
+    exceptions_coverage,
+    exceptions_list,
+)
 
 # Transaction views
 from .views_transactions import (
@@ -107,6 +111,11 @@ urlpatterns = [
     path("accounts/<int:pk>/delete/", account_delete, name="account_delete"),
     path("annual-reports/", annual_reports_view, name="annual_reports"),
     path("exceptions/", exceptions_list, name="exceptions_list"),
+    path(
+        "exceptions/coverage/",
+        exceptions_coverage,
+        name="exceptions_coverage",
+    ),
     path(
         "exceptions/<int:pk>/",
         exception_detail,

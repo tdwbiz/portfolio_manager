@@ -1,6 +1,6 @@
 from django.conf import settings
 
-from .models import BrandingConfig
+from .models import BrandingConfig, MonthlyException
 
 
 def branding(request):
@@ -21,3 +21,17 @@ def alert_badge(request):
     except Exception:
         count = 0
     return {'unacknowledged_alert_count': count}
+
+
+def exception_badge(request):
+    """Add open-exception count to all templates (one COUNT query per page).
+
+    Anonymous users get no key at all (the navbar item is hidden for them).
+    """
+    if not request.user.is_authenticated:
+        return {}
+    return {
+        'open_exception_count': MonthlyException.objects.filter(
+            status="open"
+        ).count()
+    }

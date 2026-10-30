@@ -140,6 +140,20 @@
                                 Reports
                             </a>
                         </li>
+                        {% if user.is_authenticated %}
+                        <li class="nav-item">
+                            <a
+                                class="nav-link {% if request.resolver_match.url_name == 'exceptions_list' %}active{% endif %}"
+                                href="{% url 'exceptions_list' %}"
+                            >
+                                <i class="bi bi-exclamation-circle"></i>
+                                Exceptions
+                                {% if open_exception_count %}
+                                <span class="badge bg-danger">{{ open_exception_count }}</span>
+                                {% endif %}
+                            </a>
+                        </li>
+                        {% endif %}
                         <li class="nav-item dropdown">
                             <a
                                 class="nav-link dropdown-toggle"

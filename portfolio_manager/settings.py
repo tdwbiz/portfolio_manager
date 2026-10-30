@@ -85,6 +85,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "core.context_processors.branding",
                 "core.context_processors.alert_badge",
+                "core.context_processors.exception_badge",
             ],
         },
     },

@@ -326,6 +326,29 @@ def test_new_currency_section_with_zero_begin_is_not_a_failure(account):
 
 
 @pytest.mark.django_db
+def test_gap_between_printed_and_stored_statements_is_a_note(account):
+    # The printed last statement is Dec 31, but the previous *stored*
+    # statement is Jan 31: statements are missing in between, so the
+    # begin/end totals are not compared — a GAP note is reported instead.
+    # Cash and holdings are still checked over the whole span (real-data
+    # fix 6).
+    jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    feb = make_monthly(account, date(2025, 2, 28), last_stmt=date(2024, 12, 31),
+                       begin=Decimal("250"), end=Decimal("300"))
+    cash(feb, Decimal("150"))
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("50"),
+            settlement=date(2025, 2, 12))
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2025, 2, 28))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+    gap_notes = [n for n in res.notes if n.startswith("GAP")]
+    assert len(gap_notes) == 1
+    assert "2025-01-31" in gap_notes[0] and "2024-12-31" in gap_notes[0]
+
+
+@pytest.mark.django_db
 def test_no_csv_before_first_and_after_last_settlement():
     # Global coverage bounds (decision 2): one transaction on ACCOUNT_B in
     # March 2025 defines the whole window.

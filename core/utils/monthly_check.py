@@ -165,7 +165,10 @@ def check_chain(cur_row, prev_group):
     When ``last_statement_date`` is NULL the date comparison is skipped and
     a note is added instead; a currency section new for the account (no
     previous section of that currency) is no exception when its begin total
-    is 0 (real-data fix 4).
+    is 0 (real-data fix 4). The begin/end totals are compared only when
+    ``last_statement_date`` equals the previous stored statement date; when
+    statements are missing in between a GAP note is reported instead, since
+    market values move over the missing months (real-data fix 6).
     """
     failures = []
     notes = []
@@ -183,19 +186,24 @@ def check_chain(cur_row, prev_group):
                 f"begin total 0 — not an exception"
             )
         return failures, notes
-    diff = cur_row.begin_total_market_value - prev_row.end_total_market_value
-    if abs(diff) > AMOUNT_TOL:
-        failures.append(
-            f"CHAIN: begin_total_market_value {cur_row.begin_total_market_value} "
-            f"!= previous end_total_market_value {prev_row.end_total_market_value} "
-            f"(diff {diff})"
-        )
-    if cur_row.last_statement_date is None:
+    if cur_row.last_statement_date == prev_row.statement_date:
+        diff = cur_row.begin_total_market_value - prev_row.end_total_market_value
+        if abs(diff) > AMOUNT_TOL:
+            failures.append(
+                f"CHAIN: begin_total_market_value {cur_row.begin_total_market_value} "
+                f"!= previous end_total_market_value {prev_row.end_total_market_value} "
+                f"(diff {diff})"
+            )
+    elif cur_row.last_statement_date is None:
         notes.append("last statement date unknown")
-    elif cur_row.last_statement_date != prev_row.statement_date:
-        failures.append(
-            f"CHAIN: last_statement_date {cur_row.last_statement_date} "
-            f"!= previous statement_date {prev_row.statement_date}"
+    else:
+        # The printed last statement is not the previous stored statement:
+        # statements are missing in between, so the totals are not compared.
+        notes.append(
+            f"GAP: previous stored statement {prev_group.statement_date} but "
+            f"printed last statement date {cur_row.last_statement_date} — "
+            f"begin/end totals not compared (market values move over the "
+            f"missing months)"
         )
     return failures, notes
 

@@ -75,18 +75,18 @@ def exceptions_list(request):
     first (category == "TAXABLE"), then account name, statement_date,
     kind. Status counts are computed over the filtered queryset.
     """
-    qs = _apply_list_filters(
-        MonthlyException.objects.all()
-        .select_related("account")
-        .annotate(status_rank=_STATUS_RANK, taxable=_TAXABLE),
-        request,
-    ).order_by(
+    filtered = _apply_list_filters(
+        MonthlyException.objects.all().select_related("account"), request
+    )
+    # Counts come from the clean (unannotated, unsorted) queryset: the list
+    # annotations and ordering would otherwise leak into the GROUP BY.
+    status_counts = {s: 0 for s, _ in MonthlyException.STATUS_CHOICES}
+    for row in filtered.values("status").annotate(n=Count("pk")):
+        status_counts[row["status"]] = row["n"]
+
+    qs = filtered.annotate(status_rank=_STATUS_RANK, taxable=_TAXABLE).order_by(
         "status_rank", "-taxable", "account__name", "statement_date", "kind"
     )
-
-    status_counts = {s: 0 for s, _ in MonthlyException.STATUS_CHOICES}
-    for row in qs.values("status").annotate(n=Count("pk")):
-        status_counts[row["status"]] = row["n"]
 
     context = {
         "exceptions": qs,

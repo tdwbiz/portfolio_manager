@@ -302,10 +302,23 @@ def align_cash_rows(csv_txs, pdf_txs):
     both sides — they carry no cash and only obscure the real differences
     (real-data fix 5). Diagnostics only — RbcMonthlyTransaction is unreliable
     and never used for the check itself.
+
+    The CSV side may contain unsaved Transactions (the fill's in-memory rows,
+    ``txs`` override): their ``pk`` is None, so the sort key uses ``pk or 0``
+    plus a stable index — sorting by raw ``pk`` raised TypeError on real data
+    (real-data fix, Oct 30: TOM_TFSA 2020-12).
     """
     unmatched_pdf = [p for p in pdf_txs if p.credit - p.debit != 0]
     unmatched_csv = []
-    for tx in sorted(csv_txs, key=lambda t: (t.date, t.pk)):
+    indexed = list(enumerate(csv_txs))
+    for _, tx in sorted(
+        indexed,
+        key=lambda pair: (
+            pair[1].date,
+            pair[1].pk if pair[1].pk is not None else 0,
+            pair[0],
+        ),
+    ):
         if tx.amount == 0:
             continue
         best = None

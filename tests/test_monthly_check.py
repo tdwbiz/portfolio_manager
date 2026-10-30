@@ -20,6 +20,7 @@ from core.models import (
 )
 from core.utils.account_fingerprint import fingerprint_account_number
 from core.utils.monthly_check import (
+    align_cash_rows,
     check_statement,
     csv_coverage_bounds,
     group_statements,
@@ -578,3 +579,40 @@ def test_settlement_date_after_statement_date(account):
     mar_res = cad(checks, "ACCOUNT_A", date(2025, 3, 31))
     assert feb_res.verdict == "PASS" and feb_res.failures == []
     assert mar_res.verdict == "PASS" and mar_res.failures == []
+
+
+@pytest.mark.django_db
+def test_align_cash_rows_accepts_unsaved_transactions(account):
+    # Real-data fix (Oct 30): the fill passes in-memory rows (pk=None) via
+    # the txs override; sorting by raw pk raised TypeError when an unsaved
+    # and a saved row shared a date (TOM_TFSA 2020-12).
+    d = date(2025, 2, 5)
+    stmt = BrokerStatement.objects.create(
+        source="RBC", file_date=d, raw_filename="t.csv"
+    )
+    saved = Transaction.objects.create(
+        statement=stmt, account=account, date=d, settlement_date=d,
+        symbol="", type="DEP", quantity=Decimal("0"), price=Decimal("0"),
+        commission=Decimal("0"), amount=Decimal("10"), currency="CAD",
+    )
+    unsaved = Transaction(
+        account=account, date=d, settlement_date=d,
+        symbol="", type="DEP", quantity=Decimal("0"), price=Decimal("0"),
+        commission=Decimal("0"), amount=Decimal("20"), currency="CAD",
+    )
+    assert unsaved.pk is None
+
+    # No PDF rows: both come back unmatched, no TypeError.
+    unmatched_csv, unmatched_pdf = align_cash_rows([unsaved, saved], [])
+    assert {t.amount for t in unmatched_csv} == {Decimal("10"), Decimal("20")}
+    assert unmatched_pdf == []
+
+    # One PDF row of net 10: the sort is deterministic (pk or 0, then the
+    # stable index) and exactly one CSV row matches.
+    pdf = RbcMonthlyTransaction(
+        rbc_monthly=None, date=d, activity_type="DEPOSIT",
+        credit=Decimal("10"), debit=Decimal("0"),
+    )
+    unmatched_csv, unmatched_pdf = align_cash_rows([unsaved, saved], [pdf])
+    assert len(unmatched_csv) == 1
+    assert unmatched_pdf == []

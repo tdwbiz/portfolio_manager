@@ -211,3 +211,33 @@ tdw accepted the recommended answer for every open question:
    its (non-NULL) difference changes or tdw reopens it manually.
 6. **FIRST/NO_CSV** are stored as `MonthlyCheckResult` rows too, so the table
    is a complete per-month picture; they never produce exceptions.
+
+## Implemented (Pi, Oct 30)
+
+All seven steps landed on `feature/monthly-check-store`, one commit each:
+
+1. Models `MonthlyCheckResult` + `MonthlyException` in `core/models.py`,
+   migration `0046_monthlycheckresult_monthlyexception.py`.
+2. `core/utils/monthly_check_store.py`: `exceptions_from_check` (grouping,
+   QUANTITY deduplicated across currencies, identical pooled lines stored
+   once) and `import_exceptions_from_parked` (unknown account names /
+   unparsable names come back as skipped).
+3. `store_results` / `store_exceptions`: upserts, resolve-vanished, reopen
+   on changed non-NULL difference with a note in detail; NULL difference
+   never auto-reopens; resolved-found-again returns to open.
+4. `--store` flag: results + exceptions persisted (check and import
+   exceptions for the same account+date stored together); IMPORT from the
+   parked list only, conflicts excluded, unknown accounts printed as
+   skipped; `--out` optional with `--store`, still required in report mode.
+5. `--accept` (filters `--id/--account/--kind/--ref` exact or `PREFIX*`,
+   `--from/--to`; reason required; per-account/kind counts) and `--reopen
+   --id N --reason TEXT`.
+6. Read-only admin for both models (`ReadOnlyMixin`: no add/change/delete,
+   all fields readonly); changelists show the account name only.
+7. This note.
+
+Tests: `core/tests/test_monthly_check_store.py` (22 cases: grouping, store
+rules, command-level `--store`/`--accept`/`--reopen`, admin rendering).
+Deviations: none material — a manual `--reopen` also clears `resolved_at`
+and `accepted_at` (consistency with the resolve logic); everything else is
+as planned. Full suite green (Django + pytest).

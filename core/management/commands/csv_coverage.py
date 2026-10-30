@@ -14,6 +14,7 @@ Plan: docs/plans/csv-coverage.md. This command writes nothing to the database.
 """
 
 import os
+from collections import Counter
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -27,6 +28,30 @@ from core.utils.account_fingerprint import (
 def _fmt(value):
     """Format an optional date for the report ('-' when missing)."""
     return str(value) if value is not None else '-'
+
+
+def row_identity(trade: dict) -> tuple:
+    """Identity of a parsed row for overlap/dedup (plan, decision 4).
+
+    All parsed fields except ``row_number`` — date, settlement_date, symbol,
+    type, quantity, price, commission, amount, currency, notes — plus the
+    row's account id. The account id is used internally only and must never
+    be printed or written; without it, equal rows in two different accounts
+    would count as one. Values are compared, never displayed.
+    """
+    return (
+        trade['account_id'],
+        trade['date'],
+        trade.get('settlement_date'),
+        trade['symbol'],
+        trade['type'],
+        trade['quantity'],
+        trade['price'],
+        trade['commission'],
+        trade['amount'],
+        trade['currency'],
+        trade['notes'],
+    )
 
 
 class Command(BaseCommand):
@@ -130,6 +155,51 @@ class Command(BaseCommand):
             trades_by_file[name] = trades
 
         # ------------------------------------------------------------------
+        # Per-account analysis: group rows by resolved account (fingerprint).
+        # The fingerprint is a lookup key only; the report shows names.
+        # ------------------------------------------------------------------
+        account_data = {}
+        for fname, trades in trades_by_file.items():
+            for t in trades:
+                fp = fingerprint_account_number(t['account_id'])
+                acct_name = name_map.get(fp)
+                if acct_name is None:
+                    continue  # unresolvable — counted per file, not analysed
+                acct = account_data.setdefault(
+                    fp, {'name': acct_name, 'files': {}}
+                )
+                acct['files'].setdefault(fname, []).append(t)
+
+        # Overlaps between file pairs (same account): overlapping Date range
+        # and how many rows inside it are identical in both files.
+        overlap_lines = []
+        for fp in sorted(account_data, key=lambda f: account_data[f]['name']):
+            acct = account_data[fp]
+            fnames = sorted(acct['files'])
+            pairs = []
+            for i in range(len(fnames)):
+                for j in range(i + 1, len(fnames)):
+                    fa, fb = fnames[i], fnames[j]
+                    ta, tb = acct['files'][fa], acct['files'][fb]
+                    start = max(min(t['date'] for t in ta),
+                                min(t['date'] for t in tb))
+                    end = min(max(t['date'] for t in ta),
+                              max(t['date'] for t in tb))
+                    if start > end:
+                        continue
+                    ca = Counter(row_identity(t) for t in ta
+                                 if start <= t['date'] <= end)
+                    cb = Counter(row_identity(t) for t in tb
+                                 if start <= t['date'] <= end)
+                    identical = sum(min(ca[k], cb[k])
+                                    for k in set(ca) & set(cb))
+                    pairs.append(
+                        f'    {fa} x {fb}: {_fmt(start)} .. {_fmt(end)}, '
+                        f'{identical} identical rows'
+                    )
+            overlap_lines.append((acct['name'], pairs))
+
+        # ------------------------------------------------------------------
         # Short summary (stdout)
         # ------------------------------------------------------------------
         read = [r for r in file_reports if not r.get('skipped') and not r.get('error')]
@@ -150,6 +220,14 @@ class Command(BaseCommand):
             f'Unknown-account rows: {total_unknown}, '
             f'practice rows skipped: {total_practice}'
         )
+        for acct_name, pairs in overlap_lines:
+            self.stdout.write(f'Account: {acct_name}')
+            if pairs:
+                self.stdout.write('  overlaps:')
+                self.stdout.write('\n'.join(pairs))
+            else:
+                self.stdout.write('  overlaps: none')
+
         for r in file_reports:
             if r.get('skipped'):
                 self.stdout.write(

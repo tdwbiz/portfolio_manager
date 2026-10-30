@@ -484,6 +484,46 @@ class ImportCsvLayoutAndReportTests(TestCase):
         self.assertEqual(sorted(os.listdir(self.inbox_dir)),
                          ['bad.csv', 'good.csv'])
 
+    def test_exact_cross_file_duplicate_never_near_duplicate(self) -> None:
+        """A row that has an exact duplicate in the other file is never
+        reported as a near-duplicate (dry-run fix D). Two rows of one file
+        share account/date/symbol/value and both are exactly duplicated in
+        the other file — no spurious cross-pairing reports."""
+        rows = ('"January 15, 2024","Dividends","VDY","Vanguard Dividend '
+                'ETF","1000","0.15","January 17, 2024","90000001",'
+                '"150.00","CAD","DIV ON 1000 SHS"\n'
+                '"January 15, 2024","Distribution","VDY","Vanguard '
+                'Dividend ETF","1000","0.15","January 17, 2024",'
+                '"90000001","150.00","CAD","DIST ON 1000 SHS"\n')
+        self._write('file_a.csv', RBC_CSV_HEADER + rows)
+        self._write('file_b.csv', RBC_CSV_HEADER + rows)
+
+        out, _ = self._run(dry_run=True)
+
+        self.assertNotIn('Near-duplicates', out)
+
+    def test_row_with_exact_twin_in_other_file_not_reported(self) -> None:
+        """file_a's row is exactly duplicated in file_b, which also carries
+        a near-duplicate variant: the twin-bearing row is never reported
+        (dry-run fix D)."""
+        self._write('file_a.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.",'
+                      '"5","2800.00","January 17, 2024","90000001",'
+                      '"13990.05","USD","Buy GOOGL"\n')
+        self._write('file_b.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.",'
+                      '"5","2800.00","January 17, 2024","90000001",'
+                      '"13990.05","USD","Buy GOOGL"\n'
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.",'
+                      '"6","2800.00","January 17, 2024","90000001",'
+                      '"13990.05","USD","Buy GOOGL"\n')
+
+        out, _ = self._run(dry_run=True)
+
+        self.assertNotIn('Near-duplicates', out)
+
     def test_corporate_action_types_import_without_new_transactiontype(
             self) -> None:
         """Reorganization / Return of Capital / Adjustment rows import under

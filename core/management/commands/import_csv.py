@@ -442,9 +442,25 @@ class Command(BaseCommand):
         )
 
 
+_NEAR_DUP_FIELDS = ('account', 'date', 'symbol', 'value',
+                     'type', 'quantity', 'price', 'currency',
+                     'settlement_date')
+
+
+def _row_signature(row: dict) -> tuple:
+    """Full data signature of a dry-run row (all fields except file/line)."""
+    return tuple(row[f] for f in _NEAR_DUP_FIELDS)
+
+
 def _find_near_duplicates(reports: list) -> list[tuple[dict, dict, list[str]]]:
     """Rows in different files with the same account, date, symbol and value
     that differ in another field (plan step 6).
+
+    A row that has an exact duplicate in the other file is never reported
+    as a near-duplicate (dry-run fix D): without this, two rows of one
+    file that share account/date/symbol/value with each other and are both
+    exactly duplicated in the other file produce spurious cross-pairing
+    reports. Any pair involving such a row is skipped.
 
     Returns ``(row_a, row_b, differing_fields)`` tuples. Rows are names,
     dates and counts only — never Account column values.
@@ -455,6 +471,20 @@ def _find_near_duplicates(reports: list) -> list[tuple[dict, dict, list[str]]]:
             key = (row['account'], row['date'], row['symbol'], row['value'])
             groups.setdefault(key, []).append(row)
 
+    # Signatures per file: a row whose signature also appears in a different
+    # file has an exact duplicate there and is never reported (fix D).
+    sigs_by_file: dict[str, set] = {}
+    for report in reports:
+        for row in report.rows:
+            sigs_by_file.setdefault(row['filename'], set()).add(
+                _row_signature(row))
+
+    def has_exact_duplicate_elsewhere(row: dict) -> bool:
+        sig = _row_signature(row)
+        return any(sig in sigs
+                   for fname, sigs in sigs_by_file.items()
+                   if fname != row['filename'])
+
     compare_fields = ('type', 'quantity', 'price', 'currency', 'settlement_date')
     near_dups: list[tuple[dict, dict, list[str]]] = []
     for rows in groups.values():
@@ -463,6 +493,9 @@ def _find_near_duplicates(reports: list) -> list[tuple[dict, dict, list[str]]]:
         for i, a in enumerate(rows):
             for b in rows[i + 1:]:
                 if a['filename'] == b['filename']:
+                    continue
+                if (has_exact_duplicate_elsewhere(a)
+                        or has_exact_duplicate_elsewhere(b)):
                     continue
                 diffs = [f for f in compare_fields if a[f] != b[f]]
                 if diffs:

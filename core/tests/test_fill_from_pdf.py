@@ -392,6 +392,78 @@ class FillFromPdfTest(TestCase):
         self.assertEqual(res.verdict, "PASS")
 
     # ------------------------------------------------------------------
+    # Real-data fix (Oct 30) 4: timing pairs — an unmatched PDF row (or the
+    # rows of one date and symbol by their net amount) that the CSV already
+    # has dated within 35 days outside the period is not filled, reported
+    # ------------------------------------------------------------------
+
+    def test_timing_pair_single_row_not_filled(self):
+        # The statement's closing balance includes the dividend, but the
+        # CSV dates it Jan 28 — inside the January period, 3 days before
+        # this one starts. Filling it again would double-count the cash.
+        feb = self.feb(Decimal("250"), acme=Decimal("100"))
+        self.base_period(feb)
+        make_tx(self.account, date(2025, 1, 28), "DIV", Decimal("100"),
+                symbol="ACME", settlement=date(2025, 1, 28))
+        pdf_tx(feb, date(2025, 2, 5), "DIVIDEND", credit=Decimal("100"),
+               symbol="ACME", description="DIV ON 100 SHS")
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        before = Transaction.objects.count()
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("timing pair with CSV row dated 2025-01-28", text)
+        self.assertIn("not filled", text)
+        self.assertIn("left unchanged (after-check still fails)", text)
+        self.assertEqual(Transaction.objects.count(), before)
+        self.assertFalse(
+            Transaction.objects.filter(type="DIV", date=date(2025, 2, 5)).exists()
+        )
+
+    def test_timing_pair_group_by_date_and_symbol(self):
+        # A dividend plus its NRT tax as two PDF rows of one date and symbol:
+        # taken together by their net amount (31.12 - 4.66 = 26.46) they match
+        # the CSV row dated outside the period, so neither is filled.
+        feb = self.feb(Decimal("176.46"), acme=Decimal("100"))
+        self.base_period(feb)
+        make_tx(self.account, date(2025, 1, 28), "DIV", Decimal("26.46"),
+                symbol="ACME", settlement=date(2025, 1, 28))
+        pdf_tx(feb, date(2025, 2, 15), "DIVIDEND", credit=Decimal("31.12"),
+               symbol="ACME", description="DIV ON 100 SHS")
+        pdf_tx(feb, date(2025, 2, 15), "FEE", debit=Decimal("4.66"),
+               symbol="ACME", description="NRT WITHHOLDING")
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        before = Transaction.objects.count()
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("net 26.46: timing pair with CSV row dated 2025-01-28",
+                      text)
+        self.assertIn("left unchanged (after-check still fails)", text)
+        self.assertEqual(Transaction.objects.count(), before)
+        self.assertFalse(Transaction.objects.filter(type="FEE").exists())
+
+    def test_row_outside_35_days_is_not_a_timing_pair(self):
+        # Same shape as the single-row case, but the CSV row is 42 days
+        # before the period starts: no timing pair, the PDF row is filled.
+        feb = self.feb(Decimal("250"), acme=Decimal("100"))
+        self.base_period(feb)
+        make_tx(self.account, date(2024, 12, 20), "DIV", Decimal("100"),
+                symbol="ACME", settlement=date(2024, 12, 20))
+        pdf_tx(feb, date(2025, 2, 5), "DIVIDEND", credit=Decimal("100"),
+               symbol="ACME", description="DIV ON 100 SHS")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertNotIn("timing pair", text)
+        self.assertIn("filled 1", text)
+        div = Transaction.objects.get(type="DIV", date=date(2025, 2, 5))
+        self.assertEqual(div.amount, Decimal("100.00"))
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    # ------------------------------------------------------------------
     # Decision 1: zero-net rows with a quantity are matched by
     # date/symbol/quantity and filled when unmatched
     # ------------------------------------------------------------------

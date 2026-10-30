@@ -14,7 +14,10 @@ Plan: docs/plans/fill-from-pdf.md (Decisions: tdw, Oct 30).
 """
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from decimal import Decimal
+
+from django.db.models import Q
 
 from core.models import (
     BrokerStatement,
@@ -23,6 +26,7 @@ from core.models import (
     Transaction,
 )
 from core.utils.monthly_check import (
+    AMOUNT_TOL,
     QTY_TOL,
     SYMBOL_ALIASES,
     _option_code_map,
@@ -62,6 +66,10 @@ MAPPING = {
 # Date slack for the zero-net quantity match (decision 1): same as
 # align_cash_rows.
 DATE_SLACK_DAYS = 5
+
+# How far outside the period an existing CSV row may be dated while still
+# counting as the timing pair of an unmatched PDF row (real-data fix, Oct 30).
+TIMING_PAIR_DAYS = 35
 
 
 def derive_pdf_symbol(pdf, prev_row=None):
@@ -200,6 +208,85 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
     return out
 
 
+def _timing_pair_match(account_pk, currency, net, period_start, period_end):
+    """Existing CSV row with the same net amount, dated outside this period.
+
+    Real-data fix (Oct 30): RBC sometimes prints a flow in the next
+    statement's month while the CSV dates it in the previous one (the dry run
+    would have added SUSAN_RRIF VO 281.29 in July 2020 while the CSV has it
+    in June, and SUSAN_TFSA QQQ 31.12 minus 4.66 in Nov 2019 while the CSV
+    has 26.46 in October). Such a row must not be filled again — it is
+    reported as a timing pair instead.
+
+    Returns the matching Transaction (effective date outside
+    (period_start, period_end] and within ``TIMING_PAIR_DAYS`` of either
+    boundary, same account/currency/net amount ±0.005), else None.
+    """
+    lo = min(period_start, period_end) - timedelta(days=TIMING_PAIR_DAYS)
+    hi = max(period_start, period_end) + timedelta(days=TIMING_PAIR_DAYS)
+    qs = Transaction.objects.filter(
+        Q(date__gte=lo, date__lte=hi)
+        | Q(settlement_date__gte=lo, settlement_date__lte=hi),
+        account_id=account_pk,
+        currency=currency,
+    )
+    for tx in qs:
+        eff = effective_tx_date(tx)
+        if period_start < eff <= period_end:
+            continue
+        dist = min(abs((eff - period_start).days), abs((period_end - eff).days))
+        if dist > TIMING_PAIR_DAYS:
+            continue
+        if abs(net - tx.amount) <= AMOUNT_TOL:
+            return tx
+    return None
+
+
+def split_timing_pairs(unmatched_cash, account_pk, currency, period_start,
+                       period_end):
+    """Split unmatched cash PDF rows into (rows_to_fill, report lines).
+
+    Real-data fix (Oct 30): an unmatched row — or the PDF rows of one date
+    and symbol taken together by their net amount (a dividend plus its NRT
+    tax) — that matches an existing Transaction of the same account and
+    currency with the same net amount dated within 35 days but outside this
+    period is not filled; it is reported as
+    'timing pair with CSV row dated <date>'. The group check runs first (a
+    non-zero group sum), then each remaining row individually.
+    """
+    groups = {}
+    for pdf in unmatched_cash:
+        groups.setdefault((pdf.date, (pdf.symbol or "").strip()), []).append(pdf)
+    keep = []
+    lines = []
+    for (d, sym), rows in groups.items():
+        label = f"{d} {sym or '(no symbol)'}"
+        if len(rows) > 1:
+            net = sum(((r.credit or Decimal("0")) - (r.debit or Decimal("0")))
+                      for r in rows)
+            if net != 0:
+                tx = _timing_pair_match(account_pk, currency, net,
+                                        period_start, period_end)
+                if tx is not None:
+                    lines.append(
+                        f"{label} net {net}: timing pair with CSV row dated "
+                        f"{tx.date}"
+                    )
+                    continue
+        for r in rows:
+            rnet = (r.credit or Decimal("0")) - (r.debit or Decimal("0"))
+            tx = _timing_pair_match(account_pk, currency, rnet,
+                                    period_start, period_end)
+            if tx is not None:
+                lines.append(
+                    f"{label} net {rnet}: timing pair with CSV row dated "
+                    f"{tx.date}"
+                )
+            else:
+                keep.append(r)
+    return keep, lines
+
+
 def normalise_symbol(symbol, option_map):
     """One comparison key per symbol (same rules as the monthly check).
 
@@ -230,8 +317,11 @@ class PeriodPlan:
     PDF rows to fill in (unmatched cash rows + unmatched zero-net rows with a
     quantity). ``new_rows``: mapped unsaved Transactions (None when stopped).
     ``unmapped``: one line per unmapped activity type — non-empty means the
-    period stops and nothing changes for it. ``after``: simulated verdicts
-    (None when stopped); the period is filled only if every currency PASSES.
+    period stops and nothing changes for it. ``timing_pairs``: one report
+    line per unmatched PDF row left unfilled because the CSV already has it
+    dated just outside the period (real-data fix, Oct 30). ``after``:
+    simulated verdicts (None when stopped); the period is filled only if
+    every currency PASSES.
     """
 
     group: object  # StatementGroup
@@ -241,6 +331,7 @@ class PeriodPlan:
     unmatched_pdf: list = field(default_factory=list)
     new_rows: object = None  # [Transaction] or None when stopped
     unmapped: list = field(default_factory=list)
+    timing_pairs: list = field(default_factory=list)
     after: object = None  # StatementCheck or None when stopped
 
 
@@ -266,6 +357,9 @@ def plan_period(group, prev_group, bounds, account):
     candidates = [tx for tx in all_txs if tx.statement_id not in slice_pks]
 
     unmatched_pdf = []
+    timing_pairs = []
+    period_start = prev_group.statement_date
+    period_end = group.statement_date
     for cur in sorted(group.rows):
         pdf_txs = list(
             RbcMonthlyTransaction.objects.filter(rbc_monthly=group.rows[cur])
@@ -273,6 +367,10 @@ def plan_period(group, prev_group, bounds, account):
         )
         cur_candidates = [tx for tx in candidates if tx.currency == cur]
         _unmatched_csv, unmatched_cash = align_cash_rows(cur_candidates, pdf_txs)
+        unmatched_cash, pair_lines = split_timing_pairs(
+            unmatched_cash, group.account_pk, cur, period_start, period_end
+        )
+        timing_pairs.extend(pair_lines)
         _matched_zn, unmatched_zn = match_zero_net_rows(
             cur_candidates, pdf_txs, group.account_pk
         )
@@ -290,6 +388,7 @@ def plan_period(group, prev_group, bounds, account):
             unmatched_pdf=unmatched_pdf,
             new_rows=None,
             unmapped=[str(exc)],
+            timing_pairs=timing_pairs,
             after=None,
         )
 
@@ -302,6 +401,7 @@ def plan_period(group, prev_group, bounds, account):
         unmatched_pdf=unmatched_pdf,
         new_rows=new_rows,
         unmapped=[],
+        timing_pairs=timing_pairs,
         after=after,
     )
 

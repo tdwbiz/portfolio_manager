@@ -234,6 +234,9 @@ class Command(BaseCommand):
             out("  left unchanged")
             return False
 
+        for line in plan.timing_pairs:
+            out(f"  {line} — not filled")
+
         for tx in plan.slice_rows:
             out(f"  remove: {_fmt_tx(tx)}")
         for tx in plan.new_rows:

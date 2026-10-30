@@ -109,6 +109,63 @@ def derive_pdf_symbol(pdf, prev_row=None):
     return matched.pop() if len(matched) == 1 else ""
 
 
+def _holding_deltas(cur_rbc_pk, prev_rbc_pk, currency):
+    """Per-symbol holding quantity changes (cur - prev) between statements.
+
+    Real-data fix 6 (Oct 30): the change of each same-currency holding
+    between the previous stored statement and this one; a holding absent on
+    one side counts as 0 there. Symbols are taken from the holdings' own
+    ``symbol`` field (blank ones are skipped).
+    """
+    def qty_map(pk):
+        return {
+            sym: qty
+            for sym, qty in RbcMonthlyHolding.objects.filter(
+                rbc_monthly_id=pk, currency=currency
+            ).values_list("symbol", "quantity")
+            if (sym or "").strip()
+        }
+
+    cur = qty_map(cur_rbc_pk)
+    prev = qty_map(prev_rbc_pk) if prev_rbc_pk is not None else {}
+    return [
+        (sym, cur.get(sym, Decimal("0")) - prev.get(sym, Decimal("0")))
+        for sym in set(cur) | set(prev)
+    ]
+
+
+def _symbol_by_quantity(pdf, prev_row, tx_type, qty, used):
+    """Symbol from the holdings change when the name match found none.
+
+    Real-data fix 6 (Oct 30): a SELL whose abs(quantity) equals the drop of
+    exactly one holding between the previous stored statement and this one
+    (e.g. BMO 52 to 0) gets that holding's symbol; a BUY whose quantity
+    equals the rise of exactly one holding does the same. Only a unique
+    match counts, and each holding change is used once per period —
+    ``used`` is the set of (rbc_monthly pk, symbol) changes already
+    consumed. Returns '' without a previous statement, or when no holding
+    matches exactly / more than one does.
+    """
+    if tx_type not in ("BUY", "SELL") or not qty:
+        return ""
+    prev_pk = prev_row.pk if prev_row is not None else None
+    if prev_pk is None:
+        return ""
+    direction = Decimal("-1") if tx_type == "SELL" else Decimal("1")
+    target = abs(qty) * direction
+    matches = [
+        sym
+        for sym, delta in _holding_deltas(
+            pdf.rbc_monthly_id, prev_pk, pdf.currency
+        )
+        if delta == target and (pdf.rbc_monthly_id, sym) not in used
+    ]
+    if len(matches) != 1:
+        return ""
+    used.add((pdf.rbc_monthly_id, matches[0]))
+    return matches[0]
+
+
 def _signed_qty(tx_type, qty_sign, qty):
     """Signed quantity for a filled row.
 
@@ -124,13 +181,19 @@ def _signed_qty(tx_type, qty_sign, qty):
     return qty * Decimal(qty_sign)
 
 
-def _base_transaction(account, pdf, prev_row=None):
-    """Common fields of a filled row (statement/tx_hash set by the caller)."""
+def _base_transaction(account, pdf, prev_row=None, symbol=None):
+    """Common fields of a filled row (statement/tx_hash set by the caller).
+
+    ``symbol``: pre-resolved symbol (explicit / name match / holdings
+    change); when None it is derived from the holdings' security names.
+    """
+    if symbol is None:
+        symbol = derive_pdf_symbol(pdf, prev_row)
     return Transaction(
         account=account,
         date=pdf.date,
         settlement_date=pdf.date,
-        symbol=derive_pdf_symbol(pdf, prev_row),
+        symbol=symbol,
         currency=pdf.currency,
         price=pdf.price or Decimal("0"),
         commission=Decimal("0"),
@@ -153,9 +216,11 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
 
     ``prev_group``: the previous statement group of the account — its rows
     let a symbol-less PDF row fall back to the previous stored statement's
-    holdings (real-data fix, Oct 30).
+    holdings (real-data fix, Oct 30) and supply the holdings change for the
+    quantity-based symbol match (real-data fix 6).
     """
     out = []
+    used_symbols = set()  # (rbc_monthly pk, symbol) holding changes consumed
     for pdf in pdf_rows:
         if pdf.activity_type not in MAPPING:
             raise UnmappedActivity(
@@ -171,11 +236,17 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
         net = credit - debit
         qty = pdf.quantity or Decimal("0")
 
+        # Symbol: explicit / holdings name match first, then the holdings
+        # change by quantity; each holding change is used once per period.
+        symbol = derive_pdf_symbol(pdf, prev_row) or _symbol_by_quantity(
+            pdf, prev_row, tx_type, qty, used_symbols
+        )
+
         if net == 0:
             if qty == 0:
                 # Neither cash nor quantity — stays out of the fill.
                 continue
-            tx = _base_transaction(account, pdf, prev_row)
+            tx = _base_transaction(account, pdf, prev_row, symbol=symbol)
             tx.type = tx_type
             tx.quantity = _signed_qty(tx_type, qty_sign, qty)
             tx.amount = Decimal("0")
@@ -185,14 +256,14 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
 
         if credit and debit:
             # NRT withholding: income row (credit) + TAX row (-debit).
-            tx = _base_transaction(account, pdf, prev_row)
+            tx = _base_transaction(account, pdf, prev_row, symbol=symbol)
             tx.type = tx_type
             tx.quantity = _signed_qty(tx_type, qty_sign, qty)
             tx.amount = credit
             tx.amount_cad = credit
             out.append(tx)
 
-            tax = _base_transaction(account, pdf, prev_row)
+            tax = _base_transaction(account, pdf, prev_row, symbol=symbol)
             tax.type = "TAX"
             tax.quantity = Decimal("0")
             tax.amount = -debit
@@ -200,7 +271,7 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
             out.append(tax)
             continue
 
-        tx = _base_transaction(account, pdf, prev_row)
+        tx = _base_transaction(account, pdf, prev_row, symbol=symbol)
         tx.type = tx_type
         tx.quantity = _signed_qty(tx_type, qty_sign, qty)
         tx.amount = net

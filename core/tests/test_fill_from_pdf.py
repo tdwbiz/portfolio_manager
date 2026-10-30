@@ -7,6 +7,7 @@ Plan: docs/plans/fill-from-pdf.md (Decisions: tdw, Oct 30).
 import io
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -21,7 +22,10 @@ from core.models import (
     Transaction,
 )
 from core.utils.account_fingerprint import fingerprint_account_number
-from core.utils.fill_from_pdf import derive_pdf_symbol
+from core.utils.fill_from_pdf import (
+    derive_pdf_symbol,
+    pdf_rows_to_transactions,
+)
 from core.utils.monthly_check import (
     check_statement,
     csv_coverage_bounds,
@@ -117,6 +121,11 @@ def feb_check(account):
     group = next(g for g in groups if g.statement_date == FEB)
     check = check_statement(group, prev_of[id(group)], bounds)
     return next(c for c in check.currencies if c.currency == "CAD")
+
+
+def prev_group_ns(jan):
+    """A stand-in previous statement group with one CAD row."""
+    return SimpleNamespace(rows={"CAD": jan})
 
 
 def run_cmd(*args):
@@ -614,18 +623,103 @@ class FillFromPdfTest(TestCase):
         self.assertEqual(res.verdict, "PASS")
 
     def test_symbolless_row_without_holding_match_fails_after_check(self):
-        # No holding matches the description: the row is filled without a
-        # symbol, the after-check fails, and the period stays unchanged.
+        # Neither the description (name match) nor the quantity (no holding
+        # drops by 37 — ACME goes 100 to 60) yields a symbol: the row is
+        # filled without one, the after-check fails, and the period stays
+        # unchanged.
         feb = self.feb(Decimal("550"), acme=Decimal("60"))
         self.base_period(feb)
-        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
-               quantity=Decimal("40"), price=Decimal("10"),
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("370"),
+               quantity=Decimal("37"), price=Decimal("10"),
                description="SELL SOME UNKNOWN FUND")
 
         before = Transaction.objects.count()
         text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
         self.assertIn("left unchanged (after-check still fails)", text)
         self.assertEqual(Transaction.objects.count(), before)
+
+    # ------------------------------------------------------------------
+    # Real-data fix (Oct 30) 6: symbols by quantity, after the name match
+    # fails — a SELL/BUY whose quantity equals the drop/rise of exactly one
+    # holding between the previous stored statement and this one gets that
+    # holding's symbol; unique match only, each change used once per period
+    # ------------------------------------------------------------------
+
+    def test_symbolless_sell_gets_symbol_from_holding_drop(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()
+        self.named_holding(jan, "BANC OF MONTREAL", "BMO", Decimal("52"))
+        # BMO is gone in February; 100 start + 50 DEP + 468 SELL
+        feb = self.feb(Decimal("618"), acme=None)
+        self.base_period(feb)
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("468"),
+               quantity=Decimal("52"), price=Decimal("9"),
+               description="SELL BANC COMMON SHARES")
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("filled 1", text)
+
+        sell = Transaction.objects.get(type="SELL")
+        self.assertEqual(sell.symbol, "BMO")
+        self.assertEqual(sell.quantity, Decimal("-52"))
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    def test_symbol_by_quantity_buy_rise(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()
+        self.named_holding(jan, "BANC OF MONTREAL", "BMO", Decimal("10"))
+        feb = self.feb(Decimal("100"), acme=None)
+        self.named_holding(feb, "BANC OF MONTREAL", "BMO", Decimal("60"))
+        pdf_tx(feb, date(2025, 2, 10), "BOUGHT", debit=Decimal("500"),
+               quantity=Decimal("50"), price=Decimal("10"),
+               description="BUY MORE")
+
+        txs = pdf_rows_to_transactions(
+            list(RbcMonthlyTransaction.objects.filter(rbc_monthly=feb)
+                 .order_by("date", "pk")),
+            self.account, prev_group_ns(jan),
+        )
+        self.assertEqual(len(txs), 1)
+        self.assertEqual(txs[0].symbol, "BMO")
+
+    def test_symbol_by_quantity_unique_match_used_once_per_period(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()
+        self.named_holding(jan, "BANC OF MONTREAL", "BMO", Decimal("52"))
+        feb = self.feb(Decimal("100"), acme=None)  # BMO is gone in February
+        pdf_tx(feb, date(2025, 2, 10), "SOLD", credit=Decimal("468"),
+               quantity=Decimal("52"), description="SELL FIRST LOT")
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("468"),
+               quantity=Decimal("52"), description="SELL SECOND LOT")
+
+        txs = pdf_rows_to_transactions(
+            list(RbcMonthlyTransaction.objects.filter(rbc_monthly=feb)
+                 .order_by("date", "pk")),
+            self.account, prev_group_ns(jan),
+        )
+        # Only the BMO drop (52 to 0) matches — and it may be used once.
+        self.assertEqual([t.symbol for t in txs], ["BMO", ""])
+
+    def test_symbol_by_quantity_ambiguous_drop_not_guessed(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()
+        self.named_holding(jan, "BANC OF MONTREAL", "BMO", Decimal("52"))
+        self.named_holding(jan, "XYZ FUND", "XYZ", Decimal("52"))
+        feb = self.feb(Decimal("100"), acme=None)  # both gone in February
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("468"),
+               quantity=Decimal("52"), description="SELL SOME LOTS")
+
+        txs = pdf_rows_to_transactions(
+            list(RbcMonthlyTransaction.objects.filter(rbc_monthly=feb)
+                 .order_by("date", "pk")),
+            self.account, prev_group_ns(jan),
+        )
+        # Two holdings drop by 52: not unique, no guess.
+        self.assertEqual(txs[0].symbol, "")
 
     def test_zero_net_units_already_in_csv_are_not_filled(self):
         jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)

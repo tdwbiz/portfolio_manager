@@ -15,9 +15,14 @@ Plan: docs/plans/monthly-check-report.md (Decisions: tdw, Oct 30).
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from django.db.models import Max, Min
+from django.db.models import Max, Min, Q, Sum
 
-from core.models import RbcMonthly, Transaction
+from core.models import (
+    RbcMonthly,
+    RbcMonthlyBalance,
+    RbcMonthlyTransaction,
+    Transaction,
+)
 
 # Cash and chain amounts are compared to the cent.
 AMOUNT_TOL = Decimal("0.005")
@@ -164,6 +169,129 @@ def check_chain(cur_row, prev_group):
     return failures
 
 
+def _period_q(period_start, period_end):
+    """Q filter: effective date (settlement_date, else trade date) in
+    (period_start, period_end] — plan definition of period membership."""
+    return Q(settlement_date__gt=period_start, settlement_date__lte=period_end) | Q(
+        settlement_date__isnull=True, date__gt=period_start, date__lte=period_end
+    )
+
+
+def _trade_date_q(period_start, period_end):
+    """Same window but on the trade date (for the CASH replay diagnostic)."""
+    return Q(date__gt=period_start, date__lte=period_end)
+
+
+def _cash_closing(rbc_monthly_row, currency):
+    """Closing balance of the Cash section for a currency (None if absent)."""
+    bal = RbcMonthlyBalance.objects.filter(
+        rbc_monthly=rbc_monthly_row, account_type="Cash", currency=currency
+    ).first()
+    return None if bal is None else bal.closing_balance
+
+
+def align_cash_rows(csv_txs, pdf_txs):
+    """Greedy one-to-one match of CSV cash rows against PDF activity rows.
+
+    Match rule: equal net amount (±0.005) with ≤ 5 days date slack (CSV row's
+    effective date vs the PDF row's date). Returns (unmatched_csv, unmatched_pdf)
+    where pdf entries are RbcMonthlyTransaction rows and csv entries are
+    Transaction rows. Diagnostics only — RbcMonthlyTransaction is unreliable
+    and never used for the check itself.
+    """
+    unmatched_pdf = list(pdf_txs)
+    unmatched_csv = []
+    for tx in sorted(csv_txs, key=lambda t: (t.date, t.pk)):
+        best = None
+        for pdf in unmatched_pdf:
+            net = pdf.credit - pdf.debit
+            if abs(net - tx.amount) > AMOUNT_TOL:
+                continue
+            if abs((pdf.date - tx.date).days) > 5:
+                continue
+            if best is None or pdf.date < best.date:
+                best = pdf
+        if best is not None:
+            unmatched_pdf.remove(best)
+        else:
+            unmatched_csv.append(tx)
+    return unmatched_csv, unmatched_pdf
+
+
+def check_cash(group, prev_group, currency):
+    """CASH (per currency): returns failure lines (empty list = holds).
+
+    start = previous statement's Cash closing_balance for the currency
+    (0 if that currency had no Cash section) + Σ Transaction.amount of the
+    period (signed, native currency — decision 1); must equal this
+    statement's Cash closing_balance to the cent.
+    """
+    cur_row = group.rows[currency]
+    prev_row = prev_group.rows.get(currency)
+    start = Decimal("0.00")
+    if prev_row is not None:
+        start = _cash_closing(prev_row, currency) or Decimal("0.00")
+
+    actual_bal = _cash_closing(cur_row, currency)
+    period_start = prev_group.statement_date
+    period_end = group.statement_date
+
+    txs = list(
+        Transaction.objects.filter(
+            _period_q(period_start, period_end),
+            account_id=group.account_pk,
+            currency=currency,
+        ).order_by("date", "pk")
+    )
+    flows = sum((tx.amount for tx in txs), Decimal("0.00"))
+    expected = start + flows
+
+    actual = Decimal("0.00") if actual_bal is None else actual_bal
+
+    if abs(actual - expected) <= AMOUNT_TOL:
+        return []
+
+    lines = [
+        f"CASH: expected {expected} (start {start} + flows {flows}), "
+        f"got {actual}, diff {actual - expected}"
+    ]
+    if actual_bal is None:
+        lines.append("CASH: this statement has no Cash section for this currency")
+
+    pdf_txs = list(
+        RbcMonthlyTransaction.objects.filter(
+            rbc_monthly=cur_row, currency=currency
+        ).order_by("date", "pk")
+    )
+    unmatched_csv, unmatched_pdf = align_cash_rows(txs, pdf_txs)
+    for tx in unmatched_csv:
+        lines.append(
+            f"CASH: unmatched CSV row: {tx.date} {tx.type} {tx.symbol or '(no symbol)'} "
+            f"{tx.amount}"
+        )
+    for pdf in unmatched_pdf:
+        lines.append(
+            f"CASH: unmatched PDF row: {pdf.date} {pdf.activity_type} "
+            f"net {pdf.credit - pdf.debit} — {pdf.description[:60]}"
+        )
+
+    # Diagnostic: would the cash sum pass using trade date instead of
+    # settlement date for period membership?
+    replay_txs = Transaction.objects.filter(
+        _trade_date_q(period_start, period_end),
+        account_id=group.account_pk,
+        currency=currency,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    replay_expected = start + replay_txs
+    if abs(actual - replay_expected) <= AMOUNT_TOL:
+        lines.append("CASH: trade-date replay would pass")
+    else:
+        lines.append(
+            f"CASH: trade-date replay still fails (expected {replay_expected})"
+        )
+    return lines
+
+
 def check_statement(group, prev_group, bounds):
     """Build the StatementCheck for one group.
 
@@ -193,6 +321,7 @@ def check_statement(group, prev_group, bounds):
             result.currencies.append(CurrencyResult(currency=cur, verdict="NO_CSV"))
             continue
         failures = check_chain(group.rows[cur], prev_group)
+        failures.extend(check_cash(group, prev_group, cur))
         result.currencies.append(
             CurrencyResult(
                 currency=cur,

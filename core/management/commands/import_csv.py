@@ -99,12 +99,15 @@ class Command(BaseCommand):
         imported_total = 0
         errors = 0
         activity_reports = []   # dry-run only — feeds the near-duplicate report
+        seen_hashes: set = set()   # dry-run only (review fix 3): tx_hash values
+                                   # already seen in an earlier file of this run
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
             self.stdout.write(f"Importing: {filename}")
             try:
-                report = auto_import(file_path, 'RBC', dry_run=dry_run)
+                report = auto_import(file_path, 'RBC', dry_run=dry_run,
+                                     seen_hashes=seen_hashes)
 
                 # Row accounting per file (plan step 3):
                 # data rows = imported + duplicates + practice + rejected.

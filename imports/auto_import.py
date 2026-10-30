@@ -147,15 +147,36 @@ def _assign_seq(trades: list[dict], broker: str) -> None:
         trade['seq'] = counts[key]
 
 
+def _accounting_mismatch_message(report: ImportReport, filename: str) -> str:
+    """Message describing a row-accounting mismatch, or '' when it adds up.
+
+    The same check runs in the real import (plan decision 4 — fails the
+    file atomically) and in ``--dry-run`` (review fix 3 — reported as a
+    failed file).
+    """
+    accounted = report.accounted()
+    if accounted == report.data_rows:
+        return ''
+    return (f"Row count mismatch in {filename}: data rows={report.data_rows}, "
+            f"accounted={accounted} (imported={report.imported}, "
+            f"duplicates={report.duplicates}, practice={report.practice}, "
+            f"rejected={sum(report.rejected.values())})")
+
+
 def _dry_run_report(report: ImportReport, trades: list[dict],
-                    broker: str) -> ImportReport:
+                    broker: str,
+                    seen_hashes: set | None = None) -> ImportReport:
     """Fill in a dry-run report without writing anything (plan step 6).
 
-    Duplicates are checked against the DB read-only; per-account/type/month
-    counts go into ``report.breakdown`` and the parsed rows (account name,
-    date, symbol, value — never the Account column) into ``report.rows``
-    for cross-file near-duplicate detection.
+    Duplicates are checked against the DB read-only, and — since nothing is
+    written during the run — also against the hashes already seen in an
+    earlier file of the same run (``seen_hashes``, review fix 3). Per-
+    account/type/month counts go into ``report.breakdown`` and the parsed
+    rows (account name, date, symbol, value — never the Account column)
+    into ``report.rows`` for cross-file near-duplicate detection.
     """
+    if seen_hashes is None:
+        seen_hashes = set()
     for trade in trades:
         raw_account_id = trade.get('account_id', '').strip().upper()
 
@@ -199,10 +220,12 @@ def _dry_run_report(report: ImportReport, trades: list[dict],
             (account.name, trade['type'], month),
             {'import': 0, 'duplicate': 0},
         )
-        if Transaction.objects.filter(tx_hash=tx_hash).exists():
+        if (Transaction.objects.filter(tx_hash=tx_hash).exists()
+                or tx_hash in seen_hashes):
             bucket['duplicate'] += 1
             report.duplicates += 1
         else:
+            seen_hashes.add(tx_hash)
             bucket['import'] += 1
             report.imported += 1
 
@@ -222,7 +245,8 @@ def _dry_run_report(report: ImportReport, trades: list[dict],
     return report
 
 
-def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportReport:
+def auto_import(file_path: str, broker: str, dry_run: bool = False,
+                seen_hashes: set | None = None) -> ImportReport:
     """
     Import a broker statement file.
 
@@ -314,8 +338,16 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
 
     if dry_run:
         # Nothing is written (no BrokerStatement, no FileImportLog, no file
-        # moves); the duplicate check against the DB is read-only.
-        _dry_run_report(report, trades, broker)
+        # moves); the duplicate check against the DB is read-only, and a
+        # hash already seen in an earlier file of this same run also counts
+        # as a duplicate (review fix 3).
+        _dry_run_report(report, trades, broker, seen_hashes)
+        # Same row-accounting check as the real run (review fix 3): a
+        # mismatch is reported as a failed file.
+        mismatch = _accounting_mismatch_message(report, filename)
+        if mismatch:
+            report.failed = True
+            report.fail_reason = mismatch
         logger.info("Dry run complete. No changes made to the database.")
         return report
 
@@ -461,16 +493,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
 
             # Row accounting must add up (plan decision 4): a mismatch is a
             # parser bug — fail the whole file atomically, store nothing.
-            accounted = (imported_count + duplicate_count + report.practice
-                         + sum(report.rejected.values()))
-            if accounted != report.data_rows:
-                raise _AccountingMismatch(
-                    f"Row count mismatch in {filename}: data rows="
-                    f"{report.data_rows}, accounted={accounted} "
-                    f"(imported={imported_count}, duplicates={duplicate_count}, "
-                    f"practice={report.practice}, "
-                    f"rejected={sum(report.rejected.values())})"
-                )
+            report.imported = imported_count
+            report.duplicates = duplicate_count
+            mismatch = _accounting_mismatch_message(report, filename)
+            if mismatch:
+                raise _AccountingMismatch(mismatch)
 
             # Save file import log
             FileImportLog.objects.create(

@@ -394,6 +394,53 @@ class ImportCsvLayoutAndReportTests(TestCase):
         errors_dir = os.path.join(self.processed_dir, 'errors')
         self.assertIn('bad.csv', os.listdir(errors_dir))
 
+    def test_dry_run_counts_in_run_duplicates(self) -> None:
+        """In --dry-run a tx_hash already seen in an earlier file of the
+        same run is a duplicate, not only hashes in the DB (review fix 3)."""
+        self._write('file_a.csv', RBC_CSV_HEADER + RBC_ROW_A)
+        self._write('file_b.csv', RBC_CSV_HEADER + RBC_ROW_A + RBC_ROW_B)
+
+        out, _ = self._run(dry_run=True)
+
+        # file_a (first): row A would be imported. file_b (second): row A is
+        # a duplicate of what the same run already saw, row B would import.
+        self.assertIn('Rows: 1 data = 1 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+        self.assertIn('Rows: 2 data = 1 imported + 1 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+        # Nothing was written, so a second dry run sees the same picture.
+        self.assertEqual(Transaction.objects.count(), 0)
+        out2, _ = self._run(dry_run=True)
+        self.assertIn('Rows: 2 data = 1 imported + 1 duplicates'
+                      ' + 0 practice + 0 rejected', out2)
+
+    def test_dry_run_row_count_mismatch_fails_file(self) -> None:
+        """In --dry-run the same row-accounting check as the real run runs;
+        a mismatch is reported as a failed file and the run continues
+        (review fix 3)."""
+        self._write('bad.csv', RBC_CSV_HEADER + RBC_ROW_A)
+        self._write('good.csv', RBC_CSV_HEADER + RBC_ROW_B)
+
+        def fake_parse(path, rejections=None):
+            trades, rate, accounting = parse_rbc_csv(path, rejections)
+            if os.path.basename(path) == 'bad.csv':
+                accounting['data_rows'] += 3   # force the mismatch
+            return trades, rate, accounting
+
+        with patch('imports.auto_import.parse_rbc_csv', side_effect=fake_parse):
+            out, err = self._run(dry_run=True)
+
+        self.assertIn('FILE FAILED — nothing stored for bad.csv', err)
+        self.assertIn('Row count mismatch in bad.csv', err)
+        # The run continued with the next file.
+        self.assertIn('Rows: 1 data = 1 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+        # Dry run wrote nothing and moved no files.
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(FileImportLog.objects.count(), 0)
+        self.assertEqual(sorted(os.listdir(self.inbox_dir)),
+                         ['bad.csv', 'good.csv'])
+
     def test_no_account_number_in_command_output(self) -> None:
         """The Account column value never appears in the command output."""
         self._write('acct.csv', RBC_CSV_HEADER + RBC_ROW_A)

@@ -508,7 +508,10 @@ def parse_rbc_csv(file_path: str,
         Rate is Decimal('1.0') if not found in file.
         ``accounting`` counts every data row of the file:
         ``data_rows = imported + practice + sum(rejected.values())``
-        where ``rejected`` maps rejection reason → count.
+        where ``rejected`` maps rejection reason → count. Rows from the
+        RBC disclaimer footer on (first cell 'Disclaimer'/'Disclaimers')
+        are counted separately in ``footer`` — never data rows or
+        rejections (dry-run fix A).
     """
 
     if rejections is None:
@@ -516,10 +519,13 @@ def parse_rbc_csv(file_path: str,
     trades: list[dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
+    in_footer: bool = False
     filename = os.path.basename(file_path)
     # Per-file row accounting (plan step 3): every data row is accounted for.
+    # Footer rows (RBC disclaimer block) sit outside data_rows (fix A).
     accounting: dict[str, Any] = {
         'data_rows': 0, 'imported': 0, 'practice': 0, 'rejected': {},
+        'footer': 0,
     }
 
     # Column mapping (will be set when header is found)
@@ -570,10 +576,19 @@ def parse_rbc_csv(file_path: str,
                 if not found_header:
                     continue
 
+                cleaned = [cell.strip().strip('"') for cell in row]
+
+                # RBC disclaimer footer (dry-run fix A): from the first line
+                # whose first cell is 'Disclaimer'/'Disclaimers' to EOF the
+                # rows are footer — counted separately, never data or
+                # rejections.
+                if in_footer or (cleaned and cleaned[0] in ('Disclaimer', 'Disclaimers')):
+                    in_footer = True
+                    accounting['footer'] += 1
+                    continue
+
                 # Every data row after the header is counted, whatever its fate.
                 accounting['data_rows'] += 1
-
-                cleaned = [cell.strip().strip('"') for cell in row]
 
                 def _cell(field: str) -> str:
                     """Value of a mapped column; '' when the row is short."""

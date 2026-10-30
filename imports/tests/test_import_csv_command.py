@@ -484,6 +484,23 @@ class ImportCsvLayoutAndReportTests(TestCase):
         self.assertEqual(sorted(os.listdir(self.inbox_dir)),
                          ['bad.csv', 'good.csv'])
 
+    def test_footer_rows_counted_separately_in_output(self) -> None:
+        """The RBC disclaimer footer is counted as footer in the row
+        accounting output — never data rows or rejections (dry-run fix A)."""
+        self._write('footer.csv',
+                    RBC_CSV_HEADER + RBC_ROW_A
+                    + 'Disclaimer\n' * 7)
+
+        out, _ = self._run()
+
+        tx = Transaction.objects.get()
+        self.assertEqual(tx.symbol, 'GOOGL')
+        # 1 data row imported; the 7 footer lines are neither data nor
+        # rejections.
+        self.assertIn('Rows: 1 data = 1 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected (+7 footer)', out)
+        self.assertEqual(Transaction.objects.count(), 1)
+
     def test_no_account_number_in_command_output(self) -> None:
         """The Account column value never appears in the command output."""
         self._write('acct.csv', RBC_CSV_HEADER + RBC_ROW_A)

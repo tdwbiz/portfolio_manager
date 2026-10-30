@@ -74,6 +74,7 @@ class ImportReport:
     filename: str = ''
     broker: str = ''
     dry_run: bool = False
+    footer: int = 0            # RBC disclaimer footer rows (outside data_rows)
     data_rows: int = 0          # data rows seen in the file
     imported: int = 0           # created (or, in a dry run, would be created)
     duplicates: int = 0         # skipped because the tx_hash is already stored
@@ -334,6 +335,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False,
         logger.error(f"Unsupported broker type: {broker}")
         return report
 
+    report.footer = accounting.get('footer', 0)
     report.data_rows = accounting['data_rows']
     report.practice = accounting['practice']
     report.rejected = dict(accounting['rejected'])

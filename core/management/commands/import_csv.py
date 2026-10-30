@@ -111,11 +111,14 @@ class Command(BaseCommand):
 
                 # Row accounting per file (plan step 3):
                 # data rows = imported + duplicates + practice + rejected.
+                # Footer rows (RBC disclaimer block) are counted separately
+                # and sit outside the data-row sum (dry-run fix A).
                 rejected_total = sum(report.rejected.values())
                 self.stdout.write(
                     f"  Rows: {report.data_rows} data = "
                     f"{report.imported} imported + {report.duplicates} duplicates"
                     f" + {report.practice} practice + {rejected_total} rejected"
+                    f" (+{report.footer} footer)"
                 )
                 # Rejections by reason (never carries Account column
                 # values — the parser keeps those in 'Account ID' only).

@@ -480,6 +480,48 @@ class RbcCsvParserTests(TestCase):
         self.assertEqual(accounting['data_rows'], 1)
         self.assertEqual(accounting['imported'], 1)
 
+    def test_footer_counted_separately_eleven_column(self):
+        """The RBC disclaimer footer (first cell 'Disclaimer', 7 one-cell
+        lines in the 11-column layout) is counted as footer — never data
+        rows or rejections (dry-run fix A)."""
+        footer = [['Disclaimer']] * 7
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency', 'Description'],
+            ['October 08, 2025', 'Buy', 'VFV', 'Vanguard S&P 500',
+             '10', '166.62', 'October 10, 2025', '90000001',
+             '-1666.20', 'CAD', 'Buy VFV'],
+        ] + footer)
+
+        rejections = []
+        trades, _, accounting = parse_rbc_csv(path, rejections)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(accounting['data_rows'], 1)
+        self.assertEqual(accounting['imported'], 1)
+        self.assertEqual(accounting['footer'], 7)
+        self.assertEqual(accounting['rejected'], {})
+        self.assertEqual(rejections, [])
+
+    def test_footer_counted_separately_nine_column(self):
+        """The 9-column layout footer starts at 'Disclaimers' (9 lines of
+        10 cells) and is counted as footer (dry-run fix A)."""
+        footer = [['Disclaimers'] + [''] * 9]
+        footer += [[f'Footer line {i}'] + [''] * 9 for i in range(8)]
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Quantity', 'Price',
+             'Settlement Date', 'Account', 'Value', 'Currency'],
+            ['31-Dec-18', 'Buy', 'VFV', '10', '50.00', '02-Jan-19',
+             '90000001', '-500.00', 'CAD'],
+        ] + footer)
+
+        trades, _, accounting = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(accounting['data_rows'], 1)
+        self.assertEqual(accounting['imported'], 1)
+        self.assertEqual(accounting['footer'], 9)
+        self.assertEqual(accounting['rejected'], {})
+
     def test_unknown_activity_type_rejects_row(self):
         """An activity not in _RBC_TYPE_MAP rejects the row and creates no
         TransactionType (plan step 4)."""

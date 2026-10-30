@@ -115,6 +115,10 @@ class Command(BaseCommand):
                         f"{report.imported} imported + {report.duplicates} duplicates"
                         f" + {report.practice} practice + {rejected_total} rejected"
                     )
+                    # Rejections by reason (never carries Account column
+                    # values — the parser keeps those in 'Account ID' only).
+                    for reason, count in sorted(report.rejected.items()):
+                        self.stdout.write(f"    rejected ({count}): {reason}")
 
                 # A row-count mismatch fails the whole file atomically —
                 # nothing stored, FileImportLog status error (decision 4).
@@ -162,8 +166,6 @@ class Command(BaseCommand):
                             f"{counts['import']} would import, "
                             f"{counts['duplicate']} duplicates"
                         )
-                    for reason, count in sorted(report.rejected.items()):
-                        self.stdout.write(f"    rejected ({count}): {reason}")
                     activity_reports.append(report)
                     continue
 

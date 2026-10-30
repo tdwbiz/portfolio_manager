@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from core.models import Account
+from core.models import Account, TransactionType
 from core.utils.account_fingerprint import fingerprint_account_number
 from imports.parsers import parse_rbc_csv, parse_ib_csv
 
@@ -440,6 +440,68 @@ class RbcCsvParserTests(TestCase):
         trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'BUY')
+
+    def test_old_nine_column_layout(self):
+        """Old 9-column layout (2017–2019) with 31-Dec-18 dates parses."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Quantity', 'Price',
+             'Settlement Date', 'Account', 'Value', 'Currency'],
+            ['31-Dec-18', 'Buy', 'VFV', '10', '50.00', '02-Jan-19',
+             '90000001', '-500.00', 'CAD'],
+        ])
+
+        trades, _, accounting = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        trade = trades[0]
+        self.assertEqual(trade['date'], date(2018, 12, 31))
+        self.assertEqual(trade['settlement_date'], date(2019, 1, 2))
+        self.assertEqual(trade['type'], 'BUY')
+        self.assertEqual(accounting['data_rows'], 1)
+        self.assertEqual(accounting['imported'], 1)
+
+    def test_new_eleven_column_layout(self):
+        """New 11-column layout (Symbol Description + Description) parses."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency', 'Description'],
+            ['December 31, 2018', 'Dividends', 'VDY', 'Vanguard Dividend ETF',
+             '1000', '0.15', 'January 02, 2019', '90000001',
+             '150.00', 'CAD', 'DIV ON 1000 SHS'],
+        ])
+
+        trades, _, accounting = parse_rbc_csv(path)
+        self.assertEqual(len(trades), 1)
+        trade = trades[0]
+        self.assertEqual(trade['date'], date(2018, 12, 31))
+        self.assertEqual(trade['settlement_date'], date(2019, 1, 2))
+        self.assertEqual(trade['type'], 'DIV')
+        self.assertEqual(trade['notes'], 'DIV ON 1000 SHS')
+        self.assertEqual(accounting['data_rows'], 1)
+        self.assertEqual(accounting['imported'], 1)
+
+    def test_unknown_activity_type_rejects_row(self):
+        """An activity not in _RBC_TYPE_MAP rejects the row and creates no
+        TransactionType (plan step 4)."""
+        before = TransactionType.objects.count()
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Div Reinvest', 'RBF2010', 'RBF 2010',
+             '100', '10.00', 'October 10, 2025', '90000001',
+             '-1000.00', 'CAD'],
+        ])
+
+        rejections = []
+        trades, _, accounting = parse_rbc_csv(path, rejections)
+        self.assertEqual(len(trades), 0)
+        self.assertEqual(
+            accounting['rejected'].get('Unknown activity type: Div Reinvest'), 1)
+        self.assertEqual(accounting['data_rows'], 1)
+        self.assertEqual(
+            rejections[0]['Reason Rejected'], 'Unknown activity type: Div Reinvest')
+        self.assertEqual(TransactionType.objects.count(), before)
 
 
 # ---------------------------------------------------------------------------

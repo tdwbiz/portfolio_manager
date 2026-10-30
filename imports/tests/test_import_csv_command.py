@@ -5,16 +5,20 @@ duplicate-hash cases only (IB and --broker cases dropped — import_csv is
 RBC-only, see docs/plans/import-paths.md decision Q1).
 """
 
+import io
 import os
 import shutil
 import tempfile
+from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 
-from core.models import FileImportLog, Transaction, Account
+from core.models import FileImportLog, Transaction, Account, TransactionType
 from core.utils.account_fingerprint import fingerprint_account_number
+from imports.parsers import parse_rbc_csv
 
 
 # ---------------------------------------------------------------------------
@@ -213,3 +217,181 @@ class ImportCsvCommandTest(TestCase):
 
         tx = Transaction.objects.get()
         self.assertEqual(tx.notes, 'Buy GOOGL on ACCOUNT_A')
+
+
+# ---------------------------------------------------------------------------
+# Step 7: both layouts, duplicates, seq, unknown types, near-duplicates,
+# row accounting, atomic failure on mismatch, no account numbers in output.
+# ---------------------------------------------------------------------------
+
+class ImportCsvLayoutAndReportTests(TestCase):
+    """Synthetic-CSV tests for the import_csv Activity path (plan step 7)."""
+
+    OLD_HEADER = (
+        '"Date","Activity","Symbol","Quantity","Price",'
+        '"Settlement Date","Account","Value","Currency"\n'
+    )
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+        self.inbox_dir = os.path.join(self.temp_dir, 'inbox')
+        self.processed_dir = os.path.join(self.temp_dir, 'processed')
+        os.makedirs(self.inbox_dir)
+
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _write(self, name: str, text: str) -> str:
+        path = os.path.join(self.inbox_dir, name)
+        with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+            f.write(text)
+        return path
+
+    def _run(self, **kwargs) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with override_settings(
+            IMPORT_INBOX_DIR=self.inbox_dir,
+            IMPORT_PROCESSED_DIR=self.processed_dir,
+        ):
+            call_command('import_csv', stdout=out, stderr=err, **kwargs)
+        return out.getvalue(), err.getvalue()
+
+    def test_old_layout_imported_with_dates(self) -> None:
+        """Old 9-column file with 31-Dec-18 dates: Date + Settlement Date
+        stored, row accounting printed."""
+        self._write('old.csv',
+                    self.OLD_HEADER
+                    + '"31-Dec-18","Buy","VFV","10","50.00",'
+                      '"02-Jan-19","90000001","-500.00","CAD"\n')
+
+        out, _ = self._run()
+
+        tx = Transaction.objects.get()
+        self.assertEqual(tx.date, date(2018, 12, 31))
+        self.assertEqual(tx.settlement_date, date(2019, 1, 2))
+        self.assertIn('Rows: 1 data = 1 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+
+    def test_overlapping_files_second_fully_duplicate(self) -> None:
+        """Two overlapping exports of the same rows dedup by hash."""
+        self._write('first.csv', RBC_CSV_HEADER + RBC_ROW_A + RBC_ROW_B)
+        self._run()
+        self.assertEqual(Transaction.objects.count(), 2)
+
+        # Second export: same rows, slightly different amounts (overlap).
+        self._write('second.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
+                      '"2800.00","January 17, 2024","90000001","13990.04",'
+                      '"USD","Buy GOOGL"\n'
+                    + '"January 16, 2024","Sell","AAPL","Apple Inc.","2",'
+                      '"200.00","January 18, 2024","90000001","395.01",'
+                      '"USD","Sell AAPL"\n')
+        out, _ = self._run()
+
+        self.assertEqual(Transaction.objects.count(), 2)
+        log = FileImportLog.objects.get(filename='second.csv')
+        self.assertEqual(log.records_imported, 0)
+        self.assertEqual(log.records_skipped, 2)
+        self.assertIn('Rows: 2 data = 0 imported + 2 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+
+    def test_identical_rows_in_one_file_both_imported(self) -> None:
+        """Two identical rows in one file get seq 1 and 2 — both imported,
+        different hashes."""
+        self._write('twice.csv', RBC_CSV_HEADER + RBC_ROW_A + RBC_ROW_A)
+
+        out, _ = self._run()
+
+        self.assertEqual(Transaction.objects.count(), 2)
+        hashes = set(Transaction.objects.values_list('tx_hash', flat=True))
+        self.assertEqual(len(hashes), 2)
+        self.assertIn('Rows: 2 data = 2 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+
+    def test_unknown_activity_type_rejected_no_transactiontype(self) -> None:
+        """Unknown activity type: row rejected, no new TransactionType,
+        rejection reason in the output."""
+        before = TransactionType.objects.count()
+        self._write('mixed.csv',
+                    RBC_CSV_HEADER + RBC_ROW_A
+                    + '"January 15, 2024","Div Reinvest","RBF2010",'
+                      '"RBF 2010","100","10.00","January 17, 2024",'
+                      '"90000001","-1000.00","USD","REI"\n')
+
+        out, _ = self._run()
+
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertEqual(TransactionType.objects.count(), before)
+        self.assertIn('rejected (1): Unknown activity type: Div Reinvest', out)
+        self.assertIn('Rows: 2 data = 1 imported + 0 duplicates'
+                      ' + 0 practice + 1 rejected', out)
+
+    def test_near_duplicates_reported_in_dry_run(self) -> None:
+        """Same account/date/symbol/value in two files, different quantity:
+        reported as a near-duplicate in --dry-run; nothing written."""
+        self._write('file_a.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
+                      '"2800.00","January 17, 2024","90000001","13990.05",'
+                      '"USD","Buy GOOGL"\n')
+        self._write('file_b.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","6",'
+                      '"2800.00","January 17, 2024","90000001","13990.05",'
+                      '"USD","Buy GOOGL"\n')
+
+        out, _ = self._run(dry_run=True)
+
+        self.assertIn('Near-duplicates across files (1):', out)
+        self.assertIn('file_a.csv row 4 vs file_b.csv row 4', out)
+        self.assertIn('quantity: 5 vs 6', out)
+        # Dry run wrote nothing.
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(FileImportLog.objects.count(), 0)
+        self.assertEqual(len(os.listdir(self.inbox_dir)), 2)
+
+    def test_forced_row_count_mismatch_fails_file_atomically(self) -> None:
+        """A row-count mismatch fails the whole file atomically (decision 4):
+        nothing stored for it, FileImportLog status error with the counts,
+        and the run continues with the next file."""
+        self._write('bad.csv', RBC_CSV_HEADER + RBC_ROW_A)
+        self._write('good.csv', RBC_CSV_HEADER + RBC_ROW_B)
+
+        def fake_parse(path, rejections=None):
+            trades, rate, accounting = parse_rbc_csv(path, rejections)
+            if os.path.basename(path) == 'bad.csv':
+                accounting['data_rows'] += 3   # force the mismatch
+            return trades, rate, accounting
+
+        with patch('imports.auto_import.parse_rbc_csv', side_effect=fake_parse):
+            out, err = self._run()
+
+        log = FileImportLog.objects.get(filename='bad.csv')
+        self.assertEqual(log.status, 'error')
+        self.assertIn('Row count mismatch in bad.csv', log.error_message)
+        self.assertIn('data rows=4', log.error_message)
+        # Nothing stored for the bad file; the good file was still imported.
+        self.assertFalse(Transaction.objects.filter(symbol='GOOGL').exists())
+        self.assertTrue(Transaction.objects.filter(symbol='AAPL').exists())
+        errors_dir = os.path.join(self.processed_dir, 'errors')
+        self.assertIn('bad.csv', os.listdir(errors_dir))
+
+    def test_no_account_number_in_command_output(self) -> None:
+        """The Account column value never appears in the command output."""
+        self._write('acct.csv', RBC_CSV_HEADER + RBC_ROW_A)
+
+        # Dry-run output (breakdown + rejections) first — the file stays in
+        # the inbox, so the dry run actually parses it.
+        out2, err2 = self._run(dry_run=True)
+        self.assertNotIn('90000001', out2)
+        self.assertNotIn('90000001', err2)
+
+        # Then the real import.
+        out, err = self._run()
+        self.assertNotIn('90000001', out)
+        self.assertNotIn('90000001', err)

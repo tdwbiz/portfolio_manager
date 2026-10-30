@@ -13,15 +13,19 @@ dates, types, symbols and amounts only — never account digits.
 Plan: docs/plans/fill-from-pdf.md (Decisions: tdw, Oct 30).
 """
 
+from dataclasses import dataclass, field
 from decimal import Decimal
 
-from core.models import Transaction
+from core.models import BrokerStatement, RbcMonthlyTransaction, Transaction
 from core.utils.monthly_check import (
     QTY_TOL,
     SYMBOL_ALIASES,
     _option_code_map,
+    align_cash_rows,
+    check_statement,
     effective_tx_date,
     normalize_option_text,
+    period_transactions,
 )
 
 
@@ -148,6 +152,96 @@ def normalise_symbol(symbol, option_map):
     if normalised is not None:
         return normalised
     return SYMBOL_ALIASES.get(s.upper(), s)
+
+
+# BrokerStatement raw_filename of the cleaned-CSV slice rows that a fill
+# removes and replaces with the mapped PDF rows (plan decision 2).
+SLICE_FILENAME = "rbc-act-cleaned-slice.csv"
+
+
+@dataclass
+class PeriodPlan:
+    """Read-only plan for one failing statement group.
+
+    ``slice_rows``: period transactions to remove (cleaned-CSV slice rows).
+    ``candidates``: period transactions minus the slice rows. ``unmatched_pdf``:
+    PDF rows to fill in (unmatched cash rows + unmatched zero-net rows with a
+    quantity). ``new_rows``: mapped unsaved Transactions (None when stopped).
+    ``unmapped``: one line per unmapped activity type — non-empty means the
+    period stops and nothing changes for it. ``after``: simulated verdicts
+    (None when stopped); the period is filled only if every currency PASSES.
+    """
+
+    group: object  # StatementGroup
+    before: object  # StatementCheck
+    slice_rows: list = field(default_factory=list)
+    candidates: list = field(default_factory=list)
+    unmatched_pdf: list = field(default_factory=list)
+    new_rows: object = None  # [Transaction] or None when stopped
+    unmapped: list = field(default_factory=list)
+    after: object = None  # StatementCheck or None when stopped
+
+
+def plan_period(group, prev_group, bounds, account):
+    """Plan the fill for one FAILING statement group (read-only).
+
+    Slice rows of the period are removed and replaced by the mapped PDF rows
+    that ``align_cash_rows`` (per currency) and ``match_zero_net_rows``
+    (decision 1) show as unmatched on the candidate set. The after verdicts
+    are computed in memory via ``check_statement(txs=...)``; any unmapped
+    activity type stops the period (reported, never guessed).
+    """
+    before = check_statement(group, prev_group, bounds)
+    all_txs = period_transactions(
+        group.account_pk, None, prev_group.statement_date, group.statement_date
+    )
+    slice_pks = set(
+        BrokerStatement.objects.filter(raw_filename=SLICE_FILENAME).values_list(
+            "pk", flat=True
+        )
+    )
+    slice_rows = [tx for tx in all_txs if tx.statement_id in slice_pks]
+    candidates = [tx for tx in all_txs if tx.statement_id not in slice_pks]
+
+    unmatched_pdf = []
+    for cur in sorted(group.rows):
+        pdf_txs = list(
+            RbcMonthlyTransaction.objects.filter(rbc_monthly=group.rows[cur])
+            .order_by("date", "pk")
+        )
+        cur_candidates = [tx for tx in candidates if tx.currency == cur]
+        _unmatched_csv, unmatched_cash = align_cash_rows(cur_candidates, pdf_txs)
+        _matched_zn, unmatched_zn = match_zero_net_rows(
+            cur_candidates, pdf_txs, group.account_pk
+        )
+        unmatched_pdf.extend(unmatched_cash)
+        unmatched_pdf.extend(unmatched_zn)
+
+    try:
+        new_rows = pdf_rows_to_transactions(unmatched_pdf, account)
+    except UnmappedActivity as exc:
+        return PeriodPlan(
+            group=group,
+            before=before,
+            slice_rows=slice_rows,
+            candidates=candidates,
+            unmatched_pdf=unmatched_pdf,
+            new_rows=None,
+            unmapped=[str(exc)],
+            after=None,
+        )
+
+    after = check_statement(group, prev_group, bounds, txs=candidates + new_rows)
+    return PeriodPlan(
+        group=group,
+        before=before,
+        slice_rows=slice_rows,
+        candidates=candidates,
+        unmatched_pdf=unmatched_pdf,
+        new_rows=new_rows,
+        unmapped=[],
+        after=after,
+    )
 
 
 def match_zero_net_rows(csv_txs, pdf_txs, account_pk):

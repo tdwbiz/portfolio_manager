@@ -69,6 +69,20 @@ All resolved by tdw on Oct 30 — see **Decisions** at the end of this file. The
 5. Monthly vs annual in the IMPORT section — the kind in the safe file name; anything else under other errors.
 6. Conflict identification — latest error log whose `error_message` contains "conflict" (case-insensitive).
 
+## Real-data fixes (Oct 30)
+
+A run of the finished command against tdw's real data (1011 PASS, 147 FAIL) showed five flaws in the check itself. Fix them in order, one commit each, each with a test in `tests/test_monthly_check.py`, then both full suites once:
+
+1. **Income timing** — for income rows (`DIV`, `DIST`, `INT`), the period is decided by the payment date when the notes contain one (`PAY mm/dd/yy`, e.g. `REC 12/21/21 PAY 12/31/21`), otherwise by settlement_date (then trade date). RBC books year-end dividends in the December statement while the CSV dates them Jan 2-4. Implementation: fetch a window widened ±15 days and decide membership on the effective date in Python; applies to both CASH and QUANTITY.
+2. **Option symbols** — the CSV uses RBC security codes (e.g. `9BSCCN2`, `8UJDMB6`) while the PDF holdings show option text (`CALL QQQ 03/31/21 321`, `CALLNVDA 07/30/21 210`). Map each CSV option code to the option text found in that symbol's Transaction notes (pattern: CALL or PUT, underlying, mm/dd/yy expiry, strike); normalise both sides (a space after CALL/PUT, strike without trailing zeros) and compare quantities under the normalised option text.
+3. **Symbol aliases** — a small constant `SYMBOL_ALIASES` in `core/utils/monthly_check.py`, applied to both sides before comparing: FB→META, ETHX.U→ETHXF, EBIT.U→BTEUF, E012211→ENF, P031613→SPHD, P040422→CQQQ, C024526→CQQQ.
+4. **Chain** — when `last_statement_date` is NULL, skip the date comparison and say "last statement date unknown" as a note (not an exception); a currency section new for the account (no previous section of that currency) is no exception when its begin total is 0. Notes go on `CurrencyResult.notes` and are rendered in the report.
+5. **Helper** — leave zero-amount rows out of the unmatched lists on both sides of the CASH alignment helper.
+
+Then run, once:
+- `/opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test`
+- `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`
+
 ## Decisions (tdw, Oct 30)
 
 1. **Cash sum field** — yes: use `Transaction.amount` (signed, native currency), not `amount_cad`; `RbcMonthlyBalance.closing_balance` is native-currency.

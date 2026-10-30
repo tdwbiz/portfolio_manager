@@ -107,6 +107,7 @@ class Command(BaseCommand):
             line = f"  {check.statement_date} [{cur.currency}] {cur.verdict}"
             lines.append(line)
             lines.extend(f"    {f}" for f in cur.failures)
+            lines.extend(f"    note: {n}" for n in cur.notes)
         return lines
 
     def _duplicate_lines(self, groups):

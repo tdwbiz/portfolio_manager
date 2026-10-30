@@ -55,6 +55,9 @@ class CurrencyResult:
     currency: str
     verdict: str = "PASS"
     failures: list = field(default_factory=list)
+    # Informational lines that are not exceptions (real-data fix 4), e.g.
+    # 'last statement date unknown'. Never affect the verdict.
+    notes: list = field(default_factory=list)
 
 
 @dataclass
@@ -154,20 +157,32 @@ def previous_groups(groups):
 
 
 def check_chain(cur_row, prev_group):
-    """CHAIN (per currency): returns failure lines (empty list = holds).
+    """CHAIN (per currency): returns (failure_lines, notes).
 
     ``begin_total_market_value`` must equal the previous statement's
     ``end_total_market_value`` for the same currency (±0.005) and
     ``last_statement_date`` must equal the previous ``statement_date``.
+    When ``last_statement_date`` is NULL the date comparison is skipped and
+    a note is added instead; a currency section new for the account (no
+    previous section of that currency) is no exception when its begin total
+    is 0 (real-data fix 4).
     """
     failures = []
+    notes = []
     prev_row = prev_group.rows.get(cur_row.currency)
     if prev_row is None:
-        failures.append(
-            f"CHAIN: no previous {cur_row.currency} section on "
-            f"{prev_group.statement_date} to chain from"
-        )
-        return failures
+        if abs(cur_row.begin_total_market_value) > AMOUNT_TOL:
+            failures.append(
+                f"CHAIN: no previous {cur_row.currency} section on "
+                f"{prev_group.statement_date} to chain from, but begin total "
+                f"is {cur_row.begin_total_market_value}"
+            )
+        else:
+            notes.append(
+                f"new {cur_row.currency} section (no previous section), "
+                f"begin total 0 — not an exception"
+            )
+        return failures, notes
     diff = cur_row.begin_total_market_value - prev_row.end_total_market_value
     if abs(diff) > AMOUNT_TOL:
         failures.append(
@@ -175,12 +190,14 @@ def check_chain(cur_row, prev_group):
             f"!= previous end_total_market_value {prev_row.end_total_market_value} "
             f"(diff {diff})"
         )
-    if cur_row.last_statement_date != prev_row.statement_date:
+    if cur_row.last_statement_date is None:
+        notes.append("last statement date unknown")
+    elif cur_row.last_statement_date != prev_row.statement_date:
         failures.append(
             f"CHAIN: last_statement_date {cur_row.last_statement_date} "
             f"!= previous statement_date {prev_row.statement_date}"
         )
-    return failures
+    return failures, notes
 
 
 def _pay_date(notes):
@@ -607,7 +624,8 @@ def check_statement(group, prev_group, bounds):
     quantity_failures, pairs = check_holdings(group, prev_group)
     result.symbol_pairs = pairs
     for cur in sorted(group.rows):
-        failures = check_chain(group.rows[cur], prev_group)
+        chain_failures, chain_notes = check_chain(group.rows[cur], prev_group)
+        failures = list(chain_failures)
         failures.extend(check_cash(group, prev_group, cur))
         failures.extend(quantity_failures)
         result.currencies.append(
@@ -615,6 +633,7 @@ def check_statement(group, prev_group, bounds):
                 currency=cur,
                 verdict="FAIL" if failures else "PASS",
                 failures=failures,
+                notes=list(chain_notes),
             )
         )
     return result

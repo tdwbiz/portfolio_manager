@@ -269,6 +269,52 @@ def test_chain_break_fails(account):
 
 
 @pytest.mark.django_db
+def test_null_last_statement_date_is_a_note_not_a_failure(account):
+    jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    # last_statement_date is NULL: the chain values still match, so this is
+    # a note, not an exception (real-data fix 4).
+    feb = make_monthly(account, date(2025, 2, 28), last_stmt=None,
+                       begin=Decimal("200"), end=Decimal("210"))
+    cash(feb, Decimal("110"))
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("10"),
+            settlement=date(2025, 2, 12))
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2025, 2, 28))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+    assert any("last statement date unknown" in n for n in res.notes)
+
+
+@pytest.mark.django_db
+def test_new_currency_section_with_zero_begin_is_not_a_failure(account):
+    jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    feb_cad = make_monthly(account, date(2025, 2, 28),
+                           last_stmt=date(2025, 1, 31),
+                           begin=Decimal("200"), end=Decimal("200"))
+    cash(feb_cad, Decimal("100"))
+    # USD is new for the account: no previous USD section, begin total 0 —
+    # not an exception (real-data fix 4).
+    feb_usd = make_monthly(account, date(2025, 2, 28), currency="USD",
+                           last_stmt=date(2025, 1, 31),
+                           begin=Decimal("0"), end=Decimal("0"))
+    cash(feb_usd, Decimal("0"), currency="USD")
+    # A (zero-cash) transaction in the period so it is inside CSV coverage.
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("0"),
+            settlement=date(2025, 2, 12))
+
+    checks = run_checks()
+    usd_res = next(
+        c for c in checks[("ACCOUNT_A", date(2025, 2, 28))].currencies
+        if c.currency == "USD"
+    )
+    assert usd_res.verdict == "PASS"
+    assert usd_res.failures == []
+    assert any("new USD section" in n for n in usd_res.notes)
+
+
+@pytest.mark.django_db
 def test_no_csv_before_first_and_after_last_settlement():
     # Global coverage bounds (decision 2): one transaction on ACCOUNT_B in
     # March 2025 defines the whole window.

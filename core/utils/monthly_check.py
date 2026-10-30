@@ -12,12 +12,14 @@ currencies, symbols, amounts and file names — never account digits.
 Plan: docs/plans/monthly-check-report.md (Decisions: tdw, Oct 30).
 """
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 
 from django.db.models import Max, Min, Q, Sum
 
 from core.models import (
+    FileImportLog,
     RbcMonthly,
     RbcMonthlyBalance,
     RbcMonthlyHolding,
@@ -360,6 +362,80 @@ def check_holdings(group, prev_group):
     pairs += [(sym, None) for sym in csv_only[len(pairs):]]
     pairs += [(None, sym) for sym in pdf_only[len(pairs):]]
     return failures, pairs
+
+
+# Same pattern as core/utils/safe_names.py (kept local so this plan's file
+# list stays exactly the three listed files). FileImportLog stores safe names.
+_SAFE_NAME_KIND_RE = re.compile(
+    r"^(?P<date>\d{4}(?:-\d{2}-\d{2})?)_"
+    r"(?P<kind>monthly|annual|unknown)_"
+    r"(?P<account>[A-Z0-9]+(?:_[A-Z0-9]+)*)_"
+    r"(?P<hash>[0-9a-f]{8})\."
+    r"(?P<ext>[A-Za-z0-9]+)$"
+)
+
+
+def classify_safe_name(filename):
+    """'monthly' / 'annual' from the safe file name, else None (decision 5).
+
+    ``unknown`` kinds and anything that is not a safe name at all return
+    None — those go under "other errors" so nothing is silently dropped.
+    """
+    match = _SAFE_NAME_KIND_RE.match(filename or "")
+    if not match:
+        return None
+    kind = match.group("kind")
+    return kind if kind in ("monthly", "annual") else None
+
+
+def scan_import_logs():
+    """Latest FileImportLog row per filename, split for the IMPORT section.
+
+    Only logs whose LATEST row has status='error' are listed. Split:
+    - 'conflicts': error_message contains "conflict" (case-insensitive,
+      decision 6) — second copies of corrected statements; kept out of the
+      parked list, shown with status + reason.
+    - 'parked': monthly safe names whose content_hash matches no RbcMonthly
+      row (errored and never stored).
+    - 'annual': annual safe names.
+    - 'other': everything else (unknown kind, not a safe name, or a monthly
+      error whose hash does match a stored statement).
+    """
+    latest = {}
+    for log in FileImportLog.objects.order_by("imported_at", "pk"):
+        latest[log.filename] = log  # last write per filename wins
+
+    stored_hashes = set(
+        RbcMonthly.objects.exclude(content_hash="").values_list(
+            "content_hash", flat=True
+        )
+    )
+
+    result = {"parked": [], "conflicts": [], "annual": [], "other": []}
+    for log in sorted(latest.values(), key=lambda l: l.filename):
+        if log.status != "error":
+            continue
+        entry = {
+            "filename": log.filename,
+            "status": log.status,
+            "reason": log.error_message or "(no error message)",
+            "imported_at": log.imported_at,
+        }
+        if "conflict" in (log.error_message or "").lower():
+            result["conflicts"].append(entry)
+            continue
+        kind = classify_safe_name(log.filename)
+        if kind == "monthly":
+            if log.content_hash and log.content_hash in stored_hashes:
+                entry["reason"] += " (hash matches a stored RbcMonthly row)"
+                result["other"].append(entry)
+            else:
+                result["parked"].append(entry)
+        elif kind == "annual":
+            result["annual"].append(entry)
+        else:
+            result["other"].append(entry)
+    return result
 
 
 def check_statement(group, prev_group, bounds):

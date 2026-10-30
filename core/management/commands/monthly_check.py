@@ -21,6 +21,7 @@ from core.utils.monthly_check import (
     csv_coverage_bounds,
     group_statements,
     previous_groups,
+    scan_import_logs,
 )
 
 
@@ -87,8 +88,9 @@ class Command(BaseCommand):
                 (group, check_statement(group, prev_of[id(group)], bounds))
             )
 
-        self._write_report(options["out"], options, bounds, results)
-        self._print_summary(accounts, results)
+        imports = scan_import_logs()
+        self._write_report(options["out"], options, bounds, results, imports)
+        self._print_summary(accounts, results, imports)
 
     # ------------------------------------------------------------------
     # Output
@@ -107,7 +109,22 @@ class Command(BaseCommand):
             lines.extend(f"    {f}" for f in cur.failures)
         return lines
 
-    def _write_report(self, out_path, options, bounds, results):
+    def _import_lines(self, imports):
+        labels = [
+            ("parked", "parked (monthly, error, never stored)"),
+            ("conflicts", "conflicts (second copies of corrected statements)"),
+            ("annual", "annual errors"),
+            ("other", "other errors"),
+        ]
+        lines = ["Import log:"]
+        for key, label in labels:
+            entries = imports[key]
+            lines.append(f"  {label}: {len(entries)}")
+            for entry in entries:
+                lines.append(f"    {entry['filename']}: {entry['reason']}")
+        return lines
+
+    def _write_report(self, out_path, options, bounds, results, imports):
         lines = [
             "monthly_check report",
             f"filters: account={options['account'] or '(all)'} "
@@ -123,10 +140,11 @@ class Command(BaseCommand):
             for group, check in by_account[account_name]:
                 lines.extend(self._statement_lines(group, check))
             lines.append("")
+        lines.extend(self._import_lines(imports))
         with open(out_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines).rstrip() + "\n")
 
-    def _print_summary(self, accounts, results):
+    def _print_summary(self, accounts, results, imports):
         per_account = {}
         for _group, check in results:
             entry = per_account.setdefault(
@@ -153,4 +171,9 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Totals: FIRST={totals['FIRST']} NO_CSV={totals['NO_CSV']} "
             f"PASS={totals['PASS']} FAIL={totals['FAIL']}"
+        )
+        self.stdout.write(
+            f"Import log: parked={len(imports['parked'])} "
+            f"conflicts={len(imports['conflicts'])} annual={len(imports['annual'])} "
+            f"other={len(imports['other'])}"
         )

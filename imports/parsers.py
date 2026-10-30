@@ -71,6 +71,12 @@ _RBC_TYPE_MAP: dict[str, tuple[str, str]] = {
     'Taxes':                            ('TAX',      'Tax'),
     'Tax':                              ('TAX',      'Tax'),
     'Foreign Tax Withholding':          ('WITHTAX',  'Foreign Tax Withholding'),
+    # Corporate actions (dry-run fix B): codes are the sanitised uppercase
+    # forms the old auto-create produced, so the TransactionType rows
+    # already in the database are reused.
+    'Reorganization':                   ('REORGANIZATION', 'Reorganization'),
+    'Return of Capital':                ('RETURN_OF_CAPITAL', 'Return of Capital'),
+    'Adjustment':                       ('ADJUSTMENT', 'Adjustment'),
     # Catch-all
     'Others':                           ('OTHER',    'Other'),
     'Other':                            ('OTHER',    'Other'),

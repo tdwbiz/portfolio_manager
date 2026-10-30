@@ -484,6 +484,37 @@ class ImportCsvLayoutAndReportTests(TestCase):
         self.assertEqual(sorted(os.listdir(self.inbox_dir)),
                          ['bad.csv', 'good.csv'])
 
+    def test_corporate_action_types_import_without_new_transactiontype(
+            self) -> None:
+        """Reorganization / Return of Capital / Adjustment rows import under
+        the existing TransactionType codes (dry-run fix B)."""
+        before = TransactionType.objects.count()
+        self._write('corp.csv',
+                    RBC_CSV_HEADER + RBC_ROW_A
+                    + '"January 15, 2024","Reorganization","9XYZABC1",'
+                      '"Short call","100","0","January 17, 2024",'
+                      '"90000001","0.00","USD","EXP - OPTION EXPIRED"\n'
+                    + '"January 15, 2024","Return of Capital","GOOGL",'
+                      '"Alphabet Inc.","","0","January 17, 2024",'
+                      '"90000001","0.00","USD","ROC - BOOK COST ADJ"\n'
+                    + '"January 15, 2024","Adjustment","RBF2010",'
+                      '"RBF 2010","-2.5","0","January 17, 2024",'
+                      '"90000001","0.00","USD","ADJDEL"\n')
+
+        out, _ = self._run()
+
+        self.assertEqual(TransactionType.objects.count(), before)
+        self.assertEqual(
+            Transaction.objects.get(symbol='9XYZABC1').type,
+            'REORGANIZATION')
+        roc = Transaction.objects.get(type='RETURN_OF_CAPITAL')
+        self.assertEqual(roc.quantity, Decimal('0'))
+        self.assertIn('BOOK COST ADJ', roc.notes)
+        adj = Transaction.objects.get(type='ADJUSTMENT')
+        self.assertEqual(adj.notes, 'ADJDEL')
+        self.assertIn('Rows: 4 data = 4 imported + 0 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+
     def test_footer_rows_counted_separately_in_output(self) -> None:
         """The RBC disclaimer footer is counted as footer in the row
         accounting output — never data rows or rejections (dry-run fix A)."""

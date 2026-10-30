@@ -480,6 +480,50 @@ class RbcCsvParserTests(TestCase):
         self.assertEqual(accounting['data_rows'], 1)
         self.assertEqual(accounting['imported'], 1)
 
+    def test_corporate_action_activity_types_map_to_existing_codes(self):
+        """Reorganization / Return of Capital / Adjustment map to the codes
+        the old auto-create produced (dry-run fix B); notes are kept."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency', 'Description'],
+            ['October 08, 2025', 'Reorganization', '9XYZABC1', 'Short call',
+             '100', '0', 'October 10, 2025', '90000001',
+             '0.00', 'CAD', 'EXP - OPTION EXPIRED'],
+            ['October 08, 2025', 'Reorganization', 'VFV', 'Vanguard S&P 500',
+             '300', '0', 'October 10, 2025', '90000001',
+             '0.00', 'CAD', 'DIS - STK SPLIT 4:1'],
+            ['October 08, 2025', 'Reorganization', 'VFV', 'Vanguard S&P 500',
+             '', '0', 'October 10, 2025', '90000001',
+             '1.37', 'CAD', 'CIL - CASH IN LIEU'],
+            ['October 08, 2025', 'Reorganization', 'OLDSTK', 'Old security',
+             '-100', '0', 'October 10, 2025', '90000001',
+             '0.00', 'CAD', 'MER - MERGER'],
+            ['October 08, 2025', 'Return of Capital', 'VDY', 'Vanguard ETF',
+             '', '0', 'October 10, 2025', '90000001',
+             '0.00', 'CAD', 'ROC - BOOK COST ADJ 12.34'],
+            ['October 08, 2025', 'Adjustment', 'RBF2010', 'RBF 2010',
+             '-2.5', '0', 'October 10, 2025', '90000001',
+             '0.00', 'CAD', 'ADJDEL'],
+        ])
+
+        rejections = []
+        trades, _, accounting = parse_rbc_csv(path, rejections)
+        self.assertEqual(len(trades), 6)
+        self.assertEqual(rejections, [])
+        self.assertEqual(accounting['rejected'], {})
+        codes = [t['type'] for t in trades]
+        self.assertEqual(codes[:4], ['REORGANIZATION'] * 4)
+        self.assertEqual(codes[4], 'RETURN_OF_CAPITAL')
+        self.assertEqual(codes[5], 'ADJUSTMENT')
+        # Empty quantities → 0; descriptions kept in notes.
+        self.assertEqual(trades[0]['quantity'], Decimal('100'))
+        self.assertEqual(trades[2]['quantity'], Decimal('0'))
+        self.assertEqual(trades[4]['quantity'], Decimal('0'))
+        self.assertIn('STK SPLIT', trades[1]['notes'])
+        self.assertIn('BOOK COST ADJ', trades[4]['notes'])
+        self.assertEqual(trades[5]['notes'], 'ADJDEL')
+
     def test_footer_counted_separately_eleven_column(self):
         """The RBC disclaimer footer (first cell 'Disclaimer', 7 one-cell
         lines in the 11-column layout) is counted as footer — never data

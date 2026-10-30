@@ -219,6 +219,40 @@ symbol, currency, price, notes). An unmapped activity type still stops the perio
    *Recommended:* delete it at the end of the run when it has no transactions (as
    specified above), so no empty statements accumulate.
 
+## Real-data fixes (Oct 30)
+
+A dry run on tdw's real data (8 accounts, 2019-01..2021-01) exposed four flaws.
+Each is one commit, in this order:
+
+1. **Crash — sorting unsaved rows.** `align_cash_rows` sorts the CSV side by
+   `(t.date, t.pk)`; in-memory new rows (the fill's own candidates passed via
+   the `txs` override) have `pk=None`, so Python compares `None` with an int
+   and raises `TypeError` (seen on TOM_TFSA 2020-12). Sort with a key that
+   works for unsaved rows: `(t.date, t.pk or 0)` plus a stable index.
+2. **Symbols.** Most PDF rows carry no symbol — only the security name in the
+   description (e.g. `VANGUARD FTSE CDN HIGH DIVID YIELD INDEX ETF TR UNIT`).
+   Derive the symbol from the `RbcMonthlyHolding` rows of the same statement
+   (falling back to the previous stored statement of that account, same
+   currency): match the description to a holding's security name — normalised
+   (upper case, stripped), the holding name at the start of the description or
+   the reverse — and take its symbol **only when exactly one holding matches**;
+   otherwise leave the row without a symbol (the period then fails its
+   after-check and is reported). The check's aliases and option normalisation
+   (`SYMBOL_ALIASES`, `normalize_option_text`, the option-code map) apply as
+   usual.
+3. **Signs.** BUY rows always get `+abs(quantity)` and SELL rows
+   `-abs(quantity)`, whatever sign the PDF row has (the run produced
+   SELL qty=10 and SELL qty=1430).
+4. **Timing pairs.** Before filling, an unmatched cash PDF row — or the PDF
+   rows of one date and symbol taken together by their net amount (a dividend
+   plus its NRT tax) — that matches an existing Transaction of the same
+   account and currency with the same net amount dated within 35 days but
+   **outside** this period, is not filled; it is reported as
+   `timing pair with CSV row dated <date>` (the run would have added
+   SUSAN_RRIF VO 281.29 in July 2020 while the CSV has it in June, and
+   SUSAN_TFSA QQQ 31.12 minus 4.66 in Nov 2019 while the CSV has 26.46 in
+   October).
+
 ## Decisions (tdw, Oct 30)
 
 Answers to the open questions above:

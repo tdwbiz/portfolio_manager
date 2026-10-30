@@ -10,6 +10,8 @@ from .models import (
     CoreReconciliation,
     FileImportLog,
     FixedPriceConfig,
+    MonthlyCheckResult,
+    MonthlyException,
     RbcAnnual,
     RbcMonthly,
     RbcMonthlyBalance,
@@ -213,6 +215,78 @@ class CoreAnnualReportAdmin(admin.ModelAdmin):
     list_filter = ["currency", "account", "report_year"]
     search_fields = ["account__name"]
     readonly_fields = ["generated_at"]
+
+
+class ReadOnlyMixin:
+    """Read-only admin: no add/change/delete, every field readonly."""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MonthlyCheckResult)
+class MonthlyCheckResultAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    # Read-only list; the account is shown by name only — never digits.
+    list_display = [
+        "account",
+        "statement_date",
+        "currency",
+        "verdict",
+        "checked_at",
+    ]
+    list_filter = ["verdict", "currency", "account"]
+    search_fields = ["account__name"]
+    date_hierarchy = "statement_date"
+    readonly_fields = [
+        "account",
+        "statement_date",
+        "currency",
+        "verdict",
+        "notes",
+        "checked_at",
+    ]
+
+
+@admin.register(MonthlyException)
+class MonthlyExceptionAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    # Read-only list; the account is shown by name only — never digits.
+    list_display = [
+        "account",
+        "statement_date",
+        "kind",
+        "currency",
+        "ref",
+        "difference",
+        "status",
+        "reason",
+        "first_seen",
+        "last_seen",
+        "resolved_at",
+    ]
+    list_filter = ["kind", "status", "account"]
+    search_fields = ["account__name", "ref"]
+    date_hierarchy = "statement_date"
+    readonly_fields = [
+        "kind",
+        "account",
+        "statement_date",
+        "currency",
+        "ref",
+        "difference",
+        "detail",
+        "status",
+        "reason",
+        "accepted_at",
+        "first_seen",
+        "last_seen",
+        "resolved_at",
+    ]
 
 
 @admin.register(CoreReconciliation)

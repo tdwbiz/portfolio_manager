@@ -1355,3 +1355,115 @@ class LedgerMonthClosure(models.Model):
     def __str__(self):
         status = "CLOSED" if self.is_closed else "OPEN"
         return f"{self.account.name} {self.currency} {self.statement_month} [{status}]"
+
+
+class MonthlyCheckResult(models.Model):
+    """Stored verdict of one (account, statement_date, currency) monthly check.
+
+    Written by ``monthly_check --store`` (phase 4, step 14b). One row per
+    unique key; re-runs upsert in place. Account is shown by name only —
+    never digits.
+    """
+
+    VERDICT_PASS = "PASS"
+    VERDICT_FAIL = "FAIL"
+    VERDICT_NO_CSV = "NO_CSV"
+    VERDICT_FIRST = "FIRST"
+    VERDICT_CHOICES = [
+        (VERDICT_PASS, "PASS"),
+        (VERDICT_FAIL, "FAIL"),
+        (VERDICT_NO_CSV, "NO_CSV"),
+        (VERDICT_FIRST, "FIRST"),
+    ]
+
+    account = models.ForeignKey(
+        Account, on_delete=models.CASCADE, related_name="monthly_check_results"
+    )
+    statement_date = models.DateField()
+    currency = models.CharField(max_length=3)
+    verdict = models.CharField(max_length=8, choices=VERDICT_CHOICES)
+    notes = models.TextField(blank=True, default="")
+    # Set only on create (a re-run updates the verdict, not checked_at).
+    checked_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "core_monthly_check_result"
+        unique_together = [("account", "statement_date", "currency")]
+        ordering = ["account", "statement_date", "currency"]
+        indexes = [
+            models.Index(fields=["account", "statement_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.account.name} {self.statement_date} [{self.currency}] {self.verdict}"
+
+
+class MonthlyException(models.Model):
+    """One exception found by ``monthly_check`` (phase 4, step 14b).
+
+    Keyed by kind+account+statement_date+currency+ref; ``--store`` upserts,
+    resolves rows that vanished and reopens accepted rows whose difference
+    changed. Accepting is a note only — it never changes imported data.
+    ``currency`` and ``ref`` are blank (never NULL) so the unique constraint
+    works on SQLite/SQL Server; QUANTITY uses currency="" (per account),
+    IMPORT uses ref=<hash8>.
+    """
+
+    KIND_CASH = "CASH"
+    KIND_QUANTITY = "QUANTITY"
+    KIND_CHAIN = "CHAIN"
+    KIND_IMPORT = "IMPORT"
+    KIND_CHOICES = [
+        (KIND_CASH, "CASH"),
+        (KIND_QUANTITY, "QUANTITY"),
+        (KIND_CHAIN, "CHAIN"),
+        (KIND_IMPORT, "IMPORT"),
+    ]
+
+    STATUS_OPEN = "open"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "open"),
+        (STATUS_ACCEPTED, "accepted"),
+        (STATUS_RESOLVED, "resolved"),
+    ]
+
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES)
+    account = models.ForeignKey(
+        Account, on_delete=models.CASCADE, related_name="monthly_exceptions"
+    )
+    statement_date = models.DateField()
+    currency = models.CharField(max_length=3, blank=True, default="")
+    # Symbol for QUANTITY, hash8 for IMPORT, blank otherwise.
+    ref = models.CharField(max_length=200, blank=True, default="")
+    difference = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True
+    )
+    detail = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=8, choices=STATUS_CHOICES, default=STATUS_OPEN
+    )
+    reason = models.TextField(blank=True, default="")
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    first_seen = models.DateTimeField()
+    last_seen = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "core_monthly_exception"
+        unique_together = [
+            ("kind", "account", "statement_date", "currency", "ref")
+        ]
+        ordering = ["account", "statement_date", "kind", "currency", "ref"]
+        indexes = [
+            models.Index(fields=["status"]),
+            models.Index(fields=["account", "statement_date"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.account.name} {self.statement_date} "
+            f"{self.kind} [{self.currency or '-'}] {self.ref or '-'} "
+            f"[{self.status}]"
+        )

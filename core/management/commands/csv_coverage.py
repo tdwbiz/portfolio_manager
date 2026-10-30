@@ -18,6 +18,7 @@ from collections import Counter
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.models import RbcMonthlyTransaction
 from imports.parsers import parse_rbc_csv
 from core.utils.account_fingerprint import (
     build_fingerprint_name_map,
@@ -28,6 +29,19 @@ from core.utils.account_fingerprint import (
 def _fmt(value):
     """Format an optional date for the report ('-' when missing)."""
     return str(value) if value is not None else '-'
+
+
+MONTH_START = (2017, 11)
+
+
+def _month_range(start, end):
+    """Inclusive range of (year, month) tuples from start to end."""
+    y, m = start
+    while (y, m) <= end:
+        yield (y, m)
+        m += 1
+        if m == 13:
+            y, m = y + 1, 1
 
 
 def row_identity(trade: dict) -> tuple:
@@ -222,6 +236,49 @@ class Command(BaseCommand):
             total_gaps += len(gaps)
             gap_lines.append((acct['name'], gaps))
 
+        # Monthly CSV-vs-PDF table per account, from 2017-11 to the latest
+        # month seen in the CSVs or in that account's RbcMonthlyTransaction
+        # rows. CSV count uses max-multiplicity dedup: a row identical across
+        # files counts once; duplicates within one file are kept.
+        monthly_lines = []
+        total_flagged = 0
+        for fp in sorted(account_data, key=lambda f: account_data[f]['name']):
+            acct = account_data[fp]
+            per_file = [
+                Counter(row_identity(t) for t in trades)
+                for trades in (acct['files'][f] for f in sorted(acct['files']))
+            ]
+            all_ids = set()
+            for c in per_file:
+                all_ids |= set(c)
+            csv_months = Counter()
+            for ident in all_ids:
+                m = max(c[ident] for c in per_file)
+                csv_months[(ident[1].year, ident[1].month)] += m
+
+            pdf_dates = list(RbcMonthlyTransaction.objects.filter(
+                rbc_monthly__account__fingerprint=fp,
+            ).values_list('date', flat=True))
+            pdf_months = Counter((d.year, d.month) for d in pdf_dates)
+
+            end_candidates = set(csv_months) | set(pdf_months)
+            if not end_candidates or max(end_candidates) < MONTH_START:
+                monthly_lines.append((acct['name'], []))
+                continue
+
+            lines = []
+            flagged = 0
+            for ym in _month_range(MONTH_START, max(end_candidates)):
+                c = csv_months.get(ym, 0)
+                p = pdf_months.get(ym, 0)
+                flag = ''
+                if p > 0 and c == 0:
+                    flag = '  FLAGGED (PDF rows, no CSV rows)'
+                    flagged += 1
+                lines.append(f'    {ym[0]:04d}-{ym[1]:02d}: csv={c} pdf={p}{flag}')
+            total_flagged += flagged
+            monthly_lines.append((acct['name'], lines))
+
         # ------------------------------------------------------------------
         # Short summary (stdout)
         # ------------------------------------------------------------------
@@ -244,8 +301,10 @@ class Command(BaseCommand):
             f'practice rows skipped: {total_practice}'
         )
         self.stdout.write(f'Gaps found: {total_gaps}')
+        self.stdout.write(f'Flagged months: {total_flagged}')
 
         gaps_by_name = dict(gap_lines)
+        monthly_by_name = dict(monthly_lines)
         for acct_name, pairs in overlap_lines:
             self.stdout.write(f'Account: {acct_name}')
             if pairs:
@@ -257,6 +316,10 @@ class Command(BaseCommand):
             if gaps:
                 self.stdout.write('  gaps > 31 days:')
                 self.stdout.write('\n'.join(gaps))
+            mlines = monthly_by_name.get(acct_name, [])
+            if mlines:
+                self.stdout.write('  monthly (from 2017-11):')
+                self.stdout.write('\n'.join(mlines))
 
         for r in file_reports:
             if r.get('skipped'):

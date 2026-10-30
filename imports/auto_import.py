@@ -82,6 +82,12 @@ class ImportReport:
     failed: bool = False        # row-count mismatch — file failed atomically
     fail_reason: str = ''
     content_duplicate: bool = False   # whole file skipped (content hash)
+    # Dry-run only (plan step 6):
+    breakdown: dict = field(default_factory=dict)
+    #   (account name, type, 'YYYY-MM') -> {'import': n, 'duplicate': n}
+    rows: list = field(default_factory=list)
+    #   parsed rows (names/dates/counts only) for cross-file near-duplicate
+    #   detection in the import_csv dry-run report
 
     def accounted(self) -> int:
         return (self.imported + self.duplicates + self.practice
@@ -140,6 +146,81 @@ def _assign_seq(trades: list[dict], broker: str) -> None:
         key = _hash_group_key(broker, trade)
         counts[key] = counts.get(key, 0) + 1
         trade['seq'] = counts[key]
+
+
+def _dry_run_report(report: ImportReport, trades: list[dict],
+                    broker: str) -> ImportReport:
+    """Fill in a dry-run report without writing anything (plan step 6).
+
+    Duplicates are checked against the DB read-only; per-account/type/month
+    counts go into ``report.breakdown`` and the parsed rows (account name,
+    date, symbol, value — never the Account column) into ``report.rows``
+    for cross-file near-duplicate detection.
+    """
+    for trade in trades:
+        raw_account_id = trade.get('account_id', '').strip().upper()
+
+        # Defensive: the RBC parser already rejects PRAC* rows.
+        if raw_account_id.startswith('PRACEF'):
+            report.practice += 1
+            continue
+
+        if raw_account_id:
+            digits = re.sub(r'\D', '', raw_account_id)
+            normalized_id = digits[:8] if len(digits) >= 8 else digits
+            account = lookup_account(raw_account_id)
+            if account is None:
+                report.rejected['Unknown account'] = (
+                    report.rejected.get('Unknown account', 0) + 1
+                )
+                continue
+        else:
+            normalized_id = None
+            report.rejected['Missing account'] = (
+                report.rejected.get('Missing account', 0) + 1
+            )
+            continue
+
+        tx_hash = wrap_tx_hash(compute_tx_hash(
+            broker=broker,
+            account_id=normalized_id,
+            date=trade['date'],
+            symbol=trade['symbol'],
+            tx_type=trade['type'],
+            quantity=trade['quantity'],
+            price=trade['price'],
+            currency=trade.get('currency', 'USD'),
+            amount=trade['amount'],
+            settlement_date=trade.get('settlement_date'),
+            seq=trade.get('seq', 1),
+        ))
+
+        month = f"{trade['date'].year:04d}-{trade['date'].month:02d}"
+        bucket = report.breakdown.setdefault(
+            (account.name, trade['type'], month),
+            {'import': 0, 'duplicate': 0},
+        )
+        if Transaction.objects.filter(tx_hash=tx_hash).exists():
+            bucket['duplicate'] += 1
+            report.duplicates += 1
+        else:
+            bucket['import'] += 1
+            report.imported += 1
+
+        report.rows.append({
+            'filename': report.filename,
+            'row_number': trade.get('row_number', ''),
+            'account': account.name,
+            'date': str(trade['date']),
+            'symbol': trade['symbol'],
+            'type': trade['type'],
+            'quantity': str(trade['quantity']),
+            'price': str(trade['price']),
+            'currency': trade.get('currency', 'USD'),
+            'value': str(trade['amount']),
+            'settlement_date': str(trade.get('settlement_date')),
+        })
+    return report
 
 
 def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportReport:
@@ -234,12 +315,10 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
     logger.info(f"Found {len(trades)} trades to import.")
 
     if dry_run:
-        # Nothing is written. Every parsed row would be imported (the
-        # duplicate check against the DB arrives with the dry-run report).
-        report.imported = len(trades)
+        # Nothing is written (no BrokerStatement, no FileImportLog, no file
+        # moves); the duplicate check against the DB is read-only.
+        _dry_run_report(report, trades, broker)
         logger.info("Dry run complete. No changes made to the database.")
-        for i, trade in enumerate(trades, 1):
-            logger.info(f"  {i}. {trade}")
         return report
 
     # Set up duplicate logger — writes CSV with line numbers

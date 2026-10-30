@@ -98,6 +98,7 @@ class Command(BaseCommand):
 
         imported_total = 0
         errors = 0
+        activity_reports = []   # dry-run only — feeds the near-duplicate report
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
@@ -152,6 +153,18 @@ class Command(BaseCommand):
                         f"{report.duplicates} duplicates, "
                         f"{rejected_total} rejected"
                     ))
+                    # Per account name / type / month (plan step 6) — names,
+                    # dates and counts only, never Account column values.
+                    for (name, tx_type, month), counts in sorted(
+                            report.breakdown.items()):
+                        self.stdout.write(
+                            f"    {name} {tx_type} {month}: "
+                            f"{counts['import']} would import, "
+                            f"{counts['duplicate']} duplicates"
+                        )
+                    for reason, count in sorted(report.rejected.items()):
+                        self.stdout.write(f"    rejected ({count}): {reason}")
+                    activity_reports.append(report)
                     continue
 
                 # Nothing imported and nothing matched (e.g. every row was
@@ -182,6 +195,26 @@ class Command(BaseCommand):
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+
+        # Near-duplicates across files (plan step 6, dry-run only): same
+        # account, date, symbol and value in different files but differing
+        # in another field. Fully identical rows are plain duplicates.
+        if dry_run and len(activity_reports) > 1:
+            near = _find_near_duplicates(activity_reports)
+            if near:
+                self.stdout.write(self.style.WARNING(
+                    f"Near-duplicates across files ({len(near)}):"
+                ))
+                for a, b, diffs in near:
+                    detail = ', '.join(
+                        f"{f}: {a[f]} vs {b[f]}" for f in diffs
+                    )
+                    self.stdout.write(
+                        f"  {a['filename']} row {a['row_number']} vs "
+                        f"{b['filename']} row {b['row_number']} "
+                        f"({a['account']}, {a['date']}, {a['symbol']}, "
+                        f"{a['value']}): {detail}"
+                    )
 
         # Report final counts
         if not dry_run:
@@ -398,6 +431,34 @@ class Command(BaseCommand):
             f"Total: {created_total} created, {closed_total} closed "
             f"({duplicates} duplicates, {errors} errors)"
         )
+
+
+def _find_near_duplicates(reports: list) -> list[tuple[dict, dict, list[str]]]:
+    """Rows in different files with the same account, date, symbol and value
+    that differ in another field (plan step 6).
+
+    Returns ``(row_a, row_b, differing_fields)`` tuples. Rows are names,
+    dates and counts only — never Account column values.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for report in reports:
+        for row in report.rows:
+            key = (row['account'], row['date'], row['symbol'], row['value'])
+            groups.setdefault(key, []).append(row)
+
+    compare_fields = ('type', 'quantity', 'price', 'currency', 'settlement_date')
+    near_dups: list[tuple[dict, dict, list[str]]] = []
+    for rows in groups.values():
+        if len({r['filename'] for r in rows}) < 2:
+            continue
+        for i, a in enumerate(rows):
+            for b in rows[i + 1:]:
+                if a['filename'] == b['filename']:
+                    continue
+                diffs = [f for f in compare_fields if a[f] != b[f]]
+                if diffs:
+                    near_dups.append((a, b, diffs))
+    return near_dups
 
 
 def _holdings_safe_name(snapshot_date, full_hash: str) -> str:

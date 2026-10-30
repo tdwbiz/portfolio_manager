@@ -20,7 +20,7 @@ No new models, no migrations. Accept/reopen change only the exception row — ne
   - `reopen_exception(row_id, reason) -> row | None` — same rules as `_reopen`: open status, `resolved_at`/`accepted_at` cleared, `[reopened YYYY-MM-DD: reason]` appended to `detail`.
   - `core/management/commands/monthly_check.py` — `_accept` / `_reopen` become thin argument-parsing wrappers around these (validate options, raise `CommandError`, print). Existing command tests must pass unchanged.
 - `core/views_exceptions.py` (new) — three views, all `@login_required`:
-  - `exceptions_list` (`/exceptions/`, name `exceptions_list`): GET filters `account` (Account pk), `kind`, `status`, `year` (of `statement_date`), `statement_date` (YYYY-MM-DD). Ordering: status rank open → accepted → resolved (`Case`/`When`), then taxable first, then account name, `statement_date`, `kind`. Taxable = `account.category == "TAXABLE"` (see Open questions 1) — annotate, never a name list. Counts per status (over the filtered queryset) above the table.
+  - `exceptions_list` (`/exceptions/`, name `exceptions_list`): GET filters `account` (Account pk), `kind`, `status`, `year` (of `statement_date`), `statement_date` (YYYY-MM-DD). Ordering: status rank open → accepted → resolved (`Case`/`When`), then taxable first, then account name, `statement_date`, `kind`. Taxable = `account.category == "TAXABLE"` (Decisions 1, tdw Oct 30) — annotate, never a name list. Counts per status (over the filtered queryset) above the table.
   - `exception_detail` (`/exceptions/<int:pk>/`, name `exception_detail`): all fields; `detail` rendered exactly as stored in a `<pre>` (autoescape on — it holds the check lines and unmatched CSV/PDF rows); reason and dates. POST (CSRF only) with `action=accept` (only when status open) or `action=reopen` (only when status accepted); `reason` required — blank or wrong-status POST gets an error message and a redirect back with nothing changed; success calls `accept_exceptions(reason, row_id=pk)` / `reopen_exception(pk, reason)`, then `messages.success` + redirect to the detail page. Unknown id → 404.
   - `exceptions_coverage` (`/exceptions/coverage/`, name `exceptions_coverage`): rows = all accounts (taxable first, then name); columns = every `statement_date` present in `MonthlyCheckResult`, grouped by year header. Exactly two queries (all results `select_related("account")`, all exceptions `select_related("account")`); the grid is built in Python. Cell per (account, date) combining all currencies of that statement:
     - open CASH/CHAIN/QUANTITY exception for that account+date → **FAIL** (QUANTITY has blank currency — it counts for the account+date);
@@ -35,7 +35,7 @@ No new models, no migrations. Accept/reopen change only the exception row — ne
 - `core/templates/core/exceptions_list.html`, `exception_detail.html`, `exceptions_coverage.html` (new) — extend `base.html`, Bootstrap tables like `reconciliation.html` / `transaction_list.html`. Small "taxable" badge next to taxable account names in the list.
 - `tests/test_exceptions_page.py` (new) — Django test client, `settings_test`, fake accounts `90000001`–`90000008`.
 - `tests/e2e/test_exceptions_page.py` (new) — Playwright style of the existing e2e tests.
-- `docs/IMPORT_COMMANDS.md` — short "Exceptions page" section (see Open questions 2).
+- `docs/IMPORT_COMMANDS.md` — short "Exceptions page" section (Decisions 2, tdw Oct 30).
 
 ## Migrations
 
@@ -68,7 +68,14 @@ Statements forward (14d), changing any imported data, bulk accept on the page (t
 - Anything that would print or expose account digits → stop (the no-8-digits test guards this).
 - A step turns out wrong → stop and report; the plan is revised first (plans/README rule).
 
-## Open questions
+## Open questions (answered — see Decisions)
 
 1. **Taxable marker.** `Account` already has `category` with choices RRSP / LIRA / TFSA / TAXABLE / RESP / OTHER — use `category == "TAXABLE"`, no name list. Recommendation: treat only `"TAXABLE"` as taxable (leave `OTHER` non-taxable); tdw should confirm `TS_HUISGELD` and `TS_CAR_LIVING` have `category='TAXABLE'` in production (the page degrades gracefully — they just lose the badge — and the IB accounts get it for free later by setting their category).
 2. **Docs location.** `monthly_check` is currently described only in `docs/plans/monthly-check-report.md` and `monthly-check-store.md`, which are frozen records. Recommendation: add the short "Exceptions page" section to `docs/IMPORT_COMMANDS.md` (the command reference) with the three URLs and the accept/reopen rules, pointing at the plans for background.
+
+## Decisions (tdw, Oct 30)
+
+tdw accepts the recommended answers to both open questions:
+
+1. **Taxable marker.** Treat only `category == "TAXABLE"` as taxable (`OTHER` stays non-taxable). tdw will confirm in production that `TS_HUISGELD` and `TS_CAR_LIVING` have `category='TAXABLE'`; until then the page degrades gracefully (they just lose the badge), and the IB accounts get it later by setting their category.
+2. **Docs location.** The short "Exceptions page" section goes into `docs/IMPORT_COMMANDS.md` with the three URLs and the accept/reopen rules, pointing at the plans for background.

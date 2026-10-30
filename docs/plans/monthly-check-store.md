@@ -18,9 +18,11 @@ time:
   resolved_at; unique kind+account+statement_date+currency+ref).
 - A new `--store` flag writes: results upserted; each exception found created
   or updated (detail, difference, last_seen); an accepted exception whose
-  difference changed goes back to open with a note appended to detail; an open
-  or accepted exception no longer found becomes resolved (resolved_at); re-runs
-  never create a second row for the same key.
+  difference changed goes back to open with a note appended to detail — only
+  when both the old and the new difference are non-NULL; a NULL difference
+  never auto-reopens; an open or accepted exception no longer found becomes
+  resolved (resolved_at); a resolved exception found again returns to open;
+  re-runs never create a second row for the same key.
 - IMPORT exceptions come from the check's parked list (account and statement
   date from the safe file name, ref = hash8, detail = the reasons). Conflict
   second copies never become exceptions.
@@ -160,6 +162,9 @@ Required new cases (from the task):
 
 ## Open questions
 
+All six questions below were answered by tdw (Oct 30): he accepted the
+recommended answer in every case — see "Decisions (tdw, Oct 30)" at the end.
+
 1. **Exception granularity when several lines share a key.** Several CASH lines
    (main diff + unmatched rows + trade-date replay) share
    kind+account+date+currency+ref. Recommended: one exception per key, detail =
@@ -183,3 +188,26 @@ Required new cases (from the task):
 6. **Verdicts FIRST/NO_CSV.** Recommended: store them as `MonthlyCheckResult`
    rows too (verdict column), so the table is a complete per-month picture;
    they never produce exceptions.
+
+## Decisions (tdw, Oct 30)
+
+tdw accepted the recommended answer for every open question:
+
+1. **One exception per key** (kind+account+statement_date+currency+ref).
+   `detail` = all grouped lines joined by newline (this keeps the unmatched
+   CSV/PDF rows inside the exception); `difference` parsed from the line that
+   carries `diff <amount>` (NULL when no line does).
+2. **QUANTITY exceptions are per account:** one row with `currency=""` and
+   `ref=<symbol>`, deduplicated across currencies; the report keeps attaching
+   them to every currency.
+3. **`--out`** stays required in report mode; optional (ignored if given)
+   with `--store`, `--accept`, `--reopen`.
+4. **Parked entries whose account name matches no Account:** skip, print a
+   "skipped (unknown account)" line, store nothing for them.
+5. **Non-numeric exceptions and auto-reopen:** CHAIN lines without a
+   parseable diff and all IMPORT rows keep `difference=NULL`; a NULL
+   difference never auto-reopens. A vanished-then-reappearing exception
+   returns to open if it was resolved; an accepted one stays accepted until
+   its (non-NULL) difference changes or tdw reopens it manually.
+6. **FIRST/NO_CSV** are stored as `MonthlyCheckResult` rows too, so the table
+   is a complete per-month picture; they never produce exceptions.

@@ -80,6 +80,12 @@ A run of the finished command against tdw's real data (1011 PASS, 147 FAIL) show
 5. **Helper** — leave zero-amount rows out of the unmatched lists on both sides of the CASH alignment helper.
 6. **Chain gap** — when the previous stored statement is not the statement named in `last_statement_date` (statements missing in between), do not compare `begin_total_market_value` with the previous end total (market values move over the missing months); report a GAP note instead, naming the previous stored statement date and the printed last statement date. Cash and holdings are still checked over the whole span as now. Only when `last_statement_date` equals the previous stored `statement_date` are the totals compared.
 
+A second real-data run (1043 PASS, 115 FAIL) showed three more flaws — same procedure: one commit each, a test in `tests/test_monthly_check.py`, then both suites once:
+
+7. **PDF option holdings without a symbol** — PDF holdings whose `symbol` is blank but whose security text is an option (CALL or PUT, underlying, mm/dd/yy expiry, strike, e.g. `CALLNVDA 07/30/21 210` or `CALL QQQ 03/31/21 321`) get the same normalised option key as the CSV side (fix 2), so both sides meet under one key; today they stay `(no symbol: ...)` and every option appears twice with opposite quantities.
+8. **Income without a PAY date** — income rows (`DIV`, `DIST`, `INT`) whose notes carry no `PAY` date are placed by `Transaction.date` (RBC's payment date), not by settlement_date, which runs a few days later; the report showed five such cases as "trade-date replay would pass". Other rows keep settlement_date.
+9. **New currency section after a GAP** — after a GAP (the previous stored statement is not the printed last statement, fix 6), a currency section without a previous section of that currency is a note, not a CHAIN exception, whatever its begin total.
+
 Then run, once:
 - `/opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test`
 - `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`

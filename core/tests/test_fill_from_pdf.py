@@ -686,6 +686,19 @@ class FillFromPdfTest(TestCase):
         self.assertEqual(len(txs), 1)
         self.assertEqual(txs[0].symbol, "BMO")
 
+    def test_us_dlr_description_gets_symbol_dlr_both_currencies(self):
+        # Real-data fix 7: the Norbert's gambit journal — HORIZONS U S DLR
+        # CURRENCY ETF appears on both the CAD and the USD side; the
+        # description decides, no holdings match needed.
+        feb = self.feb(Decimal("100"))
+        cad = pdf_tx(feb, date(2025, 2, 10), "TRANSFER", debit=Decimal("100"),
+                     description="JOURNAL HORIZONS U S DLR CURRENCY ETF")
+        usd = pdf_tx(feb, date(2025, 2, 10), "TRANSFER", credit=Decimal("100"),
+                     currency="USD",
+                     description="JOURNAL HORIZONS U S DLR CURRENCY ETF")
+        self.assertEqual(derive_pdf_symbol(cad), "DLR")
+        self.assertEqual(derive_pdf_symbol(usd), "DLR")
+
     def test_symbol_by_quantity_unique_match_used_once_per_period(self):
         jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
         RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()

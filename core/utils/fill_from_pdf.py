@@ -86,6 +86,10 @@ def derive_pdf_symbol(pdf, prev_row=None):
     without a symbol and the period then fails its after-check and is
     reported. Downstream, the check's aliases and option normalisation apply
     to the stored symbol as usual.
+
+    Real-data fix 7 (Oct 30): a description containing 'U S DLR' (HORIZONS
+    U S DLR CURRENCY ETF — the Norbert's gambit journal) gets the symbol
+    DLR on both the CAD and the USD side, before the holdings name match.
     """
     explicit = (pdf.symbol or "").strip()
     if explicit:
@@ -93,6 +97,8 @@ def derive_pdf_symbol(pdf, prev_row=None):
     desc = (pdf.description or "").strip().upper()
     if not desc:
         return ""
+    if "U S DLR" in desc:
+        return "DLR"
     rbc_pks = {pdf.rbc_monthly_id}
     if prev_row is not None:
         rbc_pks.add(prev_row.pk)

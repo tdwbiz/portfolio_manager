@@ -49,7 +49,7 @@ WITHDRAWAL, ADJUST, RTC, FEE, OTHER.
 | DEPOSIT | `DEP` | 0 | positive |
 | CONTRIB | `DEP` | 0 | positive |
 | WITHDRAWAL | `WDRAW` | 0 | negative |
-| TFR OUT | `WDRAW` | 0 | negative |
+| TFR OUT | `TRANSFER` | 0 | credit − debit (RBC's CSV calls transfers between accounts Transfers, as the deregistration rows in 13d) |
 | WIRE TFR | `TRANSFER` | 0 | credit − debit |
 | TRANSFER | `TRANSFER` | 0 | credit − debit |
 | FEE | `FEE` | 0 | negative |
@@ -67,6 +67,28 @@ withholding) becomes **two** Transactions — the income row (`credit`, mapped b
 activity type) and a `TAX` row (`−debit`) — as the CSV does. A row with both zero or
 only one side is a single row.
 
+## Zero-net rows with quantity (decision 1, tdw Oct 30)
+
+`align_cash_rows` drops zero-net rows from both unmatched lists (real-data fix 5), so
+it cannot surface them as fill candidates. A second matcher in
+`core/utils/fill_from_pdf.py` handles the zero-net rows that **carry a quantity**
+(spin-off shares, DLR journals, savings-fund units) — they matter for the holdings
+check:
+
+- **Candidates:** PDF rows of the period whose net cash (`credit − debit`) is 0 and
+  whose `quantity != 0`. Rows with neither cash nor quantity stay out (not fill
+candidates). The NRT split does not apply to zero-net rows.
+- **Match rule** against the candidate CSV set (period transactions minus slice rows,
+same currency): equal signed quantity (±`QTY_TOL`), equal normalised symbol
+(`SYMBOL_ALIASES` plus option normalisation — `normalize_option_text`, and the CSV
+option-code map from `monthly_check._option_code_map`), with ≤ 5 days date slack (the
+PDF row's date vs the CSV row's effective date, as in `align_cash_rows`). A matched
+row is not a fill candidate.
+- **Fill rule** for an unmatched zero-net row: type per the mapping table; quantity =
+the PDF quantity signed by the type's convention (BOUGHT +, SOLD −, every other type
++); amount = 0; all common fields as usual (`date` = `settlement_date` = PDF date,
+symbol, currency, price, notes). An unmapped activity type still stops the period.
+
 ## What changes (files)
 
 - `core/utils/monthly_check.py` — small read-only refactor: `check_cash`,
@@ -75,11 +97,12 @@ only one side is a single row.
   `period_transactions(...)` query (filtered by currency inside `check_cash`).
   Default `None` keeps today's behaviour exactly; existing tests must not change.
 - `core/utils/fill_from_pdf.py` — new: the mapping table above,
-  `pdf_rows_to_transactions()` (incl. NRT split and the unmapped→stop rule), and
+  `pdf_rows_to_transactions()` (incl. NRT split and the unmapped→stop rule),
+  `match_zero_net_rows()` (the zero-net-with-quantity matcher above), and
   `plan_period()` which for one failing `StatementGroup` computes: slice rows to
-  remove, unmatched PDF rows (via `align_cash_rows` on the candidate set), mapped
-  candidate Transactions, and the before/after verdicts (after = `check_statement`
-  with the `txs` override).
+  remove, unmatched PDF rows (via `align_cash_rows` on the candidate set **plus**
+  `match_zero_net_rows()`), mapped candidate Transactions, and the before/after
+  verdicts (after = `check_statement` with the `txs` override).
 - `core/management/commands/fill_from_pdf.py` — new command: args, dry-run report,
   `--apply` path.
 - `core/tests/test_fill_from_pdf.py` — new tests (synthetic data only).
@@ -89,10 +112,10 @@ only one side is a single row.
 - No migrations, no model changes.
 - Nothing in the check itself changes: verdicts, tolerances and the unmatched-row
   helper stay as they are.
-- Zero-net PDF rows (DIV REIN, INTEREST_RECEIVED with all money columns 0) are
-  dropped from `align_cash_rows`' unmatched lists (real-data fix 5), so they are not
-  fill candidates; a period that needs them simply still fails the after-check and is
-  reported unchanged.
+- Zero-net PDF rows with **neither cash nor quantity** stay out of the fill entirely
+  (as `align_cash_rows` already drops them, real-data fix 5). Zero-net rows that carry
+  a quantity ARE fill candidates — see "Zero-net rows with quantity" above
+  (decision 1).
 - No views/templates; no changes to `monthly_check` command output.
 - Never prints account digits; output uses account names, dates, types, symbols,
   amounts only.
@@ -111,7 +134,9 @@ only one side is a single row.
      `statement.raw_filename == 'rbc-act-cleaned-slice.csv'` → removed.
   3. Candidates = period transactions minus slice rows; per currency run
      `align_cash_rows(candidates_of_currency, RbcMonthlyTransaction rows of the
-     winning RbcMonthly row of that currency)` → unmatched PDF rows.
+     winning RbcMonthly row of that currency)` → unmatched cash PDF rows, plus
+     `match_zero_net_rows()` on the same candidate set → unmatched zero-net PDF rows
+     with quantity (decision 1).
   4. Map every unmatched row; any unmapped activity type **stops the period**
      (reported, nothing changes for it).
   5. Simulate: `check_statement(group, prev_group, bounds, txs=candidates + new rows)`
@@ -142,7 +167,10 @@ only one side is a single row.
    change. Check: `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/ -q -k
    monthly` and `rg -n "txs=None" core/utils/monthly_check.py`.
 2. **Mapping module.** `core/utils/fill_from_pdf.py`: the table above as a dict,
-   `pdf_rows_to_transactions()` incl. NRT split and `UnmappedActivity` error.
+   `pdf_rows_to_transactions()` incl. NRT split and `UnmappedActivity` error, and
+   `match_zero_net_rows()` (decision 1: date ±5 days, normalised symbol with the
+   check's aliases and option normalisation, signed quantity; rows with neither cash
+   nor quantity stay out).
    Check: `--collect-only` plus a quick import via
    `/opt/pm-venv/bin/python -c "import core.utils.fill_from_pdf"`.
 3. **Planning.** `plan_period()` (slice rows, unmatched PDF rows, mapped candidates,
@@ -190,3 +218,22 @@ only one side is a single row.
 4. **Empty fill BrokerStatement** if every period rolls back.
    *Recommended:* delete it at the end of the run when it has no transactions (as
    specified above), so no empty statements accumulate.
+
+## Decisions (tdw, Oct 30)
+
+Answers to the open questions above:
+
+1. **Zero-net rows: no** — do not accept dropping them. Zero-net PDF rows that carry
+   a quantity (spin-off shares, DLR journals, savings-fund units) matter for the
+   holdings check: match them against the CSV by date with 5 days of slack, symbol
+   (with the check's aliases and option normalisation) and quantity instead of
+   amount, and fill them when unmatched. Only rows with neither cash nor quantity
+   stay out. Implemented as the "Zero-net rows with quantity" section above.
+2. **TFR OUT / WIRE TFR / CONTRIB:** `TFR OUT` → `TRANSFER` (RBC's CSV calls transfers
+   between accounts Transfers, as the deregistration rows in 13d), `WIRE TFR` →
+   `TRANSFER`, `CONTRIB` → `DEP`. `ADJUST`, `RTC` and `OTHER` stay unmapped and are
+   flagged (they stop their period by design). The mapping table above is updated.
+3. **INTEREST_PAID:** yes — `INT` (negative), matching the CSV's interest rows, as
+   recommended.
+4. **Empty fill BrokerStatement:** yes — delete it at the end of the run when no
+   period committed any rows, as specified in "Command behaviour".

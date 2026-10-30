@@ -52,10 +52,15 @@ No migrations. **No change to any import code** (`import_csv`, `parsers.py`,
   `build_fingerprint_name_map()`, then map each trade's `account_id` via
   `fingerprint_account_number(account_id)`. The raw `account_id` is used only as a
   lookup key and is never printed or written.
-- **Row identity** (for overlap and dedup): the parsed trade fields `date,
-  settlement_date, symbol, type, quantity, price, commission, amount, currency,
-  notes` as a tuple — `row_number` and `account_id` excluded (account is the
-  grouping dimension). Values are used only for comparison, never printed.
+- **Row identity** (for overlap and dedup): all parsed trade fields except
+  `row_number` — `date, settlement_date, symbol, type, quantity, price,
+  commission, amount, currency, notes` — plus the row's account id, as a tuple.
+  The account id is used internally only (its fingerprint resolves to exactly
+  one stored account) and is never printed or written; without it, equal rows
+  in two different accounts would count as one. `parse_rbc_csv` already returns
+  `settlement_date` (possibly `None`), so no parser change is needed — had it
+  not, the command would read the Settlement Date column itself from the same
+  rows. Values are used only for comparison, never printed.
 - **Overlap per file pair (same account)**: overlap range =
   `[max(first dates), min(last dates)]` by `Date`; if non-empty, count identical
   rows inside the range as `sum over row tuples of min(count_in_file_A,
@@ -129,7 +134,7 @@ No migrations. **No change to any import code** (`import_csv`, `parsers.py`,
   `settings_test`.
 - Do not change this plan while implementing; if a step is wrong, stop and report.
 
-## Open questions
+## Open questions (all answered — see Decisions below)
 
 1. **Skip `Holdings*.csv` in `--dir`?** Recommended: yes — skip by filename and note
    it in the report; this command is for Activity CSVs only.
@@ -143,3 +148,24 @@ No migrations. **No change to any import code** (`import_csv`, `parsers.py`,
    differ between exports by whitespace alone.
 5. **`--out` optional?** Recommended: yes — without it only the short stdout summary
    is produced; nothing is ever written next to the input files.
+
+## Decisions (tdw, Oct 29)
+
+Answers to the open questions above:
+
+1. Skip `Holdings*.csv` in `--dir`: **yes** — skip by filename and note it in
+   the report; this command is for Activity CSVs only.
+2. End month of the monthly table: **yes** — the latest month seen in the CSVs
+   or in that account's `RbcMonthlyTransaction` rows (start fixed at 2017-11).
+3. Practice-account (`PRAC…`) rows: **yes** — counted per file as "practice rows
+   skipped", separate from unknown-account rows; never analysed.
+4. Row identity for overlap/dedup: **no** to the recommendation — the row
+   identity must include the resolved account (its id, used internally, never
+   printed), otherwise equal rows in two different accounts count as one. Use
+   all parsed fields except `row_number`, plus the account id and the
+   Settlement Date. If `parse_rbc_csv` did not return the Settlement Date,
+   read that column in the command itself from the same rows, without changing
+   the parser. (It does return it — `settlement_date`, possibly `None` — so no
+   fallback is needed.)
+5. `--out` optional: **yes** — without it only the short stdout summary is
+   produced; nothing is ever written next to the input files.

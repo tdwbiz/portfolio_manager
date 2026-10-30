@@ -324,13 +324,17 @@ def align_cash_rows(csv_txs, pdf_txs):
     return unmatched_csv, unmatched_pdf
 
 
-def check_cash(group, prev_group, currency):
+def check_cash(group, prev_group, currency, txs=None):
     """CASH (per currency): returns failure lines (empty list = holds).
 
     start = previous statement's Cash closing_balance for the currency
     (0 if that currency had no Cash section) + Σ Transaction.amount of the
     period (signed, native currency — decision 1); must equal this
     statement's Cash closing_balance to the cent.
+
+    ``txs``: optional list of (saved or unsaved) Transaction objects that
+    replaces the ``period_transactions(...)`` query; it is filtered by
+    currency here. Default ``None`` keeps today's behaviour exactly.
     """
     cur_row = group.rows[currency]
     prev_row = prev_group.rows.get(currency)
@@ -342,7 +346,12 @@ def check_cash(group, prev_group, currency):
     period_start = prev_group.statement_date
     period_end = group.statement_date
 
-    txs = period_transactions(group.account_pk, currency, period_start, period_end)
+    if txs is None:
+        txs = period_transactions(
+            group.account_pk, currency, period_start, period_end
+        )
+    else:
+        txs = [tx for tx in txs if tx.currency == currency]
     flows = sum((tx.amount for tx in txs), Decimal("0.00"))
     expected = start + flows
 
@@ -479,8 +488,12 @@ def _pdf_qty_map(rbc_rows):
     return qtys
 
 
-def check_holdings(group, prev_group):
+def check_holdings(group, prev_group, txs=None):
     """HOLDINGS / QUANTITY (per account, currencies pooled).
+
+    ``txs``: optional list of (saved or unsaved) Transaction objects that
+    replaces the ``period_transactions(...)`` query (currencies stay pooled).
+    Default ``None`` keeps today's behaviour exactly.
 
     start = previous statement's holdings quantities per symbol + Σ signed
     Transaction.quantity in the period; must equal this statement's holdings
@@ -518,10 +531,11 @@ def check_holdings(group, prev_group):
         key = norm(sym)
         cur_qtys[key] = cur_qtys.get(key, Decimal("0")) + qty
 
+    if txs is None:
+        txs = period_transactions(group.account_pk, None, period_start, period_end)
+
     delta = {}
-    for tx in period_transactions(
-        group.account_pk, None, period_start, period_end
-    ):
+    for tx in txs:
         raw = (tx.symbol or "").strip() or "(no symbol)"
         key = norm(raw)
         delta[key] = delta.get(key, Decimal("0")) + tx.quantity
@@ -631,12 +645,16 @@ def scan_import_logs():
     return result
 
 
-def check_statement(group, prev_group, bounds):
+def check_statement(group, prev_group, bounds, txs=None):
     """Build the StatementCheck for one group.
 
     FIRST (no previous statement) and NO_CSV (period outside the global CSV
     coverage) short-circuit; otherwise CHAIN and CASH run per currency and
     QUANTITY once per account (pooled, attached to every currency).
+
+    ``txs``: optional list of (saved or unsaved) Transaction objects passed
+    through to ``check_cash`` / ``check_holdings`` in place of the period
+    query. Default ``None`` keeps today's behaviour exactly.
     """
     result = StatementCheck(
         account_name=group.account_name, statement_date=group.statement_date
@@ -661,12 +679,12 @@ def check_statement(group, prev_group, bounds):
         return result
 
     # QUANTITY is per account (pooled): run once, attach to every currency.
-    quantity_failures, pairs = check_holdings(group, prev_group)
+    quantity_failures, pairs = check_holdings(group, prev_group, txs=txs)
     result.symbol_pairs = pairs
     for cur in sorted(group.rows):
         chain_failures, chain_notes = check_chain(group.rows[cur], prev_group)
         failures = list(chain_failures)
-        failures.extend(check_cash(group, prev_group, cur))
+        failures.extend(check_cash(group, prev_group, cur, txs=txs))
         failures.extend(quantity_failures)
         result.currencies.append(
             CurrencyResult(

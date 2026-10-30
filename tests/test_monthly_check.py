@@ -474,6 +474,28 @@ def test_income_row_uses_payment_date_from_notes(account):
 
 
 @pytest.mark.django_db
+def test_income_without_pay_date_uses_trade_date(account):
+    # An income row without a PAY date in the notes is placed by
+    # Transaction.date (RBC's payment date), not settlement_date, which
+    # runs a few days later (real-data fix 8): this dividend pays Dec 29
+    # but settles Jan 2, so it belongs to the December statement.
+    nov = make_monthly(account, date(2021, 11, 30), end=Decimal("100"))
+    cash(nov, Decimal("100"))
+    dec = make_monthly(account, date(2021, 12, 31), last_stmt=date(2021, 11, 30),
+                       begin=Decimal("100"), end=Decimal("140"))
+    cash(dec, Decimal("140"))
+    # A (zero-cash) settlement inside the period so it is in CSV coverage.
+    make_tx(account, date(2021, 12, 5), "DEP", Decimal("0"),
+            settlement=date(2021, 12, 7))
+    make_tx(account, date(2021, 12, 29), "DIV", Decimal("40"), symbol="ACME",
+            settlement=date(2022, 1, 2))
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2021, 12, 31))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+
+
+@pytest.mark.django_db
 def test_settlement_date_after_statement_date(account):
     # A trade dated Jan 30 settles Mar 3: it belongs to the March statement.
     # On settlement-date membership both Feb and Mar pass; on trade-date

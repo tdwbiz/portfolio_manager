@@ -242,3 +242,128 @@ test; then the full suites (`manage.py test core` + `pytest tests/ imports/tests
    but keep the CSV sign in the parsed row as an extra key, and in
    `--dry-run` print per transaction type how many rows have a negative
    quantity in the CSV.
+
+## Dry-run fixes (Oct 30)
+
+A `--dry-run` on tdw's real exports found three more things; each is fixed
+in order, one commit each, each with a test, then the full suites
+(`manage.py test core` + `pytest tests/ imports/tests/`).
+
+### A. Footer rows are counted separately, never data or rejections
+
+Every export ends with RBC's disclaimer block, starting at the first line
+whose first cell is `Disclaimer` or `Disclaimers` (7 lines in the 11-column
+layout with 1 cell each, 9 lines in the 9-column layout with 10 cells
+each). From that line on, rows are **footer**: counted separately as
+`footer` in the per-file row accounting and printed in the output; they are
+never data rows and never rejections (today each one is rejected as
+`Missing activity type`). The invariant stays
+`imported + duplicates + practice + rejected = data rows`; footer rows sit
+outside `data rows`. Applies to the RBC Activity path only.
+
+### B. Three more known activity types in `_RBC_TYPE_MAP`
+
+Add, each with the code the old auto-create produced for that activity
+string (the sanitised uppercase form in `_normalize_type`), so the
+`TransactionType` rows already in the database are reused:
+
+| Activity string | Code | Label |
+|---|---|---|
+| `Reorganization` | `REORGANIZATION` | Reorganization |
+| `Return of Capital` | `RETURN_OF_CAPITAL` | Return of Capital |
+| `Adjustment` | `ADJUSTMENT` | Adjustment |
+
+Their rows (no special parsing — the type maps, quantity/price/value/
+notes are stored as today):
+- **Reorganization** descriptions start with: `EXP` (option expired),
+  `DIS` (split, spin-off, stock dividend), `CIL` (cash in lieu: value,
+  empty quantity), `MGR` or `MER` (merger: old security negative quantity,
+  new security positive, sometimes cash), `NAC` (name change: old negative,
+  new positive).
+- **Return of Capital**: value 0 and an empty quantity; the book-cost
+  adjustment is only in the description (kept in notes as today).
+- **Adjustment** (`ADJINCR`, `ADJDEL`): value 0 and signed quantities on
+  RBC security codes.
+
+### C. Quantity is stored signed, exactly as the CSV gives it (tdw's decision)
+
+SELL negative, transfers out negative, the old security in a merger
+negative, expiries with their printed sign. Remove the `abs()` in
+`parse_rbc_csv` and the `quantity_csv` extra key; the dry-run
+negative-quantity count stays (now computed from the stored quantity).
+Commission derivation uses `abs(quantity)` so BUY and SELL results are
+unchanged.
+
+Every place that reads `Transaction.quantity` (rg), how it treats the sign
+today, and what changes (today's stored quantity is always positive):
+
+**Changed — assumed a positive quantity; now use `abs()` in the SELL /
+negative branches so BUY and SELL results stay the same, with a test each:**
+1. `core/utils/portfolio.py:119-121` `compute_portfolio_value_series` —
+   branches on type: BUY `+qty`, SELL `-qty`. SELL branch → `-abs(qty)`.
+2. `core/utils/portfolio.py:282-288` `compute_realised_pnl` — BUY lot qty
+   (positive, unchanged); SELL `qty_to_sell = tx.quantity` assumed
+   positive → `abs(tx.quantity)`. Realised P&L unchanged for a SELL of -10.
+3. `core/utils/portfolio.py:420-427` `compute_cost_basis_series` — BUY
+   `+qty` (unchanged); SELL `sold_cost = qty*avg`, `shares -= qty` assumed
+   positive → `abs(qty)`.
+4. `core/utils/portfolio.py:668-672` `compute_series_by_account` — same
+   pattern as 1 → `-abs(qty)` in the SELL branch.
+5. `core/utils/portfolio.py:810-815` `compute_positions` — BUY `+qty`,
+   SELL `-qty` → `-abs(qty)` in the SELL branch.
+6. `core/views_accounts.py:54-60` `account_detail` active holdings — BUY
+   `+= qty`, SELL `-= qty` → `-abs(qty)` in the SELL branch.
+7. `core/management/commands/write_ledger.py:212-216` — SELL passes
+   `tx.quantity` to a CREDIT position entry (a signed -10 would flip the
+   sign) → `abs(tx.quantity)`. The BUY DEBIT (:201), DIV REIN (:277) and
+   SPLIT (:288) entries stay: those rows carry positive quantities in the
+   CSV. The REORGANIZATION branch's `tx.quantity > 0` test (:339) is
+   unchanged for DIS (+qty) and CIL (0); a negative-quantity reorg (long
+   option expiry, new after fix B) now falls into the "no qty, no cash"
+   skip instead of being read as a new-total reorg — such rows were never
+   imported before fix B, so nothing stored changes.
+8. `core/management/commands/rebuild_positions_from_transactions.py:214-226`
+   — BUY `running_qty + qty` (unchanged); SELL `running_qty - tx.quantity`
+   assumed positive → `-abs(tx.quantity)`.
+9. `scripts/quantity_reconciliation_all.py:55-74` `classify()` (parked) —
+   BUY `+qty`, SELL `-qty`, REORG `EXP` short `+qty` / long `-qty`; all
+   assumed positive → the abs forms, so its report is unchanged.
+10. `imports/parsers.py` commission derivation — `quantity > 0` gate and
+    `gross = quantity * price` assumed positive; a signed SELL would make
+    gross negative and the sanity cap zero the commission → `abs(quantity)`.
+
+**Not changed (no positive-quantity assumption):**
+- `core/models.py:332` `Transaction.__str__` — prints the stored quantity
+  (now signed).
+- `core/views_transactions.py:175,206` CSV/Excel export — prints the stored
+  quantity verbatim; it now shows signed values (inherent to the decision,
+  no computation).
+- `core/admin.py:101,158` — admin list display.
+- `scripts/generate_accounting_ledger.py:228`, `scripts/dump_chains.py:48`,
+  `scripts/reconcile_tx.py:63,90` (parked) — print the stored quantity
+  only.
+- `scripts/fix_write_ledger.py` — one-off patcher that embeds a copy of the
+  old `write_ledger.py` as a string literal (already applied); not live
+  code, left as is.
+- `docs/history/scripts/*` — archived.
+- Files reading *other* models' quantity (`RbcMonthlyTransaction`,
+  `RbcMonthlyHolding`, `LedgerAccount`, `PositionHistory`) are out of scope:
+  `audit_rbc_data.py:730`, `reconcile_holdings_cash.py:201`,
+  `ledger_high_change.py:87`, `pdf_internal_reconciliation.py:191`,
+  `verify_pdf_integrity.py:342/440/468`, `data_quality_audit.py`,
+  `check_db_state.py`, `check_ledger.py`, `compare_monthly_pdf.py:278`,
+  `manage_inbox_import.py` (PDF path), `parsers_pdf.py`,
+  `parsers_monthly_vl.py`.
+
+### D. Near-duplicates: exact cross-file duplicates are never reported
+
+A row that has an exact duplicate in the other file is never reported as a
+near-duplicate. Today the pair loop compares every cross-file pair in a
+value group, so when two rows of one file share account/date/symbol/value
+with each other and both are exactly duplicated in the other file, the
+cross pairing (row 1 of file A vs row 2 of file B) is reported although
+both rows have their exact twin in the other file. Fix: mark every row
+whose full signature (account, date, symbol, value, type, quantity, price,
+currency, settlement date) also appears in a different file; any pair
+involving a marked row is not reported. Genuine near-duplicates (no exact
+twin in the other file) are still reported.

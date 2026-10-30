@@ -214,3 +214,31 @@ re-imports (old `tx_hash` values are not migrated).
    row at `imports/tests/test_csv_parsers.py:266` to 'Dividends', because
    real RBC exports never use 'Div Reinvest' (found in the Oct 24 test
    gate); do not add it to `_RBC_TYPE_MAP`.
+
+## Review fixes (Oct 30)
+
+Claude's review of steps 1–8. Done in order, one commit each, each with a
+test; then the full suites (`manage.py test core` + `pytest tests/ imports/tests/`).
+
+1. **Remove the file-level content-hash skip for CSV Activity imports.** The
+   skip in `auto_import` decides by an earlier `FileImportLog`, so after
+   `core_transaction` is cleared every re-import would be skipped, and a file
+   whose earlier log is an error is skipped forever. The row `tx_hash`
+   already decides duplicates — a re-imported identical file just reports all
+   rows as duplicates. Keep writing `FileImportLog` (with the content hash).
+2. **Any exception other than the accounting mismatch = failed file.** Today
+   it is only logged. Treat it like a failed file: `imported` and
+   `duplicates` 0 in the report, `report.failed` with a scrubbed reason, a
+   `FileImportLog` error row, no rows written to the CSV_Activity_Imported
+   tracking file, the file moved to errors/, and the run continues with the
+   next file.
+3. **Dry-run: in-run duplicates + same accounting check.** In `--dry-run`,
+   treat a `tx_hash` already seen in an earlier file of the same run as a
+   duplicate (not only hashes in the DB), and run the same row-accounting
+   check as the real run, reporting a mismatch as a failed file.
+4. **Missing currency rejects the row** with reason `Missing currency`
+   instead of defaulting to USD.
+5. **Keep the CSV sign of quantity.** Do not change how quantity is stored,
+   but keep the CSV sign in the parsed row as an extra key, and in
+   `--dry-run` print per transaction type how many rows have a negative
+   quantity in the CSV.

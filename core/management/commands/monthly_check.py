@@ -89,8 +89,8 @@ class Command(BaseCommand):
             )
 
         imports = scan_import_logs()
-        self._write_report(options["out"], options, bounds, results, imports)
-        self._print_summary(accounts, results, imports)
+        self._write_report(options["out"], options, bounds, results, groups, imports)
+        self._print_summary(accounts, results, groups, imports)
 
     # ------------------------------------------------------------------
     # Output
@@ -109,6 +109,34 @@ class Command(BaseCommand):
             lines.extend(f"    {f}" for f in cur.failures)
         return lines
 
+    def _duplicate_lines(self, groups):
+        """One line per duplicate (statement_date, currency) — a finding
+        (decision 4): it should not happen after the content-hash re-import.
+        Listed for every grouped statement of the selected accounts, not
+        just those inside the month window."""
+        lines = []
+        for group in groups:
+            for currency in sorted(group.duplicates):
+                files = group.duplicates[currency]
+                lines.append(
+                    f"  {group.account_name} {group.statement_date} [{currency}]: "
+                    f"{len(files)} rows — files: {', '.join(files)} "
+                    f"(used newest parsed_at)"
+                )
+        return lines
+
+    def _pair_lines(self, results):
+        """CSV-only <-> PDF-only symbol pairs (for a future symbol map)."""
+        lines = []
+        for group, check in results:
+            for csv_sym, pdf_sym in check.symbol_pairs:
+                left = f"CSV '{csv_sym}'" if csv_sym else "(no CSV-only symbol)"
+                right = f"PDF '{pdf_sym}'" if pdf_sym else "(no PDF-only symbol)"
+                lines.append(
+                    f"  {check.account_name} {check.statement_date}: {left} <-> {right}"
+                )
+        return lines
+
     def _import_lines(self, imports):
         labels = [
             ("parked", "parked (monthly, error, never stored)"),
@@ -116,21 +144,25 @@ class Command(BaseCommand):
             ("annual", "annual errors"),
             ("other", "other errors"),
         ]
-        lines = ["Import log:"]
+        lines = ["== Import log =="]
         for key, label in labels:
             entries = imports[key]
             lines.append(f"  {label}: {len(entries)}")
             for entry in entries:
-                lines.append(f"    {entry['filename']}: {entry['reason']}")
+                lines.append(
+                    f"    {entry['filename']}: status={entry['status']} — "
+                    f"{entry['reason']}"
+                )
         return lines
 
-    def _write_report(self, out_path, options, bounds, results, imports):
+    def _write_report(self, out_path, options, bounds, results, groups, imports):
         lines = [
             "monthly_check report",
             f"filters: account={options['account'] or '(all)'} "
             f"from={options['date_from'] or '(none)'} to={options['date_to'] or '(none)'}",
             f"CSV coverage (global): {self._fmt_bounds(bounds)}",
             "",
+            "== Statements ==",
         ]
         by_account = {}
         for group, check in results:
@@ -140,11 +172,22 @@ class Command(BaseCommand):
             for group, check in by_account[account_name]:
                 lines.extend(self._statement_lines(group, check))
             lines.append("")
+
+        dup_lines = self._duplicate_lines(groups)
+        lines.append("== Duplicate statement rows (findings) ==")
+        lines.extend(dup_lines if dup_lines else ["  none"])
+        lines.append("")
+
+        pair_lines = self._pair_lines(results)
+        lines.append("== Symbol pairs (CSV-only vs PDF-only) ==")
+        lines.extend(pair_lines if pair_lines else ["  none"])
+        lines.append("")
+
         lines.extend(self._import_lines(imports))
         with open(out_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines).rstrip() + "\n")
 
-    def _print_summary(self, accounts, results, imports):
+    def _print_summary(self, accounts, results, groups, imports):
         per_account = {}
         for _group, check in results:
             entry = per_account.setdefault(
@@ -172,6 +215,9 @@ class Command(BaseCommand):
             f"Totals: FIRST={totals['FIRST']} NO_CSV={totals['NO_CSV']} "
             f"PASS={totals['PASS']} FAIL={totals['FAIL']}"
         )
+        dup_lines = self._duplicate_lines(groups)
+        self.stdout.write(f"Duplicate statement rows (findings): {len(dup_lines)}")
+        self.stdout.writelines(f"{line}\n" for line in dup_lines)
         self.stdout.write(
             f"Import log: parked={len(imports['parked'])} "
             f"conflicts={len(imports['conflicts'])} annual={len(imports['annual'])} "

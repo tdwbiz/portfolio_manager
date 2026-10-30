@@ -202,14 +202,15 @@ class Command(BaseCommand):
             )
 
         elif tx_type in ['SELL', 'SOLD']:
-            # SELL: DEBIT cash (in) + CREDIT position (out)
+            # SELL: DEBIT cash (in) + CREDIT position (out). Quantity is
+            # signed (dry-run fix C) — the CREDIT entry takes the magnitude.
             entries_created += self._create_cash_entry(
                 cash_ledger, tx, statement_month, 'DEBIT',
                 abs(tx.amount_cad), f"SELL {tx.symbol}"
             )
             entries_created += self._create_position_entry(
                 tx, statement_month, 'CREDIT',
-                tx.quantity, abs(tx.amount_cad), f"SELL {tx.symbol}"
+                abs(tx.quantity), abs(tx.amount_cad), f"SELL {tx.symbol}"
             )
 
         elif tx_type in ['DIV', 'DIVIDEND', 'DIST', 'INT', 'INTEREST_RECEIVED', 'RETURN_OF_CAPITAL', 'WITHTAX']:

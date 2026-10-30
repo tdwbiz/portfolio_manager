@@ -98,36 +98,104 @@ class Command(BaseCommand):
 
         imported_total = 0
         errors = 0
+        activity_reports = []   # dry-run only — feeds the near-duplicate report
+        seen_hashes: set = set()   # dry-run only (review fix 3): tx_hash values
+                                   # already seen in an earlier file of this run
 
         for file_path in csv_files:
             filename = os.path.basename(file_path)
             self.stdout.write(f"Importing: {filename}")
             try:
-                imported_count, skipped_count, parsed_count = auto_import(file_path, 'RBC', dry_run=dry_run)
-                # Only flag as error when parser found zero trades
-                if parsed_count == 0 and not dry_run:
-                    self.stderr.write(f"  WARNING: No trades parsed from {filename}")
+                report = auto_import(file_path, 'RBC', dry_run=dry_run,
+                                     seen_hashes=seen_hashes)
+
+                # Row accounting per file (plan step 3):
+                # data rows = imported + duplicates + practice + rejected.
+                # Footer rows (RBC disclaimer block) are counted separately
+                # and sit outside the data-row sum (dry-run fix A).
+                rejected_total = sum(report.rejected.values())
+                self.stdout.write(
+                    f"  Rows: {report.data_rows} data = "
+                    f"{report.imported} imported + {report.duplicates} duplicates"
+                    f" + {report.practice} practice + {rejected_total} rejected"
+                    f" (+{report.footer} footer)"
+                )
+                # Rejections by reason (never carries Account column
+                # values — the parser keeps those in 'Account ID' only).
+                for reason, count in sorted(report.rejected.items()):
+                    self.stdout.write(f"    rejected ({count}): {reason}")
+
+                # A row-count mismatch (decision 4) or any other exception
+                # (review fix 2) fails the whole file — nothing stored,
+                # FileImportLog status error, run continues with the next.
+                if report.failed:
+                    self.stderr.write(self.style.ERROR(
+                        f"  FILE FAILED — nothing stored for {filename}: "
+                        f"{report.fail_reason}"
+                    ))
+                    errors += 1
+                    if not dry_run:
+                        dest = errors_dir / filename
+                        _move_file(Path(file_path), dest)
+                        self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                    continue
+
+                # Only flag as error when the parser found no data rows
+                if report.data_rows == 0 and not dry_run:
+                    self.stderr.write(f"  WARNING: No data rows parsed from {filename}")
                     errors += 1
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
                     continue
+
+                if report.dry_run:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  [DRY-RUN] would import {report.imported}, "
+                        f"{report.duplicates} duplicates, "
+                        f"{rejected_total} rejected"
+                    ))
+                    # Per account name / type / month (plan step 6) — names,
+                    # dates and counts only, never Account column values.
+                    for (name, tx_type, month), counts in sorted(
+                            report.breakdown.items()):
+                        self.stdout.write(
+                            f"    {name} {tx_type} {month}: "
+                            f"{counts['import']} would import, "
+                            f"{counts['duplicate']} duplicates"
+                        )
+                    # Negative-quantity rows, per transaction type (review
+                    # fix 5; quantity is stored signed — dry-run fix C).
+                    if report.neg_qty_by_type:
+                        parts = ', '.join(
+                            f'{t} {n}'
+                            for t, n in sorted(report.neg_qty_by_type.items()))
+                        self.stdout.write(f"    negative quantity in CSV: {parts}")
+                    else:
+                        self.stdout.write("    negative quantity in CSV: none")
+                    activity_reports.append(report)
+                    continue
+
+                # Nothing imported and nothing matched (e.g. every row was
+                # rejected) — the file is an error.
+                if report.imported == 0 and report.duplicates == 0:
+                    errors += 1
+                    dest = errors_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                    continue
+
                 # Track success (even if all trades were duplicates — still a valid import)
                 imported_total += 1
-                if parsed_count > 0 and imported_count == 0:
-                    if skipped_count > 0:
-                        self.stdout.write(self.style.SUCCESS(
-                            f"  All {parsed_count} trades already imported ({skipped_count} duplicates, no new transactions)"
-                        ))
-                    else:
-                        self.stdout.write(self.style.SUCCESS(
-                            f"  All {parsed_count} trades already imported (no new transactions)"
-                        ))
+                if report.imported == 0 and report.duplicates > 0:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  All {report.data_rows} rows already imported "
+                        f"({report.duplicates} duplicates, no new transactions)"
+                    ))
                 # Move to processed/ on success
-                if not dry_run:
-                    dest = processed_dir / filename
-                    _move_file(Path(file_path), dest)
-                    self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
+                dest = processed_dir / filename
+                _move_file(Path(file_path), dest)
+                self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
             except Exception as e:
                 self.stderr.write(f"  ERROR importing {filename}: {e}")
                 errors += 1
@@ -136,6 +204,26 @@ class Command(BaseCommand):
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+
+        # Near-duplicates across files (plan step 6, dry-run only): same
+        # account, date, symbol and value in different files but differing
+        # in another field. Fully identical rows are plain duplicates.
+        if dry_run and len(activity_reports) > 1:
+            near = _find_near_duplicates(activity_reports)
+            if near:
+                self.stdout.write(self.style.WARNING(
+                    f"Near-duplicates across files ({len(near)}):"
+                ))
+                for a, b, diffs in near:
+                    detail = ', '.join(
+                        f"{f}: {a[f]} vs {b[f]}" for f in diffs
+                    )
+                    self.stdout.write(
+                        f"  {a['filename']} row {a['row_number']} vs "
+                        f"{b['filename']} row {b['row_number']} "
+                        f"({a['account']}, {a['date']}, {a['symbol']}, "
+                        f"{a['value']}): {detail}"
+                    )
 
         # Report final counts
         if not dry_run:
@@ -352,6 +440,67 @@ class Command(BaseCommand):
             f"Total: {created_total} created, {closed_total} closed "
             f"({duplicates} duplicates, {errors} errors)"
         )
+
+
+_NEAR_DUP_FIELDS = ('account', 'date', 'symbol', 'value',
+                     'type', 'quantity', 'price', 'currency',
+                     'settlement_date')
+
+
+def _row_signature(row: dict) -> tuple:
+    """Full data signature of a dry-run row (all fields except file/line)."""
+    return tuple(row[f] for f in _NEAR_DUP_FIELDS)
+
+
+def _find_near_duplicates(reports: list) -> list[tuple[dict, dict, list[str]]]:
+    """Rows in different files with the same account, date, symbol and value
+    that differ in another field (plan step 6).
+
+    A row that has an exact duplicate in the other file is never reported
+    as a near-duplicate (dry-run fix D): without this, two rows of one
+    file that share account/date/symbol/value with each other and are both
+    exactly duplicated in the other file produce spurious cross-pairing
+    reports. Any pair involving such a row is skipped.
+
+    Returns ``(row_a, row_b, differing_fields)`` tuples. Rows are names,
+    dates and counts only — never Account column values.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for report in reports:
+        for row in report.rows:
+            key = (row['account'], row['date'], row['symbol'], row['value'])
+            groups.setdefault(key, []).append(row)
+
+    # Signatures per file: a row whose signature also appears in a different
+    # file has an exact duplicate there and is never reported (fix D).
+    sigs_by_file: dict[str, set] = {}
+    for report in reports:
+        for row in report.rows:
+            sigs_by_file.setdefault(row['filename'], set()).add(
+                _row_signature(row))
+
+    def has_exact_duplicate_elsewhere(row: dict) -> bool:
+        sig = _row_signature(row)
+        return any(sig in sigs
+                   for fname, sigs in sigs_by_file.items()
+                   if fname != row['filename'])
+
+    compare_fields = ('type', 'quantity', 'price', 'currency', 'settlement_date')
+    near_dups: list[tuple[dict, dict, list[str]]] = []
+    for rows in groups.values():
+        if len({r['filename'] for r in rows}) < 2:
+            continue
+        for i, a in enumerate(rows):
+            for b in rows[i + 1:]:
+                if a['filename'] == b['filename']:
+                    continue
+                if (has_exact_duplicate_elsewhere(a)
+                        or has_exact_duplicate_elsewhere(b)):
+                    continue
+                diffs = [f for f in compare_fields if a[f] != b[f]]
+                if diffs:
+                    near_dups.append((a, b, diffs))
+    return near_dups
 
 
 def _holdings_safe_name(snapshot_date, full_hash: str) -> str:

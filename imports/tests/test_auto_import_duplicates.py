@@ -66,12 +66,12 @@ class DuplicateLogLineTests(TestCase):
         # row position (same tx_hash → duplicate) plus a new trade, so the
         # file-level content-hash dedupe does not skip it wholesale.
         first = self._write_csv("first.csv", [RBC_ROW_A])
-        imported, skipped, _ = auto_import(first, "RBC")
-        self.assertEqual((imported, skipped), (1, 0))
+        report = auto_import(first, "RBC")
+        self.assertEqual((report.imported, report.duplicates), (1, 0))
 
         second = self._write_csv("second.csv", [RBC_ROW_A, RBC_ROW_B])
-        imported, skipped, _ = auto_import(second, "RBC")
-        self.assertEqual((imported, skipped), (1, 1))
+        report = auto_import(second, "RBC")
+        self.assertEqual((report.imported, report.duplicates), (1, 1))
 
         dup_path = os.path.join(
             self.temp_dir, "docs", "reconciliation", "CSV_Duplicates.csv"

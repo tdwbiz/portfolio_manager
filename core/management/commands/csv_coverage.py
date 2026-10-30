@@ -116,7 +116,7 @@ class Command(BaseCommand):
 
             rejections = []
             try:
-                trades, _rate = parse_rbc_csv(path, rejections=rejections)
+                trades, _rate, _accounting = parse_rbc_csv(path, rejections=rejections)
             except Exception as exc:  # non-Activity CSV or unreadable file
                 file_reports.append({'name': name, 'error': str(exc)})
                 continue

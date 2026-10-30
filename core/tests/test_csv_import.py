@@ -156,7 +156,7 @@ class RbcCsvParserTests(TestCase):
              '-6000.00', 'CAD'],
         ])
 
-        trades, rate = parse_rbc_csv(path)
+        trades, rate, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         trade = trades[0]
         self.assertEqual(trade['date'], date(2025, 10, 8))
@@ -175,7 +175,7 @@ class RbcCsvParserTests(TestCase):
              'Value', 'Currency'],
         ])
 
-        _, rate = parse_rbc_csv(path)
+        _, rate, _ = parse_rbc_csv(path)
         self.assertEqual(rate, Decimal('1.3720'))
 
     def test_skips_practice_accounts(self):
@@ -189,7 +189,7 @@ class RbcCsvParserTests(TestCase):
              '-1500.00', 'USD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_multiple_trades_parsed(self):
@@ -207,7 +207,7 @@ class RbcCsvParserTests(TestCase):
              '-1666.20', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 2)
 
         # Check first trade
@@ -760,20 +760,20 @@ class AutoImportTests(TestCase):
         self.statement.delete()
 
     def test_returns_count_zero_for_empty_file(self):
-        """auto_import should return (0, 0, 0) for files with no trades."""
+        """auto_import should report zero counts for files with no data rows."""
         path = self._write_csv([
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
         ])
 
-        imported, skipped, parsed = auto_import(path, 'RBC')
-        self.assertEqual(imported, 0)
-        self.assertEqual(skipped, 0)
-        self.assertEqual(parsed, 0)
+        report = auto_import(path, 'RBC')
+        self.assertEqual(report.imported, 0)
+        self.assertEqual(report.duplicates, 0)
+        self.assertEqual(report.data_rows, 0)
 
     def test_returns_count_of_imported_trades(self):
-        """auto_import should return (imported, skipped, parsed) counts."""
+        """auto_import should report imported / duplicates / data_rows."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -784,21 +784,21 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        imported, skipped, parsed = auto_import(path, 'RBC')
-        self.assertEqual(imported, 1)
-        self.assertEqual(skipped, 0)
-        self.assertEqual(parsed, 1)
+        report = auto_import(path, 'RBC')
+        self.assertEqual(report.imported, 1)
+        self.assertEqual(report.duplicates, 0)
+        self.assertEqual(report.data_rows, 1)
 
     def test_returns_zero_on_exception(self):
-        """auto_import should return (0, 0, 0) on exception."""
+        """auto_import should return a zero report for a missing file."""
         path = '/nonexistent/path/file.csv'
-        imported, skipped, parsed = auto_import(path, 'RBC')
-        self.assertEqual(imported, 0)
-        self.assertEqual(skipped, 0)
-        self.assertEqual(parsed, 0)
+        report = auto_import(path, 'RBC')
+        self.assertEqual(report.imported, 0)
+        self.assertEqual(report.duplicates, 0)
+        self.assertEqual(report.data_rows, 0)
 
     def test_dry_run_returns_count(self):
-        """auto_import with dry_run should return (0, 0, parsed_count)."""
+        """auto_import with dry_run reports rows that would be imported."""
         path = self._write_csv([
             ['Exchange Rate: 1 USD = 1.37 CAD'],
             ['Date', 'Activity', 'Symbol', 'Symbol Description',
@@ -809,10 +809,10 @@ class AutoImportTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        imported, skipped, parsed = auto_import(path, 'RBC', dry_run=True)
-        self.assertEqual(imported, 0)
-        self.assertEqual(skipped, 0)
-        self.assertEqual(parsed, 1)
+        report = auto_import(path, 'RBC', dry_run=True)
+        self.assertEqual(report.imported, 1)   # would be imported
+        self.assertEqual(report.duplicates, 0)
+        self.assertEqual(report.data_rows, 1)
 
     def _write_csv(self, rows: list[list[str]]) -> str:
         """Write CSV rows to a temp file and return the path."""

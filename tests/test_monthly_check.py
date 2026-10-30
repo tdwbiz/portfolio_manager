@@ -191,6 +191,35 @@ def test_quantity_fail(account):
 
 
 @pytest.mark.django_db
+def test_option_code_maps_to_pdf_option_text(account):
+    # The CSV uses RBC security codes; the PDF holdings show option text.
+    # Both must compare under the normalised option text (real-data fix 2).
+    jan = make_monthly(account, date(2021, 1, 29), end=Decimal("0"))
+    cash(jan, Decimal("1000"))
+    # PDF text without a space after CALL.
+    holding(jan, "CALLNVDA 07/30/21 210", Decimal("50"))
+    feb = make_monthly(account, date(2021, 2, 26), last_stmt=date(2021, 1, 29),
+                       begin=Decimal("0"), end=Decimal("0"))
+    cash(feb, Decimal("950"))
+    holding(feb, "CALL QQQ 03/31/21 321", Decimal("100"))
+
+    make_tx(account, date(2021, 2, 10), "BUY", Decimal("-100"),
+            symbol="9BSCCN2", qty=Decimal("100"), settlement=date(2021, 2, 12),
+            notes="BUY CALL QQQ 03/31/21 321")
+    # Strike with trailing zeros in the notes must normalise to the PDF's.
+    make_tx(account, date(2021, 2, 15), "SELL", Decimal("50"),
+            symbol="8UJDMB6", qty=Decimal("-50"), settlement=date(2021, 2, 17),
+            notes="SELL CALL NVDA 07/30/21 210.0")
+
+    checks = run_checks()
+    check = checks[("ACCOUNT_A", date(2021, 2, 26))]
+    res = cad(checks, "ACCOUNT_A", date(2021, 2, 26))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+    assert check.symbol_pairs == []
+
+
+@pytest.mark.django_db
 def test_gap_month_with_matching_chain_passes(account):
     jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
     cash(jan, Decimal("100"))

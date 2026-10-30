@@ -342,6 +342,60 @@ def check_cash(group, prev_group, currency):
     return lines
 
 
+# Option text as it appears in RBC PDF holdings and CSV transaction notes:
+# CALL/PUT, underlying, mm/dd/yy expiry, strike (real-data fix 2). The CSV
+# uses RBC security codes (9BSCCN2, 8UJDMB6) instead of this text.
+_OPTION_TEXT_RE = re.compile(
+    r"(?<![A-Z])(?P<side>CALL|PUT)\s*(?P<underlying>[A-Z0-9]+\.?)\s+"
+    r"(?P<m>\d{1,2})/(?P<d>\d{1,2})/(?P<y>\d{2,4})\s+(?P<strike>\d+(?:\.\d+)?)"
+)
+
+
+def normalize_option_text(text):
+    """Normalise option text for comparison (real-data fix 2).
+
+    'CALLNVDA 07/30/21 210.0' -> 'CALL NVDA 07/30/21 210': a space after
+    CALL/PUT, upper case, strike without trailing zeros. Returns None when
+    the text is not option text.
+    """
+    match = _OPTION_TEXT_RE.match((text or "").strip().upper())
+    if not match:
+        return None
+    strike = format(Decimal(match.group("strike")).normalize(), "f")
+    return (
+        f"{match.group('side')} {match.group('underlying')} "
+        f"{match.group('m')}/{match.group('d')}/{match.group('y')} {strike}"
+    )
+
+
+def option_text_from_notes(notes):
+    """Normalised option text found in a Transaction's notes, else None."""
+    match = _OPTION_TEXT_RE.search((notes or "").upper())
+    return normalize_option_text(match.group(0)) if match else None
+
+
+def _option_code_map(account_pk):
+    """CSV option code -> normalised option text (real-data fix 2).
+
+    The option text is taken from that symbol's Transaction notes (e.g.
+    'BUY CALL QQQ 03/31/21 321'); the first note carrying it wins.
+    """
+    out = {}
+    txs = (
+        Transaction.objects.filter(account_id=account_pk)
+        .exclude(symbol="")
+        .only("symbol", "notes")
+    )
+    for tx in txs:
+        sym = tx.symbol.strip()
+        if not sym or sym in out:
+            continue
+        text = option_text_from_notes(tx.notes)
+        if text is not None:
+            out[sym] = text
+    return out
+
+
 def _pdf_qty_map(rbc_rows):
     """Pooled quantity per symbol over the given RbcMonthly rows (all
     currencies — the DLR journal moves shares between the CAD and USD sides,
@@ -361,7 +415,10 @@ def check_holdings(group, prev_group):
 
     start = previous statement's holdings quantities per symbol + Σ signed
     Transaction.quantity in the period; must equal this statement's holdings
-    per symbol at 0.0001 tolerance (decision 3). Returns (failure_lines,
+    per symbol at 0.0001 tolerance (decision 3). CSV option codes are mapped
+    to their normalised option text from the transaction notes and PDF option
+    text is normalised in place, so both sides compare under one key
+    (real-data fix 2). Returns (failure_lines,
     symbol_pairs): pairs line up CSV-only and PDF-only symbols (sorted, by
     position) so a symbol map can be designed later; unmatched entries carry
     None on the missing side.
@@ -369,14 +426,31 @@ def check_holdings(group, prev_group):
     period_start = prev_group.statement_date
     period_end = group.statement_date
 
-    prev_qtys = _pdf_qty_map(list(prev_group.rows.values()))
-    cur_qtys = _pdf_qty_map(list(group.rows.values()))
+    option_map = _option_code_map(group.account_pk)
+
+    def norm(sym):
+        # CSV option codes map to their normalised option text (from the
+        # transaction notes); PDF option text is normalised in place.
+        s = sym.strip()
+        if s in option_map:
+            return option_map[s]
+        return normalize_option_text(s) or s
+
+    prev_qtys = {}
+    for sym, qty in _pdf_qty_map(list(prev_group.rows.values())).items():
+        key = norm(sym)
+        prev_qtys[key] = prev_qtys.get(key, Decimal("0")) + qty
+    cur_qtys = {}
+    for sym, qty in _pdf_qty_map(list(group.rows.values())).items():
+        key = norm(sym)
+        cur_qtys[key] = cur_qtys.get(key, Decimal("0")) + qty
 
     delta = {}
     for tx in period_transactions(
         group.account_pk, None, period_start, period_end
     ):
-        key = (tx.symbol or "").strip() or "(no symbol)"
+        raw = (tx.symbol or "").strip() or "(no symbol)"
+        key = norm(raw)
         delta[key] = delta.get(key, Decimal("0")) + tx.quantity
 
     expected = {}

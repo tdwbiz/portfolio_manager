@@ -29,7 +29,6 @@ import calendar
 from datetime import date, datetime
 
 from django.core.management.base import BaseCommand, CommandError
-from django.utils import timezone
 
 from core.models import Account, MonthlyException
 from core.utils.monthly_check import (
@@ -40,8 +39,10 @@ from core.utils.monthly_check import (
     scan_import_logs,
 )
 from core.utils.monthly_check_store import (
+    accept_exceptions,
     exceptions_from_check,
     import_exceptions_from_parked,
+    reopen_exception,
     store_exceptions,
     store_results,
 )
@@ -183,39 +184,16 @@ class Command(BaseCommand):
         reason = (options["reason"] or "").strip()
         if not reason:
             raise CommandError("--accept requires --reason TEXT")
-
-        qs = MonthlyException.objects.filter(
-            status=MonthlyException.STATUS_OPEN
-        ).select_related("account")
-        if options["row_id"] is not None:
-            qs = qs.filter(pk=options["row_id"])
-        if options["account"]:
-            qs = qs.filter(account__name=options["account"])
-        if options["kind"]:
-            qs = qs.filter(kind=options["kind"])
-        ref = options["ref"]
-        if ref:
-            if ref.endswith("*"):
-                qs = qs.filter(ref__startswith=ref[:-1])
-            else:
-                qs = qs.filter(ref=ref)
         month_start, month_end = self._month_window(options)
-        if month_start is not None:
-            qs = qs.filter(statement_date__gte=month_start)
-        if month_end is not None:
-            qs = qs.filter(statement_date__lte=month_end)
-
-        now = timezone.now()
-        per = {}
-        count = 0
-        for row in qs:
-            row.status = MonthlyException.STATUS_ACCEPTED
-            row.reason = reason
-            row.accepted_at = now
-            row.save()
-            key = (row.account.name, row.kind)
-            per[key] = per.get(key, 0) + 1
-            count += 1
+        count, per = accept_exceptions(
+            reason,
+            row_id=options["row_id"],
+            account_name=options["account"],
+            kind=options["kind"],
+            ref=options["ref"],
+            month_start=month_start,
+            month_end=month_end,
+        )
         self.stdout.write(f"Accepted {count} exception(s)")
         for (name, kind), n in sorted(per.items()):
             self.stdout.write(f"  {name} {kind}: {n}")
@@ -227,20 +205,9 @@ class Command(BaseCommand):
         reason = (options["reason"] or "").strip()
         if not reason:
             raise CommandError("--reopen requires --reason TEXT")
-        row = (
-            MonthlyException.objects.filter(pk=options["row_id"])
-            .select_related("account")
-            .first()
-        )
+        row = reopen_exception(options["row_id"], reason)
         if row is None:
             raise CommandError(f"no exception with id {options['row_id']}")
-        now = timezone.now()
-        row.status = MonthlyException.STATUS_OPEN
-        row.resolved_at = None
-        row.accepted_at = None
-        note = f"[reopened {now:%Y-%m-%d}: {reason}]"
-        row.detail = (row.detail + "\n" if row.detail else "") + note
-        row.save()
         self.stdout.write(
             f"Reopened exception {row.pk} ({row.account.name} "
             f"{row.statement_date} {row.kind})"

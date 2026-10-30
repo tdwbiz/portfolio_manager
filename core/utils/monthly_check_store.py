@@ -139,6 +139,84 @@ def import_exceptions_from_parked(parked):
     return exceptions, skipped
 
 
+def accept_exceptions(
+    reason,
+    *,
+    row_id=None,
+    account_name=None,
+    kind=None,
+    ref=None,
+    month_start=None,
+    month_end=None,
+):
+    """Accept open exceptions matching all filters (a note only).
+
+    Same rules as the command's ``--accept``: only rows with status open are
+    touched; ``ref`` is an exact match or a prefix ending in ``*`` (e.g.
+    ``RBF*``); the month window bounds ``statement_date``. Each matched row
+    gets ``status=accepted``, ``reason`` and ``accepted_at=now``. Never
+    touches transactions, statements or results.
+
+    Returns ``(count, per)`` where ``per`` maps (account name, kind) -> count.
+    """
+    qs = MonthlyException.objects.filter(
+        status=MonthlyException.STATUS_OPEN
+    ).select_related("account")
+    if row_id is not None:
+        qs = qs.filter(pk=row_id)
+    if account_name:
+        qs = qs.filter(account__name=account_name)
+    if kind:
+        qs = qs.filter(kind=kind)
+    if ref:
+        if ref.endswith("*"):
+            qs = qs.filter(ref__startswith=ref[:-1])
+        else:
+            qs = qs.filter(ref=ref)
+    if month_start is not None:
+        qs = qs.filter(statement_date__gte=month_start)
+    if month_end is not None:
+        qs = qs.filter(statement_date__lte=month_end)
+
+    now = timezone.now()
+    per = {}
+    count = 0
+    for row in qs:
+        row.status = MonthlyException.STATUS_ACCEPTED
+        row.reason = reason
+        row.accepted_at = now
+        row.save()
+        key = (row.account.name, row.kind)
+        per[key] = per.get(key, 0) + 1
+        count += 1
+    return count, per
+
+
+def reopen_exception(row_id, reason):
+    """Reopen one exception: status open + reason note appended to detail.
+
+    Same rules as the command's ``--reopen``: ``resolved_at`` and
+    ``accepted_at`` are cleared and ``[reopened YYYY-MM-DD: reason]`` is
+    appended to ``detail``. Returns the row, or None when no exception has
+    that id.
+    """
+    row = (
+        MonthlyException.objects.filter(pk=row_id)
+        .select_related("account")
+        .first()
+    )
+    if row is None:
+        return None
+    now = timezone.now()
+    row.status = MonthlyException.STATUS_OPEN
+    row.resolved_at = None
+    row.accepted_at = None
+    note = f"[reopened {now:%Y-%m-%d}: {reason}]"
+    row.detail = (row.detail + "\n" if row.detail else "") + note
+    row.save()
+    return row
+
+
 def store_results(results):
     """Upsert one MonthlyCheckResult per (group, currency verdict).
 

@@ -103,31 +103,77 @@ class Command(BaseCommand):
             filename = os.path.basename(file_path)
             self.stdout.write(f"Importing: {filename}")
             try:
-                imported_count, skipped_count, parsed_count = auto_import(file_path, 'RBC', dry_run=dry_run)
-                # Only flag as error when parser found zero trades
-                if parsed_count == 0 and not dry_run:
-                    self.stderr.write(f"  WARNING: No trades parsed from {filename}")
+                report = auto_import(file_path, 'RBC', dry_run=dry_run)
+
+                # Row accounting per file (plan step 3):
+                # data rows = imported + duplicates + practice + rejected.
+                rejected_total = sum(report.rejected.values())
+                if not report.content_duplicate:
+                    self.stdout.write(
+                        f"  Rows: {report.data_rows} data = "
+                        f"{report.imported} imported + {report.duplicates} duplicates"
+                        f" + {report.practice} practice + {rejected_total} rejected"
+                    )
+
+                # A row-count mismatch fails the whole file atomically —
+                # nothing stored, FileImportLog status error (decision 4).
+                if report.failed:
+                    self.stderr.write(self.style.ERROR(
+                        f"  ROW COUNT MISMATCH — file failed atomically "
+                        f"(nothing stored): {report.fail_reason}"
+                    ))
+                    errors += 1
+                    if not dry_run:
+                        dest = errors_dir / filename
+                        _move_file(Path(file_path), dest)
+                        self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                    continue
+
+                # Identical content already imported — nothing to do.
+                if report.content_duplicate:
+                    if not dry_run:
+                        dest = processed_dir / filename
+                        _move_file(Path(file_path), dest)
+                        self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
+                    continue
+
+                # Only flag as error when the parser found no data rows
+                if report.data_rows == 0 and not dry_run:
+                    self.stderr.write(f"  WARNING: No data rows parsed from {filename}")
                     errors += 1
                     dest = errors_dir / filename
                     _move_file(Path(file_path), dest)
                     self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
                     continue
+
+                if report.dry_run:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  [DRY-RUN] would import {report.imported}, "
+                        f"{report.duplicates} duplicates, "
+                        f"{rejected_total} rejected"
+                    ))
+                    continue
+
+                # Nothing imported and nothing matched (e.g. every row was
+                # rejected) — the file is an error.
+                if report.imported == 0 and report.duplicates == 0:
+                    errors += 1
+                    dest = errors_dir / filename
+                    _move_file(Path(file_path), dest)
+                    self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
+                    continue
+
                 # Track success (even if all trades were duplicates — still a valid import)
                 imported_total += 1
-                if parsed_count > 0 and imported_count == 0:
-                    if skipped_count > 0:
-                        self.stdout.write(self.style.SUCCESS(
-                            f"  All {parsed_count} trades already imported ({skipped_count} duplicates, no new transactions)"
-                        ))
-                    else:
-                        self.stdout.write(self.style.SUCCESS(
-                            f"  All {parsed_count} trades already imported (no new transactions)"
-                        ))
+                if report.imported == 0 and report.duplicates > 0:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  All {report.data_rows} rows already imported "
+                        f"({report.duplicates} duplicates, no new transactions)"
+                    ))
                 # Move to processed/ on success
-                if not dry_run:
-                    dest = processed_dir / filename
-                    _move_file(Path(file_path), dest)
-                    self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
+                dest = processed_dir / filename
+                _move_file(Path(file_path), dest)
+                self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
             except Exception as e:
                 self.stderr.write(f"  ERROR importing {filename}: {e}")
                 errors += 1

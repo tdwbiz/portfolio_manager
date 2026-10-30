@@ -486,8 +486,11 @@ def parse_rbc_csv(file_path: str,
         file_path: Path to the RBC CSV file.
 
     Returns:
-        Tuple of (trades_list, usd_to_cad_rate).
+        Tuple of (trades_list, usd_to_cad_rate, accounting).
         Rate is Decimal('1.0') if not found in file.
+        ``accounting`` counts every data row of the file:
+        ``data_rows = imported + practice + sum(rejected.values())``
+        where ``rejected`` maps rejection reason → count.
     """
 
     if rejections is None:
@@ -496,6 +499,10 @@ def parse_rbc_csv(file_path: str,
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
     filename = os.path.basename(file_path)
+    # Per-file row accounting (plan step 3): every data row is accounted for.
+    accounting: dict[str, Any] = {
+        'data_rows': 0, 'imported': 0, 'practice': 0, 'rejected': {},
+    }
 
     # Column mapping (will be set when header is found)
     col_map: dict[str, int] = {}
@@ -545,6 +552,9 @@ def parse_rbc_csv(file_path: str,
                 if not found_header:
                     continue
 
+                # Every data row after the header is counted, whatever its fate.
+                accounting['data_rows'] += 1
+
                 cleaned = [cell.strip().strip('"') for cell in row]
 
                 def _cell(field: str) -> str:
@@ -554,15 +564,26 @@ def parse_rbc_csv(file_path: str,
                         return ''
                     return cleaned[idx]
 
-                activity = _cell('activity')
-                if not activity:
+                def _reject(reason: str, **fields) -> None:
+                    """Record a rejected row and count it by reason."""
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': 'Missing activity type',
-                        'Date': _cell('date'), 'Type': '', 'Symbol': _cell('symbol'),
-                        'Quantity': '', 'Price': '', 'Amount': _cell('value'),
-                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
+                        'Reason Rejected': reason,
+                        'Date': fields.get('date', ''), 'Type': fields.get('type', ''),
+                        'Symbol': fields.get('symbol', ''), 'Quantity': fields.get('quantity', ''),
+                        'Price': fields.get('price', ''), 'Amount': fields.get('amount', ''),
+                        'Currency': fields.get('currency', ''),
+                        'Account ID': fields.get('account_id', ''),
+                        'Notes': fields.get('notes', ''),
                     })
+                    accounting['rejected'][reason] = (
+                        accounting['rejected'].get(reason, 0) + 1
+                    )
+
+                activity = _cell('activity')
+                if not activity:
+                    _reject('Missing activity type', date=_cell('date'), symbol=_cell('symbol'),
+                            amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
                     continue
 
                 type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
@@ -571,39 +592,24 @@ def parse_rbc_csv(file_path: str,
                 if trade_date is None:
                     bad_date = _cell('date')
                     logger.warning("Row %d: Could not parse date '%s'", row_num, bad_date)
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': 'Invalid date: ' + repr(bad_date),
-                        'Date': bad_date, 'Type': activity, 'Symbol': _cell('symbol'),
-                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
-                        'Amount': _cell('value'),
-                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
-                    })
+                    _reject('Invalid date: ' + repr(bad_date), date=bad_date, type=activity,
+                            symbol=_cell('symbol'), quantity=_cell('quantity'), price=_cell('price'),
+                            amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
                     continue
 
                 # Settlement date is mandatory (plan decision 1): a blank or
                 # unreadable cell rejects the row — it never becomes NULL.
                 raw_sd = _cell('settlement').strip()
                 if not raw_sd:
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': 'Missing settlement date',
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
-                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
-                        'Amount': _cell('value'),
-                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
-                    })
+                    _reject('Missing settlement date', date=str(trade_date), type=activity,
+                            symbol=_cell('symbol'), quantity=_cell('quantity'), price=_cell('price'),
+                            amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
                     continue
                 settlement_date = parse_csv_date(raw_sd)
                 if settlement_date is None:
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': 'Invalid settlement date: ' + repr(raw_sd),
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
-                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
-                        'Amount': _cell('value'),
-                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
-                    })
+                    _reject('Invalid settlement date: ' + repr(raw_sd), date=str(trade_date), type=activity,
+                            symbol=_cell('symbol'), quantity=_cell('quantity'), price=_cell('price'),
+                            amount=_cell('value'), currency=_cell('currency'), account_id=_cell('account'))
                     continue
 
                 def _to_decimal(val: str) -> Decimal:
@@ -629,13 +635,9 @@ def parse_rbc_csv(file_path: str,
                     reason = ('Invalid numeric fields (qty=' + repr(bad_qty)
                                + ', price=' + repr(bad_price)
                                + ', amount=' + repr(bad_amount) + ')')
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': reason,
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
-                        'Quantity': bad_qty, 'Price': bad_price, 'Amount': bad_amount,
-                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': _cell('notes'),
-                    })
+                    _reject(reason, date=str(trade_date), type=activity, symbol=_cell('symbol'),
+                            quantity=bad_qty, price=bad_price, amount=bad_amount,
+                            currency=_cell('currency'), account_id=_cell('account'), notes=_cell('notes'))
                     continue
 
                 # Commission only meaningful for trade types
@@ -651,13 +653,16 @@ def parse_rbc_csv(file_path: str,
                 symbol     = _cell('symbol')
                 notes      = _cell('notes')
 
-                # Capture Account column — skip practice accounts
+                # Capture Account column — skip practice accounts. The reason
+                # never carries the raw number (it may be printed); the
+                # 'Account ID' field keeps it for local log files only.
                 account_id = _cell('account').strip().upper()
                 if account_id.startswith('PRAC'):
                     logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
+                    accounting['practice'] += 1
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': f'Practice account: {account_id}',
+                        'Reason Rejected': 'Practice account',
                         'Date': str(trade_date), 'Type': activity, 'Symbol': symbol,
                         'Quantity': str(quantity), 'Price': str(price), 'Amount': str(amount),
                         'Currency': currency, 'Account ID': account_id, 'Notes': notes,
@@ -667,15 +672,12 @@ def parse_rbc_csv(file_path: str,
                 # Skip accounts whose number has no stored fingerprint
                 if account_id and not is_known_account(account_id):
                     logger.debug(f"Row {row_num}: Skipping unknown account '{account_id}'")
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': f'Unknown account: {account_id}',
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': symbol,
-                        'Quantity': str(quantity), 'Price': str(price), 'Amount': str(amount),
-                        'Currency': currency, 'Account ID': account_id, 'Notes': notes,
-                    })
+                    _reject('Unknown account', date=str(trade_date), type=activity, symbol=symbol,
+                            quantity=str(quantity), price=str(price), amount=str(amount),
+                            currency=currency, account_id=account_id, notes=notes)
                     continue
 
+                accounting['imported'] += 1
                 trades.append({
                     'date':              trade_date,
                     'settlement_date':   settlement_date,
@@ -699,4 +701,4 @@ def parse_rbc_csv(file_path: str,
         raise PermissionError(f"Permission denied: {file_path}")
 
     logger.info(f"Parsed {len(trades)} trades from RBC CSV")
-    return trades, usd_to_cad_rate
+    return trades, usd_to_cad_rate, accounting

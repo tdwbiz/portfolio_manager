@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -62,42 +63,78 @@ def _setup_duplicate_logger() -> None:
         dup_logger.addHandler(console_handler)
 
 
-def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int, int, int]:
+@dataclass
+class ImportReport:
+    """Per-file import report (plan step 3/6).
+
+    Row accounting: ``data_rows = imported + duplicates + practice +
+    sum(rejected.values())``. In a dry run, ``imported`` is the number of
+    rows that would be imported.
+    """
+    filename: str = ''
+    broker: str = ''
+    dry_run: bool = False
+    data_rows: int = 0          # data rows seen in the file
+    imported: int = 0           # created (or, in a dry run, would be created)
+    duplicates: int = 0         # skipped because the tx_hash is already stored
+    practice: int = 0           # PRAC* rows
+    rejected: dict = field(default_factory=dict)   # reason -> count
+    failed: bool = False        # row-count mismatch — file failed atomically
+    fail_reason: str = ''
+    content_duplicate: bool = False   # whole file skipped (content hash)
+
+    def accounted(self) -> int:
+        return (self.imported + self.duplicates + self.practice
+                + sum(self.rejected.values()))
+
+
+class _AccountingMismatch(Exception):
+    """A file's row accounting does not add up (parser bug — plan decision 4)."""
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
+def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportReport:
     """
     Import a broker statement file.
-    
+
     Args:
         file_path: Path to the CSV file.
         broker: 'IB' or 'RBC'.
-        dry_run: If True, only parse and report.
-    
+        dry_run: If True, only parse and report (no DB writes).
+
     Returns:
-        Tuple of (imported_count, skipped_count, parsed_count).
-        - dry_run: parsed_count = number of trades found (imported_count, skipped_count always 0)
-        - actual: imported_count = transactions written to DB,
-                  skipped_count = duplicates already in DB,
-                  parsed_count = total trades found by parser
+        An :class:`ImportReport` with per-file row accounting. A row-count
+        mismatch fails the whole file atomically (nothing stored), records a
+        ``FileImportLog`` with status ``error`` carrying the counts, and sets
+        ``report.failed`` so the caller can continue with the next file.
     """
+    filename = os.path.basename(file_path)
+    report = ImportReport(filename=filename, broker=broker, dry_run=dry_run)
+
     # One query for the fingerprint->name map; scrub_text must never query
     # per candidate (SQL Server without MARS).
     name_map = build_fingerprint_name_map()
 
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
-        return (0, 0, 0)
+        return report
 
     # Read file bytes for hashing
     with open(file_path, 'rb') as f:
         file_bytes = f.read()
-    
+
     content_hash = hashlib.sha256(file_bytes).hexdigest()
 
     # Check for duplicate file content (skip if found, unless dry-run)
     if not dry_run:
         prior_log = FileImportLog.objects.filter(content_hash=content_hash).first()
         if prior_log:
-            logger.warning(f"Skipping {os.path.basename(file_path)}: identical content already imported as {prior_log.filename}")
-            return (0, 0, 1)
+            logger.warning(f"Skipping {filename}: identical content already imported as {prior_log.filename}")
+            report.content_duplicate = True
+            return report
 
     # Setup import tracking
     import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')
@@ -113,23 +150,48 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
     exchange_rate_cad: Decimal = Decimal('1.000000')
     if broker == 'IB':
         trades = parse_ib_csv(file_path, rejections)
+        # The IB parser returns no accounting — derive it from its output so
+        # the row-accounting invariant still holds for this path.
+        practice = sum(
+            1 for r in rejections
+            if r['Reason Rejected'].startswith('Practice account')
+        )
+        rejected_counts: dict[str, int] = {}
+        for r in rejections:
+            if r['Reason Rejected'].startswith('Practice account'):
+                continue
+            reason = r['Reason Rejected']
+            rejected_counts[reason] = rejected_counts.get(reason, 0) + 1
+        accounting = {
+            'data_rows': len(trades) + len(rejections),
+            'imported': len(trades),
+            'practice': practice,
+            'rejected': rejected_counts,
+        }
     elif broker == 'RBC':
-        trades, exchange_rate_cad = parse_rbc_csv(file_path, rejections)
+        trades, exchange_rate_cad, accounting = parse_rbc_csv(file_path, rejections)
     else:
         logger.error(f"Unsupported broker type: {broker}")
-        return (0, 0, 0)
+        return report
 
-    if not trades:
-        logger.warning("No trades found in the file.")
-        return (0, 0, 0)
+    report.data_rows = accounting['data_rows']
+    report.practice = accounting['practice']
+    report.rejected = dict(accounting['rejected'])
+
+    if report.data_rows == 0:
+        logger.warning("No data rows found in the file.")
+        return report
 
     logger.info(f"Found {len(trades)} trades to import.")
 
     if dry_run:
+        # Nothing is written. Every parsed row would be imported (the
+        # duplicate check against the DB arrives with the dry-run report).
+        report.imported = len(trades)
         logger.info("Dry run complete. No changes made to the database.")
         for i, trade in enumerate(trades, 1):
             logger.info(f"  {i}. {trade}")
-        return (0, 0, len(trades))
+        return report
 
     # Set up duplicate logger — writes CSV with line numbers
     _setup_duplicate_logger()
@@ -137,7 +199,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
 
     # Import to DB
     imported_count = 0
-    skipped_count = 0
+    duplicate_count = 0
     try:
         with transaction.atomic():
             # Create BrokerStatement
@@ -151,19 +213,19 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
             for trade in trades:
                 # Get account_id from trade
                 raw_account_id = trade.get('account_id', '').strip().upper()
-                
-                # Skip PRACEF practice accounts
+
+                # Defensive: the RBC parser already rejects PRAC* rows.
                 if raw_account_id.startswith('PRACEF'):
-                    skipped_count += 1
+                    report.practice += 1
                     continue
-                
+
                 # Normalize account ID to 8-digit canonical form
                 if raw_account_id:
                     digits = re.sub(r'\D', '', raw_account_id)
                     normalized_id = digits[:8] if len(digits) >= 8 else digits
                 else:
                     normalized_id = None
-                
+
                 if raw_account_id:
                     account = lookup_account(raw_account_id)
                     if account is None:
@@ -171,11 +233,15 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                             "Unknown account fingerprint — skipping transaction "
                             "(do not auto-create accounts from CSV)"
                         )
-                        skipped_count += 1
+                        report.rejected['Unknown account'] = (
+                            report.rejected.get('Unknown account', 0) + 1
+                        )
                         continue
                 else:
                     account = None
-                    skipped_count += 1
+                    report.rejected['Missing account'] = (
+                        report.rejected.get('Missing account', 0) + 1
+                    )
                     continue
 
                 # Compute tx_hash for deduplication, then wrap it: the stored
@@ -196,7 +262,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
 
                 # Check for duplicate by tx_hash
                 if Transaction.objects.filter(tx_hash=tx_hash).exists():
-                    skipped_count += 1
+                    duplicate_count += 1
                     row_num = trade.get('row_number', '')
                     # Write duplicate detail to dedicated logfile
                     dup_logger.info(
@@ -266,24 +332,54 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                 statement.period_end = max(trade_dates)
                 statement.save(update_fields=['period_start', 'period_end'])
 
+            # Row accounting must add up (plan decision 4): a mismatch is a
+            # parser bug — fail the whole file atomically, store nothing.
+            accounted = (imported_count + duplicate_count + report.practice
+                         + sum(report.rejected.values()))
+            if accounted != report.data_rows:
+                raise _AccountingMismatch(
+                    f"Row count mismatch in {filename}: data rows="
+                    f"{report.data_rows}, accounted={accounted} "
+                    f"(imported={imported_count}, duplicates={duplicate_count}, "
+                    f"practice={report.practice}, "
+                    f"rejected={sum(report.rejected.values())})"
+                )
+
             # Save file import log
             FileImportLog.objects.create(
                 filename=os.path.basename(file_path),
                 broker=broker,
                 records_imported=imported_count,
-                records_skipped=skipped_count,
+                records_skipped=duplicate_count,
                 status='success' if imported_count > 0 else 'partial',
                 content_hash=content_hash,
             )
 
-            logger.info(f"Successfully imported {imported_count} transactions ({skipped_count} duplicates skipped).")
+            logger.info(f"Successfully imported {imported_count} transactions ({duplicate_count} duplicates skipped).")
 
             # Roll back the BrokerStatement if nothing was actually imported
             if imported_count == 0:
                 statement.delete()
 
+    except _AccountingMismatch as e:
+        # The transaction above rolled back — nothing is stored for this
+        # file. Record the failure and let the run continue with the next.
+        FileImportLog.objects.create(
+            filename=filename,
+            broker=broker,
+            records_imported=0,
+            records_skipped=0,
+            status='error',
+            error_message=e.message,
+            content_hash=content_hash,
+        )
+        report.failed = True
+        report.fail_reason = e.message
     except Exception as e:
         logger.error(f"Import failed: {e}")
+
+    report.imported = imported_count
+    report.duplicates = duplicate_count
 
     # Write imported transactions to tracking file (after commit)
     if imported_trades:
@@ -322,7 +418,7 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> tuple[int
                 writer.writeheader()
             writer.writerows(all_rejections)
 
-    return (imported_count, skipped_count, len(trades))
+    return report
 
 
 if __name__ == '__main__':

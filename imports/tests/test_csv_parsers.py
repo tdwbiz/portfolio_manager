@@ -64,7 +64,7 @@ class RbcCsvParserTests(TestCase):
              '-1666.20', 'CAD'],
         ])
 
-        trades, rate = parse_rbc_csv(path)
+        trades, rate, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         trade = trades[0]
         self.assertEqual(trade['type'], 'BUY')
@@ -85,7 +85,7 @@ class RbcCsvParserTests(TestCase):
              '886.81', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'DIST')
         self.assertEqual(trades[0]['amount'], Decimal('886.81'))
@@ -101,7 +101,7 @@ class RbcCsvParserTests(TestCase):
              '-842.52', 'CAD', 'REI - REINV@C$49.56'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'DIV')
         self.assertEqual(trades[0]['quantity'], Decimal('17'))
@@ -121,7 +121,7 @@ class RbcCsvParserTests(TestCase):
              '0', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'INT')
         self.assertEqual(trades[0]['quantity'], Decimal('2.003'))
@@ -139,7 +139,7 @@ class RbcCsvParserTests(TestCase):
              '-500.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'WDRAW')
         self.assertEqual(trades[0]['amount'], Decimal('-500.00'))
@@ -155,7 +155,7 @@ class RbcCsvParserTests(TestCase):
              '2000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'DEP')
         self.assertEqual(trades[0]['amount'], Decimal('2000.00'))
@@ -174,7 +174,7 @@ class RbcCsvParserTests(TestCase):
              '-50.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 2)
         self.assertEqual(trades[0]['type'], 'FEE')
         self.assertEqual(trades[1]['type'], 'TAX')
@@ -190,7 +190,7 @@ class RbcCsvParserTests(TestCase):
              '-16662.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(trades[0]['amount'], Decimal('-16662.00'))
         self.assertTrue(trades[0]['amount'] < 0)
 
@@ -205,7 +205,7 @@ class RbcCsvParserTests(TestCase):
              '-1702.80', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         gross = Decimal('10') * Decimal('166.62')
         # Commission = |gross - |amount|| = |1666.20 - 1702.80| = 36.60
         self.assertAlmostEqual(trades[0]['commission'], Decimal('36.60'), places=2)
@@ -219,7 +219,7 @@ class RbcCsvParserTests(TestCase):
              'Value', 'Currency'],
         ])
 
-        _, rate = parse_rbc_csv(path)
+        _, rate, _ = parse_rbc_csv(path)
         self.assertEqual(rate, Decimal('1.3720'))
 
     def test_exchange_rate_default_one_if_not_found(self):
@@ -233,7 +233,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        _, rate = parse_rbc_csv(path)
+        _, rate, _ = parse_rbc_csv(path)
         self.assertEqual(rate, Decimal('1.0'))
 
     def test_skips_practice_accounts(self):
@@ -247,7 +247,7 @@ class RbcCsvParserTests(TestCase):
              '-1500.00', 'USD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_parses_multiple_trades_in_order(self):
@@ -268,7 +268,7 @@ class RbcCsvParserTests(TestCase):
              '1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 3)
         self.assertEqual(trades[0]['symbol'], 'VDY')
         self.assertEqual(trades[1]['symbol'], 'VFV')
@@ -291,7 +291,7 @@ class RbcCsvParserTests(TestCase):
              '-500.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 3)
         self.assertEqual(trades[0]['date'], date(2025, 10, 8))
         self.assertEqual(trades[1]['date'], date(2025, 10, 8))
@@ -308,7 +308,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_insufficient_columns_skipped(self):
@@ -321,7 +321,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],  # Only 5 columns
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_empty_activity_skipped(self):
@@ -335,7 +335,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_numeric_parse_error_skipped(self):
@@ -349,7 +349,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_comma_in_amount_stripped(self):
@@ -363,7 +363,7 @@ class RbcCsvParserTests(TestCase):
              '-100,000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['amount'], Decimal('-100000.00'))
 
@@ -378,7 +378,7 @@ class RbcCsvParserTests(TestCase):
              '--', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['amount'], Decimal('0'))
 
@@ -395,7 +395,7 @@ class RbcCsvParserTests(TestCase):
         ])
 
         rejections = []
-        trades, _rate = parse_rbc_csv(path, rejections)
+        trades, _rate, _acctg = parse_rbc_csv(path, rejections)
         self.assertEqual(len(trades), 0)
         self.assertEqual(len(rejections), 1)
         self.assertIn('Unknown account', rejections[0]['Reason Rejected'])
@@ -408,7 +408,7 @@ class RbcCsvParserTests(TestCase):
              'Value', 'Currency'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_unexpected_header_not_treated_as_data(self):
@@ -423,7 +423,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 0)
 
     def test_activity_type_normalisation(self):
@@ -437,7 +437,7 @@ class RbcCsvParserTests(TestCase):
              '-1000.00', 'CAD'],
         ])
 
-        trades, _ = parse_rbc_csv(path)
+        trades, _, _ = parse_rbc_csv(path)
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]['type'], 'BUY')
 

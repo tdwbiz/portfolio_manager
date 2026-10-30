@@ -435,6 +435,28 @@ _RBC_REQUIRED_COLUMNS = (
     'settlement', 'account', 'value', 'currency',
 )
 
+# Date formats seen in RBC Activity exports (both layouts):
+#   31-Dec-18, 31-Dec-2018, Dec 31, 2018, December 31, 2018
+_CSV_DATE_FORMATS = ('%d-%b-%y', '%d-%b-%Y', '%b %d, %Y', '%B %d, %Y')
+
+
+def parse_csv_date(value: str):
+    """Parse a CSV date cell into a ``datetime.date``, or None if unreadable.
+
+    Handles the formats seen in RBC Activity exports (``31-Dec-18``,
+    ``31-Dec-2018``, ``Dec 31, 2018``, ``December 31, 2018``); surrounding
+    quotes are stripped. Used for both the Date and Settlement Date columns.
+    """
+    v = (value or '').strip().strip('"').strip()
+    if not v:
+        return None
+    for fmt in _CSV_DATE_FORMATS:
+        try:
+            return datetime.strptime(v, fmt).date()
+        except ValueError:
+            continue
+    return None
+
 
 def is_known_account(account_id: str) -> bool:
     """True if the row's account number matches a stored Account fingerprint.
@@ -545,23 +567,39 @@ def parse_rbc_csv(file_path: str,
 
                 type_code, type_label = _normalize_type(activity, _RBC_TYPE_MAP)
 
-                try:
-                    # Try multiple date formats
-                    try:
-                        trade_date = datetime.strptime(_cell('date'), '%b %d, %Y').date()
-                    except ValueError:
-                        try:
-                            trade_date = datetime.strptime(_cell('date'), '%B %d, %Y').date()
-                        except ValueError:
-                            # DD-Mon-YY format (e.g., '26-Jun-24')
-                            trade_date = datetime.strptime(_cell('date'), '%d-%b-%y').date()
-                except ValueError:
+                trade_date = parse_csv_date(_cell('date'))
+                if trade_date is None:
                     bad_date = _cell('date')
                     logger.warning("Row %d: Could not parse date '%s'", row_num, bad_date)
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': 'Invalid date: ' + repr(bad_date),
                         'Date': bad_date, 'Type': activity, 'Symbol': _cell('symbol'),
+                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
+                        'Amount': _cell('value'),
+                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
+                    })
+                    continue
+
+                # Settlement date is mandatory (plan decision 1): a blank or
+                # unreadable cell rejects the row — it never becomes NULL.
+                raw_sd = _cell('settlement').strip()
+                if not raw_sd:
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': 'Missing settlement date',
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
+                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
+                        'Amount': _cell('value'),
+                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
+                    })
+                    continue
+                settlement_date = parse_csv_date(raw_sd)
+                if settlement_date is None:
+                    rejections.append({
+                        'Filename': filename, 'Row Number': row_num,
+                        'Reason Rejected': 'Invalid settlement date: ' + repr(raw_sd),
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
                         'Quantity': _cell('quantity'), 'Price': _cell('price'),
                         'Amount': _cell('value'),
                         'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
@@ -612,15 +650,6 @@ def parse_rbc_csv(file_path: str,
                 currency   = _cell('currency') or 'USD'
                 symbol     = _cell('symbol')
                 notes      = _cell('notes')
-
-                # Settlement date — optional (parsed with the same formats as Date)
-                settlement_date = None
-                raw_sd = _cell('settlement').strip()
-                if raw_sd:
-                    try:
-                        settlement_date = datetime.strptime(raw_sd, '%B %d, %Y').date()
-                    except ValueError:
-                        pass
 
                 # Capture Account column — skip practice accounts
                 account_id = _cell('account').strip().upper()

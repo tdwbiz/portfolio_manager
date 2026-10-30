@@ -81,7 +81,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Distribution', 'VDY', 'Vanguard ETF',
-             '6182', '0.143', '', '90000001',
+             '6182', '0.143', 'October 10, 2025', '90000001',
              '886.81', 'CAD'],
         ])
 
@@ -97,7 +97,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency', 'Notes'],
             ['October 08, 2025', 'Dividends', 'VFV', 'Vanguard S&P 500',
-             '17', '49.56', '', '90000001',
+             '17', '49.56', 'October 10, 2025', '90000001',
              '-842.52', 'CAD', 'REI - REINV@C$49.56'],
         ])
 
@@ -117,7 +117,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 01, 2025', 'Interest', 'RBF2010', 'RBF 2010',
-             '2.003', '0', '', '90000001',
+             '2.003', '0', 'October 03, 2025', '90000001',
              '0', 'CAD'],
         ])
 
@@ -135,7 +135,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Withdrawal', '', 'Withdrawal',
-             '0', '0', '', '90000001',
+             '0', '0', 'October 10, 2025', '90000001',
              '-500.00', 'CAD'],
         ])
 
@@ -151,7 +151,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Deposits & Contributions', '', 'Contribution',
-             '0', '0', '', '90000001',
+             '0', '0', 'October 10, 2025', '90000001',
              '2000.00', 'CAD'],
         ])
 
@@ -167,10 +167,10 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Fees', '', 'Management Fee',
-             '0', '0', '', '90000001',
+             '0', '0', 'October 10, 2025', '90000001',
              '-15.00', 'CAD'],
             ['October 08, 2025', 'Taxes', '', 'Tax Withholding',
-             '0', '0', '', '90000001',
+             '0', '0', 'October 10, 2025', '90000001',
              '-50.00', 'CAD'],
         ])
 
@@ -281,13 +281,13 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['Oct 08, 2025', 'Buy', 'VFV', 'Test',
-             '10', '100.00', '', '90000001',
+             '10', '100.00', 'Oct 10, 2025', '90000001',
              '-1000.00', 'CAD'],
             ['October 08, 2025', 'Buy', 'VDY', 'Test',
-             '100', '0.143', '', '90000001',
+             '100', '0.143', 'October 10, 2025', '90000001',
              '14.30', 'CAD'],
             ['08-Oct-25', 'Buy', 'VFV', 'Test',
-             '5', '100.00', '', '90000001',
+             '5', '100.00', '10-Oct-25', '90000001',
              '-500.00', 'CAD'],
         ])
 
@@ -359,7 +359,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Buy', 'VFV', 'Test',
-             '100', '100.00', '', '90000001',
+             '100', '100.00', 'October 10, 2025', '90000001',
              '-100,000.00', 'CAD'],
         ])
 
@@ -374,7 +374,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'Buy', 'VFV', 'Test',
-             '100', '100.00', '', '90000001',
+             '100', '100.00', 'October 10, 2025', '90000001',
              '--', 'CAD'],
         ])
 
@@ -433,7 +433,7 @@ class RbcCsvParserTests(TestCase):
              'Quantity', 'Price', 'Settlement Date', 'Account',
              'Value', 'Currency'],
             ['October 08, 2025', 'buy', 'VFV', 'Test',
-             '10', '100.00', '', '90000001',
+             '10', '100.00', 'October 10, 2025', '90000001',
              '-1000.00', 'CAD'],
         ])
 

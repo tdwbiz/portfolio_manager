@@ -54,8 +54,11 @@ name, never by position**):
   reason); identical rows within one file get a within-file sequence
   (`seq` 1, 2, …) instead of the CSV row number.
 - `core/models.py` — `compute_tx_hash()`: drop `row_number`, add `seq`
-  (default 1, omitted from the hash when 1). Update the docstring and the
-  AGENTS.md gotcha line.
+  (default 1, omitted from the hash when 1). The hash uses only fields
+  present in both layouts — date, settlement date, activity/type, symbol,
+  quantity, price, value, currency, plus the account and seq — never
+  Symbol Description or Description. Update the docstring and the AGENTS.md
+  gotcha line.
 - `imports/auto_import.py` — use `seq` in the hash; assign `seq` by grouping
   rows with identical hash inputs in file order; return a rich report
   (counts + per-account/type/month breakdown + rejections by reason +
@@ -96,7 +99,10 @@ logs, the actual production re-import (tdw runs it after this branch).
    (data rows seen, imported, practice, rejected-by-reason) such that
    imported + practice + rejected = data rows; `auto_import` adds
    duplicates so imported + duplicate + practice + rejected = data rows;
-   `import_csv` prints the sum per file and flags a mismatch loudly.
+   `import_csv` prints the sum per file. A row-count mismatch **fails that
+   whole file**: nothing is stored for it (atomic), the `FileImportLog`
+   status is `error` with the counts as the reason, and the run continues
+   with the next file (decision 4).
    Check: `pytest imports/tests/test_import_csv_command.py -q`.
 4. **Unknown type rejects the row.** For the RBC path, `_normalize_type`
    no longer auto-creates `TransactionType` rows: an activity string not in
@@ -105,7 +111,10 @@ logs, the actual production re-import (tdw runs it after this branch).
    its behaviour; only the RBC call site changes.)
    Check: `rg -n "auto_create_or_get" imports/parsers.py` shows no RBC-path call.
 5. **Hash without row number.** `compute_tx_hash`: remove `row_number`,
-   add `seq` (omitted when 1); `auto_import` assigns `seq` per group of
+   add `seq` (omitted when 1); the hash uses only fields present in both
+   layouts — date, settlement date, activity/type, symbol, quantity,
+   price, value, currency, plus the account and seq — never Symbol
+   Description or Description. `auto_import` assigns `seq` per group of
    rows with identical hash inputs, in file order, and hashes over parsed
    fields + broker + normalised account. Two identical rows in one file →
    seq 1 and 2, both imported; the same row in two overlapping exports →
@@ -129,7 +138,10 @@ logs, the actual production re-import (tdw runs it after this branch).
    two identical rows in one file (both imported, different hashes); an
    unknown activity type (row rejected, no new `TransactionType` row); a
    near-duplicate pair across two files (reported in dry-run); row counts
-   add up in every case; no Account column value appears in command output.
+   add up in every case; a forced row-count mismatch fails the whole file
+   atomically (nothing stored, `FileImportLog` status error with the
+   counts, run continues with the next file) — decision 4; no Account
+   column value appears in command output.
    Check (full suite, run once here):
    `/opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test`
    and `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`.
@@ -182,3 +194,19 @@ re-imports (old `tx_hash` values are not migrated).
 5. **Is `csv_coverage` in scope?** Recommended: only the shared date-parser
    reuse (step 2), since its broken settlement column is the symptom that
    motivated this task; nothing else in it changes.
+
+## Decisions (tdw, Oct 30)
+
+1. A row with a missing settlement date is rejected even in the 11-column
+   layout — yes, uniformly.
+2. `row_number` comes out of `compute_tx_hash` entirely and `seq` (default
+   1, omitted when 1) goes in — yes. The hash uses only fields present in
+   both layouts: date, settlement date, activity/type, symbol, quantity,
+   price, value, currency, plus the account and seq. Never Symbol
+   Description or Description.
+3. Near-duplicates block nothing — yes, reported in `--dry-run` only.
+4. Row-count mismatch is not a warning — no: it fails that whole file,
+   nothing is stored for it (atomic), the `FileImportLog` status is
+   `error` with the counts as the reason, and the run continues with the
+   next file. Tested.
+5. `csv_coverage` is in scope only for the shared date-parser reuse — yes.

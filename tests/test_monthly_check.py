@@ -231,6 +231,34 @@ def test_option_code_maps_to_pdf_option_text(account):
 
 
 @pytest.mark.django_db
+def test_pdf_option_holding_without_symbol_matches_csv_option_code(account):
+    # The PDF holding has a blank symbol and its security text is the
+    # option; it must get the same normalised key as the CSV side, so both
+    # meet under one key instead of appearing twice with opposite
+    # quantities (real-data fix 7).
+    jan = make_monthly(account, date(2021, 1, 29), end=Decimal("0"))
+    cash(jan, Decimal("1000"))
+    RbcMonthlyHolding.objects.create(
+        rbc_monthly=jan, currency="CAD", security="CALLNVDA 07/30/21 210",
+        symbol="", quantity=Decimal("50"),
+    )
+    feb = make_monthly(account, date(2021, 2, 26), last_stmt=date(2021, 1, 29),
+                       begin=Decimal("0"), end=Decimal("0"))
+    cash(feb, Decimal("1050"))
+
+    make_tx(account, date(2021, 2, 10), "SELL", Decimal("50"),
+            symbol="9BSCCN2", qty=Decimal("-50"), settlement=date(2021, 2, 12),
+            notes="SELL CALL NVDA 07/30/21 210")
+
+    checks = run_checks()
+    check = checks[("ACCOUNT_A", date(2021, 2, 26))]
+    res = cad(checks, "ACCOUNT_A", date(2021, 2, 26))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+    assert check.symbol_pairs == []
+
+
+@pytest.mark.django_db
 def test_symbol_alias_applied_to_both_sides(account):
     # The CSV says FB, the PDF holdings say META (real-data fix 3).
     jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))

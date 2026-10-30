@@ -440,14 +440,21 @@ def _option_code_map(account_pk):
 def _pdf_qty_map(rbc_rows):
     """Pooled quantity per symbol over the given RbcMonthly rows (all
     currencies — the DLR journal moves shares between the CAD and USD sides,
-    so pooling is deliberate). Blank symbols are keyed by security name."""
+    so pooling is deliberate). Blank symbols are keyed by their normalised
+    option text when the security text is an option, else by the security
+    name (real-data fix 7)."""
     qtys = {}
     holdings = RbcMonthlyHolding.objects.filter(
         rbc_monthly__in=[row.pk for row in rbc_rows]
     )
     for h in holdings:
-        key = (h.symbol or "").strip() or f"(no symbol: {h.security})"
-        qtys[key] = qtys.get(key, Decimal("0")) + h.quantity
+        sym = (h.symbol or "").strip()
+        if not sym:
+            # A blank-symbol PDF holding whose security text is an option
+            # gets the same normalised option key as the CSV side, so both
+            # meet under one key (real-data fix 7).
+            sym = normalize_option_text(h.security) or f"(no symbol: {h.security})"
+        qtys[sym] = qtys.get(sym, Decimal("0")) + h.quantity
     return qtys
 
 

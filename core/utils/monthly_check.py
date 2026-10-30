@@ -14,6 +14,7 @@ Plan: docs/plans/monthly-check-report.md (Decisions: tdw, Oct 30).
 
 import re
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db.models import Max, Min, Q, Sum
@@ -31,6 +32,15 @@ from core.models import (
 AMOUNT_TOL = Decimal("0.005")
 # PDF quantities are stored at 4 dp (decision 3).
 QTY_TOL = Decimal("0.0001")
+
+# Income rows are dated by their payment date when the notes carry one
+# ('REC 12/21/21 PAY 12/31/21'): RBC books year-end dividends in the
+# December statement while the CSV dates them Jan 2-4 (real-data fix 1).
+INCOME_TYPES = {"DIV", "DIST", "INT"}
+_PAY_DATE_RE = re.compile(r"PAY\s+(\d{2})/(\d{2})/(\d{2})")
+# How far outside the period an income row's CSV date may sit while its
+# payment date is inside: fetch this wide, decide membership in Python.
+DATE_SLACK_DAYS = 15
 
 
 @dataclass
@@ -173,12 +183,54 @@ def check_chain(cur_row, prev_group):
     return failures
 
 
-def _period_q(period_start, period_end):
-    """Q filter: effective date (settlement_date, else trade date) in
-    (period_start, period_end] — plan definition of period membership."""
-    return Q(settlement_date__gt=period_start, settlement_date__lte=period_end) | Q(
-        settlement_date__isnull=True, date__gt=period_start, date__lte=period_end
+def _pay_date(notes):
+    """Payment date from notes ('PAY mm/dd/yy', 2-digit year -> 20yy), else None."""
+    match = _PAY_DATE_RE.search(notes or "")
+    if not match:
+        return None
+    month, day, year = (int(match.group(i)) for i in (1, 2, 3))
+    try:
+        return date(year + 2000, month, day)
+    except ValueError:
+        return None
+
+
+def effective_tx_date(tx):
+    """The date that decides a transaction's statement period.
+
+    Income rows (DIV / DIST / INT): the payment date from the notes when
+    present, else settlement_date, else trade date. Everything else:
+    settlement_date, else trade date (real-data fix 1).
+    """
+    if tx.type in INCOME_TYPES:
+        pay = _pay_date(tx.notes)
+        if pay is not None:
+            return pay
+    return tx.settlement_date or tx.date
+
+
+def period_transactions(account_pk, currency, period_start, period_end):
+    """Transactions whose effective date is in (period_start, period_end].
+
+    Fetches a window widened by DATE_SLACK_DAYS on both sides (income rows
+    may carry a CSV date outside the period while their payment date is
+    inside) and filters in Python. ``currency`` None = all currencies of
+    the account.
+    """
+    lo = period_start - timedelta(days=DATE_SLACK_DAYS)
+    hi = period_end + timedelta(days=DATE_SLACK_DAYS)
+    qs = Transaction.objects.filter(
+        Q(date__gte=lo, date__lte=hi)
+        | Q(settlement_date__gte=lo, settlement_date__lte=hi),
+        account_id=account_pk,
     )
+    if currency is not None:
+        qs = qs.filter(currency=currency)
+    return [
+        tx
+        for tx in qs.order_by("date", "pk")
+        if period_start < effective_tx_date(tx) <= period_end
+    ]
 
 
 def _trade_date_q(period_start, period_end):
@@ -240,13 +292,7 @@ def check_cash(group, prev_group, currency):
     period_start = prev_group.statement_date
     period_end = group.statement_date
 
-    txs = list(
-        Transaction.objects.filter(
-            _period_q(period_start, period_end),
-            account_id=group.account_pk,
-            currency=currency,
-        ).order_by("date", "pk")
-    )
+    txs = period_transactions(group.account_pk, currency, period_start, period_end)
     flows = sum((tx.amount for tx in txs), Decimal("0.00"))
     expected = start + flows
 
@@ -327,16 +373,11 @@ def check_holdings(group, prev_group):
     cur_qtys = _pdf_qty_map(list(group.rows.values()))
 
     delta = {}
-    rows = (
-        Transaction.objects.filter(
-            _period_q(period_start, period_end), account_id=group.account_pk
-        )
-        .values("symbol")
-        .annotate(total=Sum("quantity"))
-    )
-    for row in rows:
-        key = (row["symbol"] or "").strip() or "(no symbol)"
-        delta[key] = row["total"] or Decimal("0")
+    for tx in period_transactions(
+        group.account_pk, None, period_start, period_end
+    ):
+        key = (tx.symbol or "").strip() or "(no symbol)"
+        delta[key] = delta.get(key, Decimal("0")) + tx.quantity
 
     expected = {}
     for sym in set(prev_qtys) | set(delta):

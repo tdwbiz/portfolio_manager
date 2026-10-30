@@ -42,7 +42,7 @@ def account():
 
 
 def make_tx(account, d, tx_type="DEP", amount=Decimal("0"), currency="CAD",
-            symbol="", qty=Decimal("0"), settlement=None):
+            symbol="", qty=Decimal("0"), settlement=None, notes=""):
     stmt = BrokerStatement.objects.create(
         source="RBC", file_date=d, raw_filename="t.csv"
     )
@@ -58,6 +58,7 @@ def make_tx(account, d, tx_type="DEP", amount=Decimal("0"), currency="CAD",
         commission=Decimal("0"),
         amount=amount,
         currency=currency,
+        notes=notes,
     )
 
 
@@ -289,6 +290,32 @@ def test_dlr_journal_passes_when_pooled_per_account(account):
 
     check = run_checks()[("ACCOUNT_A", date(2025, 2, 28))]
     assert [c.verdict for c in check.currencies] == ["PASS", "PASS"]
+
+
+@pytest.mark.django_db
+def test_income_row_uses_payment_date_from_notes(account):
+    # RBC books the year-end dividend in the December statement; the CSV
+    # dates it Jan 2 with settlement Jan 4, but the notes carry PAY 12/31.
+    nov = make_monthly(account, date(2021, 11, 30), end=Decimal("100"))
+    cash(nov, Decimal("100"))
+    dec = make_monthly(account, date(2021, 12, 31), last_stmt=date(2021, 11, 30),
+                       begin=Decimal("100"), end=Decimal("140"))
+    cash(dec, Decimal("140"))
+    make_tx(account, date(2021, 12, 15), "DEP", Decimal("25"),
+            settlement=date(2021, 12, 17))
+    # Paid Dec 31: belongs to December although the CSV dates it in January.
+    make_tx(account, date(2021, 12, 31), "DIV", Decimal("15"), symbol="ACME",
+            settlement=date(2022, 1, 4),
+            notes="REC 12/21/21 PAY 12/31/21")
+    # Paid Jan 15: even though it settles in December, it belongs to
+    # January and must NOT be counted here.
+    make_tx(account, date(2021, 12, 20), "DIV", Decimal("10"), symbol="ACME",
+            settlement=date(2021, 12, 22),
+            notes="REC 12/21/21 PAY 01/15/22")
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2021, 12, 31))
+    assert res.verdict == "PASS"
+    assert res.failures == []
 
 
 @pytest.mark.django_db

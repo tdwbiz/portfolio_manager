@@ -86,6 +86,10 @@ A second real-data run (1043 PASS, 115 FAIL) showed three more flaws — same pr
 8. **Income without a PAY date** — income rows (`DIV`, `DIST`, `INT`) whose notes carry no `PAY` date are placed by `Transaction.date` (RBC's payment date), not by settlement_date, which runs a few days later; the report showed five such cases as "trade-date replay would pass". Other rows keep settlement_date.
 9. **New currency section after a GAP** — after a GAP (the previous stored statement is not the printed last statement, fix 6), a currency section without a previous section of that currency is a note, not a CHAIN exception, whatever its begin total.
 
+A third real-data run got *worse* (807 PASS / 351 FAIL) — fix 8 went too far; one more correction:
+
+10. **INT placement** — the RBC savings funds (RBF2010, RBF2014) reinvest interest as INT rows with units, and for those `Transaction.date` is a month before the units appear on the statement; by settlement_date they pass. Only DIV and DIST without a PAY date in the notes are placed by `Transaction.date`; INT and every other row are placed by settlement_date (a PAY date in the notes still wins for DIV, DIST and INT).
+
 Then run, once:
 - `/opt/pm-venv/bin/python manage.py test core --settings=portfolio_manager.settings_test`
 - `/opt/pm-venv/bin/python -m pytest tests/ imports/tests/`

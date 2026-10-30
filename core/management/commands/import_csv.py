@@ -161,6 +161,16 @@ class Command(BaseCommand):
                             f"{counts['import']} would import, "
                             f"{counts['duplicate']} duplicates"
                         )
+                    # Negative-quantity rows in the CSV, per transaction type
+                    # (review fix 5): the stored quantity stays abs(); this
+                    # only reports what the CSV itself said.
+                    if report.neg_qty_by_type:
+                        parts = ', '.join(
+                            f'{t} {n}'
+                            for t, n in sorted(report.neg_qty_by_type.items()))
+                        self.stdout.write(f"    negative quantity in CSV: {parts}")
+                    else:
+                        self.stdout.write("    negative quantity in CSV: none")
                     activity_reports.append(report)
                     continue
 

@@ -424,11 +424,38 @@ class ImportCsvLayoutAndReportTests(TestCase):
                       ' + 0 practice + 0 rejected', out)
         self.assertIn('Rows: 2 data = 1 imported + 1 duplicates'
                       ' + 0 practice + 0 rejected', out)
+        # No negative-quantity rows in these files (review fix 5 line).
+        self.assertIn('negative quantity in CSV: none', out)
         # Nothing was written, so a second dry run sees the same picture.
         self.assertEqual(Transaction.objects.count(), 0)
         out2, _ = self._run(dry_run=True)
         self.assertIn('Rows: 2 data = 1 imported + 1 duplicates'
                       ' + 0 practice + 0 rejected', out2)
+
+    def test_dry_run_reports_negative_csv_quantity_per_type(self) -> None:
+        """The CSV sign of quantity is kept in the parsed row and the dry run
+        prints per transaction type how many rows are negative in the CSV
+        (review fix 5); the stored quantity stays abs()."""
+        self._write('signs.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
+                      '"2800.00","January 17, 2024","90000001","13990.05",'
+                      '"USD","Buy GOOGL"\n'
+                    + '"January 16, 2024","Sell","AAPL","Apple Inc.","-2",'
+                      '"200.00","January 18, 2024","90000001","395.00",'
+                      '"USD","Sell AAPL"\n')
+
+        out, _ = self._run(dry_run=True)
+        # Only the SELL row has a negative quantity in the CSV.
+        self.assertIn('negative quantity in CSV: SELL 1', out)
+        self.assertEqual(Transaction.objects.count(), 0)
+
+        # Real import: stored quantities stay abs().
+        self._run()
+        self.assertEqual(Transaction.objects.get(symbol='AAPL').quantity,
+                         Decimal('2'))
+        self.assertEqual(Transaction.objects.get(symbol='GOOGL').quantity,
+                         Decimal('5'))
 
     def test_dry_run_row_count_mismatch_fails_file(self) -> None:
         """In --dry-run the same row-accounting check as the real run runs;

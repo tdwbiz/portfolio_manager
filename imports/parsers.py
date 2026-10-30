@@ -647,7 +647,12 @@ def parse_rbc_csv(file_path: str,
                     return Decimal(v)
 
                 try:
-                    quantity = abs(_to_decimal(_cell('quantity')))
+                    # Keep the CSV sign of the quantity (review fix 5): the
+                    # stored quantity stays abs() per convention, but the raw
+                    # signed value is carried in 'quantity_csv' so a dry run
+                    # can report how many rows of each type are negative.
+                    quantity_csv = _to_decimal(_cell('quantity'))
+                    quantity = abs(quantity_csv)
                     price    = _to_decimal(_cell('price'))
                     amount   = _to_decimal(_cell('value'))  # signed — negative = outflow
                 except Exception:
@@ -719,6 +724,7 @@ def parse_rbc_csv(file_path: str,
                     'type':              type_code,
                     'type_label':        type_label,
                     'quantity':          quantity,
+                    'quantity_csv':      quantity_csv,
                     'price':             price,
                     'commission':        commission,
                     'amount':            amount,

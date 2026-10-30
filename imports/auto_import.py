@@ -87,6 +87,9 @@ class ImportReport:
     rows: list = field(default_factory=list)
     #   parsed rows (names/dates/counts only) for cross-file near-duplicate
     #   detection in the import_csv dry-run report
+    neg_qty_by_type: dict = field(default_factory=dict)
+    #   Dry-run only (review fix 5): transaction type -> number of rows whose
+    #   quantity is negative in the CSV itself (stored quantity stays abs()).
 
     def accounted(self) -> int:
         return (self.imported + self.duplicates + self.practice
@@ -184,6 +187,14 @@ def _dry_run_report(report: ImportReport, trades: list[dict],
         if raw_account_id.startswith('PRACEF'):
             report.practice += 1
             continue
+
+        # CSV sign of the quantity, per transaction type (review fix 5):
+        # counted for every parsed row, duplicates included.
+        if Decimal(str(trade.get('quantity_csv', 0))) < 0:
+            tx_type = trade['type']
+            report.neg_qty_by_type[tx_type] = (
+                report.neg_qty_by_type.get(tx_type, 0) + 1
+            )
 
         if raw_account_id:
             digits = re.sub(r'\D', '', raw_account_id)

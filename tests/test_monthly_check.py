@@ -377,6 +377,40 @@ def test_gap_between_printed_and_stored_statements_is_a_note(account):
 
 
 @pytest.mark.django_db
+def test_new_currency_section_after_gap_is_a_note_not_a_failure(account):
+    # After a GAP (previous stored statement Jan 31, printed last statement
+    # Dec 31) a currency section without a previous section of that currency
+    # is a note, not a CHAIN exception, whatever its begin total — it may
+    # have opened in the missing months (real-data fix 9).
+    jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    feb_cad = make_monthly(account, date(2025, 2, 28),
+                           last_stmt=date(2024, 12, 31),
+                           begin=Decimal("250"), end=Decimal("300"))
+    cash(feb_cad, Decimal("150"))
+    # USD is new for the account and its begin total is NOT zero.
+    feb_usd = make_monthly(account, date(2025, 2, 28), currency="USD",
+                           last_stmt=date(2024, 12, 31),
+                           begin=Decimal("500"), end=Decimal("600"))
+    cash(feb_usd, Decimal("500"), currency="USD")
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("50"),
+            settlement=date(2025, 2, 12))
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("500"), currency="USD",
+            settlement=date(2025, 2, 12))
+
+    checks = run_checks()
+    usd_res = next(
+        c for c in checks[("ACCOUNT_A", date(2025, 2, 28))].currencies
+        if c.currency == "USD"
+    )
+    assert usd_res.verdict == "PASS"
+    assert usd_res.failures == []
+    gap_notes = [n for n in usd_res.notes if "GAP" in n]
+    assert len(gap_notes) == 1
+    assert "2025-01-31" in gap_notes[0] and "2024-12-31" in gap_notes[0]
+
+
+@pytest.mark.django_db
 def test_no_csv_before_first_and_after_last_settlement():
     # Global coverage bounds (decision 2): one transaction on ACCOUNT_B in
     # March 2025 defines the whole window.

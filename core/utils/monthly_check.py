@@ -168,13 +168,27 @@ def check_chain(cur_row, prev_group):
     is 0 (real-data fix 4). The begin/end totals are compared only when
     ``last_statement_date`` equals the previous stored statement date; when
     statements are missing in between a GAP note is reported instead, since
-    market values move over the missing months (real-data fix 6).
+    market values move over the missing months (real-data fix 6) — and a
+    currency section new after such a GAP is a note whatever its begin total,
+    since it may have opened in the missing months (real-data fix 9).
     """
     failures = []
     notes = []
     prev_row = prev_group.rows.get(cur_row.currency)
     if prev_row is None:
-        if abs(cur_row.begin_total_market_value) > AMOUNT_TOL:
+        if (
+            cur_row.last_statement_date is not None
+            and cur_row.last_statement_date != prev_group.statement_date
+        ):
+            # After a GAP the section may have opened in the missing months,
+            # so its begin total cannot be chained (real-data fix 9).
+            notes.append(
+                f"new {cur_row.currency} section after a GAP (previous "
+                f"stored statement {prev_group.statement_date}, printed last "
+                f"statement {cur_row.last_statement_date}) — begin total "
+                f"{cur_row.begin_total_market_value} not compared"
+            )
+        elif abs(cur_row.begin_total_market_value) > AMOUNT_TOL:
             failures.append(
                 f"CHAIN: no previous {cur_row.currency} section on "
                 f"{prev_group.statement_date} to chain from, but begin total "

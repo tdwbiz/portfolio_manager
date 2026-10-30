@@ -150,6 +150,18 @@ python manage.py watch_inbox --interval 300
 | `clean_misclassified_annuals` | Delete RbcMonthly records created from annual report PDFs |
 | `dedupe_monthly_statements` | Report duplicate RbcMonthly pairs (same account/date/currency); `--apply` deletes the higher-id row of each identical pair |
 
+## Exceptions page
+
+The exceptions stored by `monthly_check --store` (`MonthlyException`) are browsable on three pages (logged-in users only; a navbar badge shows the open count):
+
+| URL | What it shows |
+|---|---|
+| `/exceptions/` | All exceptions, filterable by account, kind, status, year and statement date. Ordered open → accepted → resolved, taxable accounts (`category = TAXABLE`) first. |
+| `/exceptions/<id>/` | One exception with its stored detail verbatim. **Accept** (only when open) and **Reopen** (only when accepted) forms; both require a reason. Accepting/reopening changes only the exception row — never transactions, statements or results. |
+| `/exceptions/coverage/` | Coverage grid: accounts × statement dates, one combined cell per stored statement. Letters: `P` PASS, `F` FAIL, `A` ACCEPTED (verdict FAIL with all check exceptions accepted), `1` FIRST, `–` NO_CSV, `·` no stored result (gap), `i` IMPORT exception on that date. |
+
+Bulk accept/reopen is still the command (`monthly_check --accept` / `--reopen`, same rules as the page forms). Background: `docs/plans/exceptions-page.md`, `docs/plans/monthly-check-store.md`.
+
 ## Workflow
 
 ```

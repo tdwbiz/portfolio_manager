@@ -2,6 +2,8 @@
 
 ``manage.py monthly_check [--account NAME] [--from YYYY-MM] [--to YYYY-MM] --out FILE``
 ``manage.py monthly_check --store [...]``
+``manage.py monthly_check --accept --reason TEXT [--id N] [--account NAME] [--kind K] [--ref R|PREFIX*] [--from YYYY-MM] [--to YYYY-MM]``
+``manage.py monthly_check --reopen --id N --reason TEXT``
 
 Compares the CSV ``Transaction`` rows with the stored RBC monthly statements
 and reports, per account / statement / currency, a verdict (FIRST / NO_CSV /
@@ -14,6 +16,12 @@ With ``--store`` the same checks run and their results are persisted as
 (upserts; vanished exceptions resolve, accepted ones reopen when their
 difference changes); ``--out`` is optional then.
 
+``--accept`` / ``--reopen`` touch the database only (no checks run, no
+report): accepting an exception is a decision — a note with a required
+reason, never a data change. ``--accept`` accepts only open exceptions
+matching all filters; ``--ref`` takes an exact ref or a prefix ending in
+``*`` (e.g. ``RBF*``).
+
 Plan: docs/plans/monthly-check-store.md (Decisions: tdw, Oct 30).
 """
 
@@ -21,8 +29,9 @@ import calendar
 from datetime import date, datetime
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
-from core.models import Account
+from core.models import Account, MonthlyException
 from core.utils.monthly_check import (
     check_statement,
     csv_coverage_bounds,
@@ -79,8 +88,46 @@ class Command(BaseCommand):
             help="Persist the check results and exceptions "
                  "(MonthlyCheckResult / MonthlyException).",
         )
+        parser.add_argument(
+            "--accept", action="store_true",
+            help="Accept open exceptions matching all filters (note only, "
+                 "no data change). Requires --reason.",
+        )
+        parser.add_argument(
+            "--reopen", action="store_true",
+            help="Reopen one exception. Requires --id N and --reason.",
+        )
+        parser.add_argument(
+            "--reason", default=None,
+            help="Reason note (required with --accept / --reopen).",
+        )
+        parser.add_argument(
+            "--id", dest="row_id", type=int, default=None,
+            help="Exception id (--reopen: required; --accept: filter).",
+        )
+        parser.add_argument(
+            "--kind", choices=[k for k, _ in MonthlyException.KIND_CHOICES],
+            default=None,
+            help="Filter --accept by exception kind.",
+        )
+        parser.add_argument(
+            "--ref", default=None,
+            help="Filter --accept by ref: exact (e.g. RBF2010) or a prefix "
+                 "ending in * (e.g. RBF*).",
+        )
 
     def handle(self, *args, **options):
+        if options["accept"] or options["reopen"]:
+            # Decision mode: DB only — no checks run, no report written.
+            if options["store"]:
+                raise CommandError(
+                    "--accept/--reopen cannot be combined with --store"
+                )
+            if options["accept"]:
+                self._accept(options)
+            else:
+                self._reopen(options)
+            return
         if not options["store"] and not options["out"]:
             raise CommandError("--out is required in report mode (without --store)")
 
@@ -118,6 +165,86 @@ class Command(BaseCommand):
         if options["out"]:
             self._write_report(options["out"], options, bounds, results, groups, imports)
         self._print_summary(accounts, results, groups, imports)
+
+    # ------------------------------------------------------------------
+    # --accept / --reopen
+    # ------------------------------------------------------------------
+
+    def _month_window(self, options):
+        month_start = month_end = None
+        if options["date_from"]:
+            month_start, _ = _parse_month(options["date_from"], "--from")
+        if options["date_to"]:
+            _, month_end = _parse_month(options["date_to"], "--to")
+        return month_start, month_end
+
+    def _accept(self, options):
+        """Accept open exceptions matching all filters (a note only)."""
+        reason = (options["reason"] or "").strip()
+        if not reason:
+            raise CommandError("--accept requires --reason TEXT")
+
+        qs = MonthlyException.objects.filter(
+            status=MonthlyException.STATUS_OPEN
+        ).select_related("account")
+        if options["row_id"] is not None:
+            qs = qs.filter(pk=options["row_id"])
+        if options["account"]:
+            qs = qs.filter(account__name=options["account"])
+        if options["kind"]:
+            qs = qs.filter(kind=options["kind"])
+        ref = options["ref"]
+        if ref:
+            if ref.endswith("*"):
+                qs = qs.filter(ref__startswith=ref[:-1])
+            else:
+                qs = qs.filter(ref=ref)
+        month_start, month_end = self._month_window(options)
+        if month_start is not None:
+            qs = qs.filter(statement_date__gte=month_start)
+        if month_end is not None:
+            qs = qs.filter(statement_date__lte=month_end)
+
+        now = timezone.now()
+        per = {}
+        count = 0
+        for row in qs:
+            row.status = MonthlyException.STATUS_ACCEPTED
+            row.reason = reason
+            row.accepted_at = now
+            row.save()
+            key = (row.account.name, row.kind)
+            per[key] = per.get(key, 0) + 1
+            count += 1
+        self.stdout.write(f"Accepted {count} exception(s)")
+        for (name, kind), n in sorted(per.items()):
+            self.stdout.write(f"  {name} {kind}: {n}")
+
+    def _reopen(self, options):
+        """Reopen one exception: status open + reason note appended to detail."""
+        if options["row_id"] is None:
+            raise CommandError("--reopen requires --id N")
+        reason = (options["reason"] or "").strip()
+        if not reason:
+            raise CommandError("--reopen requires --reason TEXT")
+        row = (
+            MonthlyException.objects.filter(pk=options["row_id"])
+            .select_related("account")
+            .first()
+        )
+        if row is None:
+            raise CommandError(f"no exception with id {options['row_id']}")
+        now = timezone.now()
+        row.status = MonthlyException.STATUS_OPEN
+        row.resolved_at = None
+        row.accepted_at = None
+        note = f"[reopened {now:%Y-%m-%d}: {reason}]"
+        row.detail = (row.detail + "\n" if row.detail else "") + note
+        row.save()
+        self.stdout.write(
+            f"Reopened exception {row.pk} ({row.account.name} "
+            f"{row.statement_date} {row.kind})"
+        )
 
     # ------------------------------------------------------------------
     # --store

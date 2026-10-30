@@ -415,3 +415,94 @@ class StoreCommandTests(TestCase):
         self.assertFalse(
             MonthlyException.objects.filter(ref="abcdef12").exists()
         )
+
+
+class AcceptReopenCommandTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC", last_4="0001"
+        )
+
+    def make_exc(self, ref, status="open", kind="QUANTITY"):
+        now = timezone.now()
+        return MonthlyException.objects.create(
+            kind=kind,
+            account=self.account,
+            statement_date=date(2025, 2, 28),
+            currency="",
+            ref=ref,
+            difference=Decimal("-5"),
+            detail=f"{kind}: {ref}",
+            status=status,
+            first_seen=now,
+            last_seen=now,
+        )
+
+    def test_bulk_accept_ref_prefix_touches_only_matching_open_rows(self):
+        rbf2010 = self.make_exc("RBF2010")
+        rbf2014 = self.make_exc("RBF2014")
+        acme = self.make_exc("ACME")
+        already = self.make_exc("RBF9999", status="accepted")
+
+        call_command(
+            "monthly_check", "--accept", "--ref", "RBF*",
+            "--reason", "known savings-fund rows",
+        )
+
+        for row in (rbf2010, rbf2014):
+            row.refresh_from_db()
+            self.assertEqual(row.status, "accepted")
+            self.assertEqual(row.reason, "known savings-fund rows")
+            self.assertIsNotNone(row.accepted_at)
+        acme.refresh_from_db()
+        self.assertEqual(acme.status, "open")
+        # An already-accepted row is not an open row: untouched.
+        already.refresh_from_db()
+        self.assertEqual(already.status, "accepted")
+        self.assertEqual(already.reason, "")
+
+    def test_accept_without_reason_is_refused(self):
+        self.make_exc("RBF2010")
+        with self.assertRaises(CommandError):
+            call_command("monthly_check", "--accept", "--ref", "RBF*")
+        self.assertEqual(
+            MonthlyException.objects.get().status, "open"
+        )
+
+    def test_accept_filters_by_kind_account_and_month(self):
+        self.make_exc("RBF2010", kind="QUANTITY")
+        cash = self.make_exc("", kind="CASH", status="open")
+        call_command(
+            "monthly_check", "--accept", "--kind", "QUANTITY",
+            "--account", "ACCOUNT_A", "--from", "2025-02", "--to", "2025-02",
+            "--reason", "r",
+        )
+        self.assertEqual(MonthlyException.objects.get(ref="RBF2010").status,
+                         "accepted")
+        self.assertEqual(cash.status, "open")
+
+    def test_reopen_sets_open_and_appends_note(self):
+        row = self.make_exc("RBF2010", status="resolved")
+        row.resolved_at = timezone.now()
+        row.save()
+
+        call_command(
+            "monthly_check", "--reopen", "--id", str(row.pk),
+            "--reason", "recheck after CSV re-import",
+        )
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "open")
+        self.assertIsNone(row.resolved_at)
+        self.assertIn(
+            "[reopened 20", row.detail
+        )
+        self.assertIn("recheck after CSV re-import", row.detail)
+
+    def test_reopen_requires_id_and_reason(self):
+        with self.assertRaises(CommandError):
+            call_command("monthly_check", "--reopen", "--reason", "r")
+        with self.assertRaises(CommandError):
+            call_command(
+                "monthly_check", "--reopen", "--id", "999", "--reason", "r"
+            )

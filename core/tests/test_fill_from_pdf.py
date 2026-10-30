@@ -464,6 +464,54 @@ class FillFromPdfTest(TestCase):
         self.assertEqual(res.verdict, "PASS")
 
     # ------------------------------------------------------------------
+    # Real-data fix (Oct 30) 5: timing pairs only for income rows — deposits,
+    # withdrawals and transfers repeat with the same amount, so they are
+    # never paired
+    # ------------------------------------------------------------------
+
+    def test_deposit_is_never_a_timing_pair(self):
+        # The same deposit amount exists in the CSV dated Jan 28 (outside
+        # this period, 3 days before it starts): a deposit must not be
+        # treated as its timing pair — the PDF row is filled.
+        feb = self.feb(Decimal("550"), acme=Decimal("100"))
+        self.base_period(feb)
+        make_tx(self.account, date(2025, 1, 28), "DEP", Decimal("400"),
+                settlement=date(2025, 1, 28))
+        pdf_tx(feb, date(2025, 2, 1), "DEPOSIT", credit=Decimal("400"),
+               description="TEST DEPOSIT")
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertNotIn("timing pair", text)
+        self.assertIn("filled 1", text)
+
+        dep = Transaction.objects.get(type="DEP", date=date(2025, 2, 1))
+        self.assertEqual(dep.amount, Decimal("400.00"))
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    def test_withdrawal_is_never_a_timing_pair(self):
+        # Same shape for an outflow: the CSV already has a 250 withdrawal
+        # dated just before the period; the PDF WITHDRAWAL is still filled.
+        feb = self.feb(Decimal("-100"), acme=Decimal("100"))
+        self.base_period(feb)
+        make_tx(self.account, date(2025, 1, 28), "WDRAW", Decimal("-250"),
+                settlement=date(2025, 1, 28))
+        pdf_tx(feb, date(2025, 2, 3), "WITHDRAWAL", debit=Decimal("250"),
+               description="TEST WITHDRAWAL")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertNotIn("timing pair", text)
+        self.assertIn("filled 1", text)
+
+        wdraw = Transaction.objects.get(type="WDRAW", date=date(2025, 2, 3))
+        self.assertEqual(wdraw.amount, Decimal("-250.00"))
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    # ------------------------------------------------------------------
     # Decision 1: zero-net rows with a quantity are matched by
     # date/symbol/quantity and filled when unmatched
     # ------------------------------------------------------------------

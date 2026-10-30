@@ -27,6 +27,7 @@ from core.models import (
 )
 from core.utils.monthly_check import (
     AMOUNT_TOL,
+    INCOME_TYPES,
     QTY_TOL,
     SYMBOL_ALIASES,
     _option_code_map,
@@ -242,6 +243,17 @@ def _timing_pair_match(account_pk, currency, net, period_start, period_end):
     return None
 
 
+def _is_income_row(pdf):
+    """True when the PDF row maps to an income type (DIV / DIST / INT).
+
+    Real-data fix 5 (Oct 30): timing pairs exist only for income rows and
+    the TAX split from them — deposits, withdrawals and transfers repeat
+    with the same amount and are never timing pairs.
+    """
+    entry = MAPPING.get(pdf.activity_type)
+    return entry is not None and entry[0] in INCOME_TYPES
+
+
 def split_timing_pairs(unmatched_cash, account_pk, currency, period_start,
                        period_end):
     """Split unmatched cash PDF rows into (rows_to_fill, report lines).
@@ -253,6 +265,11 @@ def split_timing_pairs(unmatched_cash, account_pk, currency, period_start,
     period is not filled; it is reported as
     'timing pair with CSV row dated <date>'. The group check runs first (a
     non-zero group sum), then each remaining row individually.
+
+    Real-data fix 5 (Oct 30): only income rows (DIV / DIST / INT) and the
+    TAX split from them — the non-income companions of a same-date/symbol
+    group that contains an income row — are checked; every other unmatched
+    row (deposit, withdrawal, transfer, fee) is always kept for filling.
     """
     groups = {}
     for pdf in unmatched_cash:
@@ -261,7 +278,8 @@ def split_timing_pairs(unmatched_cash, account_pk, currency, period_start,
     lines = []
     for (d, sym), rows in groups.items():
         label = f"{d} {sym or '(no symbol)'}"
-        if len(rows) > 1:
+        has_income = any(_is_income_row(r) for r in rows)
+        if len(rows) > 1 and has_income:
             net = sum(((r.credit or Decimal("0")) - (r.debit or Decimal("0")))
                       for r in rows)
             if net != 0:
@@ -274,6 +292,11 @@ def split_timing_pairs(unmatched_cash, account_pk, currency, period_start,
                     )
                     continue
         for r in rows:
+            # Non-income rows are never timing pairs, except as the TAX-split
+            # companions of a multi-row group that contains an income row.
+            if not _is_income_row(r) and not (len(rows) > 1 and has_income):
+                keep.append(r)
+                continue
             rnet = (r.credit or Decimal("0")) - (r.debit or Decimal("0"))
             tx = _timing_pair_match(account_pk, currency, rnet,
                                     period_start, period_end)

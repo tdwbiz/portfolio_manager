@@ -530,6 +530,31 @@ def test_income_without_pay_date_uses_trade_date(account):
 
 
 @pytest.mark.django_db
+def test_int_row_without_pay_date_uses_settlement_date(account):
+    # An INT row with units (RBF2010 interest reinvested) is NOT placed by
+    # Transaction.date: that sits a month before the units appear on the
+    # statement. Dated Nov 30 but settling Dec 1, it belongs to the
+    # December statement — cash and quantity both pass there (real-data
+    # fix 10; fix 8's trade-date placement was wrong for INT).
+    nov = make_monthly(account, date(2021, 11, 30), end=Decimal("100"))
+    cash(nov, Decimal("100"))
+    holding(nov, "RBF2010", Decimal("100"))
+    dec = make_monthly(account, date(2021, 12, 31), last_stmt=date(2021, 11, 30),
+                       begin=Decimal("100"), end=Decimal("140"))
+    cash(dec, Decimal("150"))
+    holding(dec, "RBF2010", Decimal("105"))
+    make_tx(account, date(2021, 12, 5), "DEP", Decimal("50"),
+            settlement=date(2021, 12, 7))
+    # Dated Nov 30 (a month before the units appear) but settles Dec 1.
+    make_tx(account, date(2021, 11, 30), "INT", Decimal("0"), symbol="RBF2010",
+            qty=Decimal("5"), settlement=date(2021, 12, 1))
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2021, 12, 31))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+
+
+@pytest.mark.django_db
 def test_settlement_date_after_statement_date(account):
     # A trade dated Jan 30 settles Mar 3: it belongs to the March statement.
     # On settlement-date membership both Feb and Mar pass; on trade-date

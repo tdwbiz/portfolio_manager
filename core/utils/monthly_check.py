@@ -238,15 +238,20 @@ def effective_tx_date(tx):
     """The date that decides a transaction's statement period.
 
     Income rows (DIV / DIST / INT): the payment date from the notes when
-    present, else ``Transaction.date`` — RBC's payment date; settlement_date
-    runs a few days later and must not be used for these (real-data fixes 1
-    and 8). Everything else: settlement_date, else trade date.
+    present (real-data fix 1). DIV and DIST without a PAY date are placed by
+    ``Transaction.date`` — RBC's payment date; settlement_date runs a few
+    days later and must not be used for these (real-data fix 8). INT rows and
+    every other row are placed by settlement_date: the RBC savings funds
+    (RBF2010, RBF2014) reinvest interest as INT rows with units whose
+    ``Transaction.date`` sits a month before the units appear on the
+    statement; by settlement_date they pass (real-data fix 10).
     """
     if tx.type in INCOME_TYPES:
         pay = _pay_date(tx.notes)
         if pay is not None:
             return pay
-        return tx.date
+        if tx.type in ("DIV", "DIST"):
+            return tx.date
     return tx.settlement_date or tx.date
 
 

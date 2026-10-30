@@ -210,3 +210,7 @@ re-imports (old `tx_hash` values are not migrated).
    `error` with the counts as the reason, and the run continues with the
    next file. Tested.
 5. `csv_coverage` is in scope only for the shared date-parser reuse — yes.
+6. Step 4 stop resolved with option (a): change the 'Div Reinvest' fixture
+   row at `imports/tests/test_csv_parsers.py:266` to 'Dividends', because
+   real RBC exports never use 'Div Reinvest' (found in the Oct 24 test
+   gate); do not add it to `_RBC_TYPE_MAP`.

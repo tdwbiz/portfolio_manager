@@ -15,13 +15,17 @@ def compute_tx_hash(
     price,
     currency: str,
     amount=None,
-    row_number=None,
+    settlement_date=None,
+    seq=1,
 ) -> str:
     """Return a SHA-256 hex digest that uniquely identifies a transaction.
 
-    All numeric fields are normalised to fixed decimal places so that the
-    same trade imported from two different overlapping export files always
-    produces the same hash.
+    The hash uses only fields present in both RBC export layouts (9- and
+    11-column) — broker, account, date, settlement date, activity/type,
+    symbol, quantity, price, value and currency — never Symbol Description
+    or Description. All numeric fields are normalised to fixed decimal
+    places so that the same trade imported from two different overlapping
+    export files always produces the same hash.
 
     For BUY/SELL trades, amount is excluded so overlapping CSV exports with
     slightly different amounts still match.
@@ -30,10 +34,12 @@ def compute_tx_hash(
     because two transfers of different amounts on the same date are different
     transactions.
 
-    When row_number is provided (e.g. from CSV import), it is appended to the
-    hash so that identical rows at different positions in the CSV get different
-    hashes. This handles recurring deposits of the same amount (e.g. $400/month
-    car fund where both spouses deposit $400 separately).
+    ``seq`` is a within-file sequence number for rows with identical hash
+    inputs: two identical rows in one file get seq 1 and 2 (different
+    hashes, both imported), while the same row in two overlapping exports
+    both get seq 1 (same hash, second skipped). seq is omitted from the
+    hash when it is 1 so hashes of single (non-repeated) rows stay simple
+    and stable.
     """
     key_parts = [
         broker or "",
@@ -46,15 +52,17 @@ def compute_tx_hash(
         currency or "",
     ]
 
+    if settlement_date is not None:
+        key_parts.append(str(settlement_date))
+
     # Include amount for non-trade types
     trade_types = ('BUY', 'SELL')
     if tx_type not in trade_types and amount is not None:
         key_parts.append(f"{Decimal(str(amount)).quantize(Decimal('0.01')):.2f}")
 
-    # Include row_number if provided — makes identical CSV rows at different
-    # positions produce different hashes (handles recurring same-amount deposits)
-    if row_number is not None:
-        key_parts.append(str(row_number))
+    # seq distinguishes identical rows within one file (omitted when 1)
+    if seq != 1:
+        key_parts.append(f'seq={seq}')
 
     key = "|".join(key_parts)
     return hashlib.sha256(key.encode()).hexdigest()

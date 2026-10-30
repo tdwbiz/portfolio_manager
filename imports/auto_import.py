@@ -96,6 +96,52 @@ class _AccountingMismatch(Exception):
         super().__init__(message)
 
 
+def _hash_group_key(broker: str, trade: dict) -> tuple:
+    """Key identifying rows with identical ``compute_tx_hash`` inputs.
+
+    Mirrors the hash fields exactly (except seq itself) so that two rows
+    which would hash identically in one file share a group and receive
+    distinct seq values (plan step 5).
+    """
+    raw_account_id = trade.get('account_id', '').strip().upper()
+    if raw_account_id:
+        digits = re.sub(r'\D', '', raw_account_id)
+        normalized_id = digits[:8] if len(digits) >= 8 else digits
+    else:
+        normalized_id = None
+    tx_type = trade['type']
+    amount = trade.get('amount')
+    key = (
+        broker,
+        normalized_id,
+        str(trade.get('date')),
+        trade.get('symbol', ''),
+        tx_type,
+        f"{Decimal(str(trade.get('quantity', 0))):.4f}",
+        f"{Decimal(str(trade.get('price', 0))):.4f}",
+        trade.get('currency', 'USD'),
+        str(trade.get('settlement_date')),
+    )
+    if tx_type not in ('BUY', 'SELL') and amount is not None:
+        key = key + (f"{Decimal(str(amount)).quantize(Decimal('0.01')):.2f}",)
+    return key
+
+
+def _assign_seq(trades: list[dict], broker: str) -> None:
+    """Assign a within-file ``seq`` to rows with identical hash inputs.
+
+    Rows are grouped by their hash inputs in file order; the n-th row of a
+    group gets seq n. Two identical rows in one file → seq 1 and 2, both
+    imported with different hashes. The same row in two overlapping exports
+    → seq 1 in each file, same hash, second skipped as duplicate.
+    """
+    counts: dict[tuple, int] = {}
+    for trade in trades:
+        key = _hash_group_key(broker, trade)
+        counts[key] = counts.get(key, 0) + 1
+        trade['seq'] = counts[key]
+
+
 def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportReport:
     """
     Import a broker statement file.
@@ -178,6 +224,9 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
     report.practice = accounting['practice']
     report.rejected = dict(accounting['rejected'])
 
+    # Within-file sequence for rows with identical hash inputs (plan step 5).
+    _assign_seq(trades, broker)
+
     if report.data_rows == 0:
         logger.warning("No data rows found in the file.")
         return report
@@ -257,7 +306,8 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
                     price=trade['price'],
                     currency=trade.get('currency', 'USD'),
                     amount=trade['amount'],
-                    row_number=trade.get('row_number'),
+                    settlement_date=trade.get('settlement_date'),
+                    seq=trade.get('seq', 1),
                 ))
 
                 # Check for duplicate by tx_hash

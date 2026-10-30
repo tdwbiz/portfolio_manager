@@ -327,11 +327,16 @@ def check_holdings(group, prev_group):
     cur_qtys = _pdf_qty_map(list(group.rows.values()))
 
     delta = {}
-    for sym, total in Transaction.objects.filter(
-        _period_q(period_start, period_end), account_id=group.account_pk
-    ).values("symbol").annotate(total=Sum("quantity")):
-        key = (sym or "").strip() or "(no symbol)"
-        delta[key] = total or Decimal("0")
+    rows = (
+        Transaction.objects.filter(
+            _period_q(period_start, period_end), account_id=group.account_pk
+        )
+        .values("symbol")
+        .annotate(total=Sum("quantity"))
+    )
+    for row in rows:
+        key = (row["symbol"] or "").strip() or "(no symbol)"
+        delta[key] = row["total"] or Decimal("0")
 
     expected = {}
     for sym in set(prev_qtys) | set(delta):

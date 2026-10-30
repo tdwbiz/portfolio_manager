@@ -199,6 +199,29 @@ class Command(BaseCommand):
                     )
             overlap_lines.append((acct['name'], pairs))
 
+        # Gaps of more than 31 days between consecutive row dates per account,
+        # naming the file(s) on each side of the gap.
+        gap_lines = []
+        total_gaps = 0
+        for fp in sorted(account_data, key=lambda f: account_data[f]['name']):
+            acct = account_data[fp]
+            date_files = {}
+            for fname, trades in acct['files'].items():
+                for t in trades:
+                    date_files.setdefault(t['date'], set()).add(fname)
+            dates = sorted(date_files)
+            gaps = []
+            for a, b in zip(dates, dates[1:]):
+                gap_days = (b - a).days
+                if gap_days > 31:
+                    gaps.append(
+                        f'    {_fmt(a)} ({", ".join(sorted(date_files[a]))}) -> '
+                        f'{_fmt(b)} ({", ".join(sorted(date_files[b]))}): '
+                        f'{gap_days} days'
+                    )
+            total_gaps += len(gaps)
+            gap_lines.append((acct['name'], gaps))
+
         # ------------------------------------------------------------------
         # Short summary (stdout)
         # ------------------------------------------------------------------
@@ -220,6 +243,9 @@ class Command(BaseCommand):
             f'Unknown-account rows: {total_unknown}, '
             f'practice rows skipped: {total_practice}'
         )
+        self.stdout.write(f'Gaps found: {total_gaps}')
+
+        gaps_by_name = dict(gap_lines)
         for acct_name, pairs in overlap_lines:
             self.stdout.write(f'Account: {acct_name}')
             if pairs:
@@ -227,6 +253,10 @@ class Command(BaseCommand):
                 self.stdout.write('\n'.join(pairs))
             else:
                 self.stdout.write('  overlaps: none')
+            gaps = gaps_by_name.get(acct_name, [])
+            if gaps:
+                self.stdout.write('  gaps > 31 days:')
+                self.stdout.write('\n'.join(gaps))
 
         for r in file_reports:
             if r.get('skipped'):

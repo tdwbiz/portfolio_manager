@@ -148,29 +148,42 @@ class ImportCsvCommandTest(TestCase):
         expected_cad = (rbc_tx.amount * rbc_tx.exchange_rate_cad).quantize(Decimal('0.01'))
         self.assertEqual(rbc_tx.amount_cad, expected_cad)
 
-    def test_duplicate_file_skipped_by_hash(self) -> None:
-        """Importing the same file content twice skips the second import."""
+    def test_reimported_identical_file_reports_all_rows_duplicate(self) -> None:
+        """Re-importing identical content is NOT skipped at file level
+        (review fix 1): the row tx_hash decides duplicates, so every row is
+        reported as a duplicate and a FileImportLog is still written."""
         # First import
         self._run()
         self.assertEqual(Transaction.objects.count(), 1)
         self.assertEqual(FileImportLog.objects.filter(status='success').count(), 1)
 
-        # Write a duplicate file with identical content (original was moved to processed/)
+        # Write a file with identical content (original was moved to processed/)
         duplicate_file = os.path.join(self.inbox_dir, 'rbc_duplicate.csv')
         with open(duplicate_file, 'w', newline='', encoding='utf-8-sig') as f:
             f.write(RBC_CSV)
 
-        # Second import
-        self._run()
+        # Second import — the file is processed, not skipped by content hash
+        stream = io.StringIO()
+        with override_settings(
+            IMPORT_INBOX_DIR=self.inbox_dir,
+            IMPORT_PROCESSED_DIR=self.processed_dir,
+        ):
+            call_command('import_csv', stdout=stream)
+        out = stream.getvalue()
 
-        # Transaction count should not change
+        # No new transactions — the row was matched by its tx_hash
         self.assertEqual(Transaction.objects.count(), 1)
 
-        # Only 1 success log (the duplicate was skipped)
-        self.assertEqual(FileImportLog.objects.filter(status='success').count(), 1)
+        # A log for the re-imported file: 0 imported, 1 duplicate (partial)
+        dup_log = FileImportLog.objects.get(filename='rbc_duplicate.csv')
+        self.assertEqual(dup_log.records_imported, 0)
+        self.assertEqual(dup_log.records_skipped, 1)
+        self.assertEqual(dup_log.status, 'partial')
 
-        # The duplicate file should not have a log
-        self.assertFalse(FileImportLog.objects.filter(filename='rbc_duplicate.csv').exists())
+        # All rows reported as duplicates; file moved to processed/
+        self.assertIn('Rows: 1 data = 0 imported + 1 duplicates'
+                      ' + 0 practice + 0 rejected', out)
+        self.assertIn('rbc_duplicate.csv', os.listdir(self.processed_dir))
 
     def test_reimported_row_found_as_duplicate_after_wrapping(self) -> None:
         """A row re-imported from a different file is found as a duplicate.

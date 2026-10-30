@@ -81,7 +81,6 @@ class ImportReport:
     rejected: dict = field(default_factory=dict)   # reason -> count
     failed: bool = False        # row-count mismatch — file failed atomically
     fail_reason: str = ''
-    content_duplicate: bool = False   # whole file skipped (content hash)
     # Dry-run only (plan step 6):
     breakdown: dict = field(default_factory=dict)
     #   (account name, type, 'YYYY-MM') -> {'import': n, 'duplicate': n}
@@ -253,15 +252,12 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
     with open(file_path, 'rb') as f:
         file_bytes = f.read()
 
+    # Content hash is still written to the FileImportLog, but it never skips
+    # a file: after core_transaction is cleared a re-import must run, and a
+    # file whose earlier log was an error must not be skipped forever.
+    # Row-level tx_hash already decides duplicates — a re-imported identical
+    # file just reports all rows as duplicates (review fix 1).
     content_hash = hashlib.sha256(file_bytes).hexdigest()
-
-    # Check for duplicate file content (skip if found, unless dry-run)
-    if not dry_run:
-        prior_log = FileImportLog.objects.filter(content_hash=content_hash).first()
-        if prior_log:
-            logger.warning(f"Skipping {filename}: identical content already imported as {prior_log.filename}")
-            report.content_duplicate = True
-            return report
 
     # Setup import tracking
     import_log = Path('docs/reconciliation/CSV_Activity_Imported.csv')

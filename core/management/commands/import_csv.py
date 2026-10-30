@@ -109,16 +109,15 @@ class Command(BaseCommand):
                 # Row accounting per file (plan step 3):
                 # data rows = imported + duplicates + practice + rejected.
                 rejected_total = sum(report.rejected.values())
-                if not report.content_duplicate:
-                    self.stdout.write(
-                        f"  Rows: {report.data_rows} data = "
-                        f"{report.imported} imported + {report.duplicates} duplicates"
-                        f" + {report.practice} practice + {rejected_total} rejected"
-                    )
-                    # Rejections by reason (never carries Account column
-                    # values — the parser keeps those in 'Account ID' only).
-                    for reason, count in sorted(report.rejected.items()):
-                        self.stdout.write(f"    rejected ({count}): {reason}")
+                self.stdout.write(
+                    f"  Rows: {report.data_rows} data = "
+                    f"{report.imported} imported + {report.duplicates} duplicates"
+                    f" + {report.practice} practice + {rejected_total} rejected"
+                )
+                # Rejections by reason (never carries Account column
+                # values — the parser keeps those in 'Account ID' only).
+                for reason, count in sorted(report.rejected.items()):
+                    self.stdout.write(f"    rejected ({count}): {reason}")
 
                 # A row-count mismatch fails the whole file atomically —
                 # nothing stored, FileImportLog status error (decision 4).
@@ -132,14 +131,6 @@ class Command(BaseCommand):
                         dest = errors_dir / filename
                         _move_file(Path(file_path), dest)
                         self.stdout.write(self.style.WARNING(f"  Moved to errors/: {filename}"))
-                    continue
-
-                # Identical content already imported — nothing to do.
-                if report.content_duplicate:
-                    if not dry_run:
-                        dest = processed_dir / filename
-                        _move_file(Path(file_path), dest)
-                        self.stdout.write(self.style.SUCCESS(f"  Moved to processed/: {filename}"))
                     continue
 
                 # Only flag as error when the parser found no data rows

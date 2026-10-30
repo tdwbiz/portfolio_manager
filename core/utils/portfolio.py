@@ -112,13 +112,14 @@ def compute_portfolio_value_series(
         for tx_date in dates:
             holdings = {}
 
-            # Replay transactions up to this date
+            # Replay transactions up to this date (quantity is signed —
+            # dry-run fix C: a SELL of -10 reduces the position by 10).
             for tx in transactions.filter(date__lte=tx_date):
                 symbol = tx.symbol
                 if tx.type == "BUY":
                     holdings[symbol] = holdings.get(symbol, Decimal("0")) + tx.quantity
                 elif tx.type == "SELL":
-                    holdings[symbol] = holdings.get(symbol, Decimal("0")) - tx.quantity
+                    holdings[symbol] = holdings.get(symbol, Decimal("0")) - abs(tx.quantity)
 
             # Get unique symbols with positive holdings
             symbols = [s for s, qty in holdings.items() if qty > 0]
@@ -285,7 +286,8 @@ def compute_realised_pnl(
 
             elif tx.type == "SELL":
                 sell_amount = abs(tx.amount_cad)
-                qty_to_sell = tx.quantity
+                # Quantity is signed (dry-run fix C) — a SELL of -10 sells 10.
+                qty_to_sell = abs(tx.quantity)
 
                 # FIFO cost basis
                 qty_remaining = qty_to_sell
@@ -421,10 +423,12 @@ def compute_cost_basis_series(
                     )
                     total_cost[key] = total_cost.get(key, Decimal("0")) + cost
                 elif tx.type == "SELL":
+                    # Quantity is signed (dry-run fix C) — use the magnitude.
+                    qty_sold = abs(tx.quantity)
                     shares = total_shares.get(key, Decimal("0"))
                     avg = total_cost[key] / shares if shares > 0 else Decimal("0")
-                    sold_cost = tx.quantity * avg
-                    total_shares[key] = max(shares - tx.quantity, Decimal("0"))
+                    sold_cost = qty_sold * avg
+                    total_shares[key] = max(shares - qty_sold, Decimal("0"))
                     total_cost[key] = max(
                         total_cost.get(key, Decimal("0")) - sold_cost, Decimal("0")
                     )
@@ -613,8 +617,8 @@ def compute_series_by_account(
         if prices_df is None or (hasattr(prices_df, "empty") and prices_df.empty):
             all_symbols = list(
                 set(
-                    tx.symbol
-                    for tx in Transaction.objects.filter(
+                    sym
+                    for sym in Transaction.objects.filter(
                         account__name__in=accounts_with_buys
                     ).values_list("symbol", flat=True)
                 )
@@ -668,8 +672,9 @@ def compute_series_by_account(
                             holdings.get(symbol, Decimal("0")) + tx.quantity
                         )
                     elif tx.type == "SELL":
+                        # Quantity is signed (dry-run fix C).
                         holdings[symbol] = (
-                            holdings.get(symbol, Decimal("0")) - tx.quantity
+                            holdings.get(symbol, Decimal("0")) - abs(tx.quantity)
                         )
 
                 symbols = [s for s, qty in holdings.items() if qty > 0]
@@ -812,7 +817,9 @@ def compute_positions(broker=None):
             pos["buy_qty"] += tx.quantity
             pos["buy_cost_cad"] += tx.amount_cad
         elif tx.type == "SELL":
-            pos["total_shares"] -= tx.quantity
+            # Quantity is signed (dry-run fix C) — a SELL of -10 reduces the
+            # position by 10.
+            pos["total_shares"] -= abs(tx.quantity)
             pos["total_cost_cad"] -= tx.amount_cad
 
     # Convert to list of dicts

@@ -308,7 +308,11 @@ negative branches so BUY and SELL results stay the same, with a test each:**
    `+qty` (unchanged); SELL `sold_cost = qty*avg`, `shares -= qty` assumed
    positive → `abs(qty)`.
 4. `core/utils/portfolio.py:668-672` `compute_series_by_account` — same
-   pattern as 1 → `-abs(qty)` in the SELL branch.
+   pattern as 1 → `-abs(qty)` in the SELL branch. (Also fixes a latent bug
+   found while testing this: the symbol set was built as
+   `tx.symbol for tx in …values_list("symbol", flat=True)` — iterating
+   strings, so the function always crashed to `{}` whenever the price cache
+   was empty; now `sym for sym in …`.)
 5. `core/utils/portfolio.py:810-815` `compute_positions` — BUY `+qty`,
    SELL `-qty` → `-abs(qty)` in the SELL branch.
 6. `core/views_accounts.py:54-60` `account_detail` active holdings — BUY

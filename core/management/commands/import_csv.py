@@ -164,9 +164,8 @@ class Command(BaseCommand):
                             f"{counts['import']} would import, "
                             f"{counts['duplicate']} duplicates"
                         )
-                    # Negative-quantity rows in the CSV, per transaction type
-                    # (review fix 5): the stored quantity stays abs(); this
-                    # only reports what the CSV itself said.
+                    # Negative-quantity rows, per transaction type (review
+                    # fix 5; quantity is stored signed — dry-run fix C).
                     if report.neg_qty_by_type:
                         parts = ', '.join(
                             f'{t} {n}'

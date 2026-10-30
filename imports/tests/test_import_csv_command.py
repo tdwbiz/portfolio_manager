@@ -433,9 +433,9 @@ class ImportCsvLayoutAndReportTests(TestCase):
                       ' + 0 practice + 0 rejected', out2)
 
     def test_dry_run_reports_negative_csv_quantity_per_type(self) -> None:
-        """The CSV sign of quantity is kept in the parsed row and the dry run
-        prints per transaction type how many rows are negative in the CSV
-        (review fix 5); the stored quantity stays abs()."""
+        """The dry run prints per transaction type how many rows have a
+        negative quantity (review fix 5); quantity is stored signed, exactly
+        as the CSV gives it (dry-run fix C)."""
         self._write('signs.csv',
                     RBC_CSV_HEADER
                     + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
@@ -450,10 +450,10 @@ class ImportCsvLayoutAndReportTests(TestCase):
         self.assertIn('negative quantity in CSV: SELL 1', out)
         self.assertEqual(Transaction.objects.count(), 0)
 
-        # Real import: stored quantities stay abs().
+        # Real import: quantities are stored signed (dry-run fix C).
         self._run()
         self.assertEqual(Transaction.objects.get(symbol='AAPL').quantity,
-                         Decimal('2'))
+                         Decimal('-2'))
         self.assertEqual(Transaction.objects.get(symbol='GOOGL').quantity,
                          Decimal('5'))
 

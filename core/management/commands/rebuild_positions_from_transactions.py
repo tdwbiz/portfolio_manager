@@ -220,8 +220,9 @@ class Command(BaseCommand):
 
             elif tx.type == 'SELL':
                 # Avg cost stays the same on sell (FIFO not tracked,
-                # average cost basis is preserved)
-                new_qty = running_qty - tx.quantity
+                # average cost basis is preserved). Quantity is signed
+                # (dry-run fix C) — a SELL of -10 reduces qty by 10.
+                new_qty = running_qty - abs(tx.quantity)
                 new_avg_cost = running_avg_cost
             else:
                 continue

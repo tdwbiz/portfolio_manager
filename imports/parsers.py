@@ -668,12 +668,11 @@ def parse_rbc_csv(file_path: str,
                     return Decimal(v)
 
                 try:
-                    # Keep the CSV sign of the quantity (review fix 5): the
-                    # stored quantity stays abs() per convention, but the raw
-                    # signed value is carried in 'quantity_csv' so a dry run
-                    # can report how many rows of each type are negative.
-                    quantity_csv = _to_decimal(_cell('quantity'))
-                    quantity = abs(quantity_csv)
+                    # Quantity is stored signed, exactly as the CSV gives it
+                    # (dry-run fix C): SELL negative, transfers out negative,
+                    # the old security in a merger negative, expiries with
+                    # their printed sign.
+                    quantity = _to_decimal(_cell('quantity'))
                     price    = _to_decimal(_cell('price'))
                     amount   = _to_decimal(_cell('value'))  # signed — negative = outflow
                 except Exception:
@@ -693,9 +692,11 @@ def parse_rbc_csv(file_path: str,
                             currency=_cell('currency'), account_id=_cell('account'), notes=_cell('notes'))
                     continue
 
-                # Commission only meaningful for trade types
-                if type_code in ('BUY', 'SELL') and quantity > 0 and price > 0:
-                    gross = quantity * price
+                # Commission only meaningful for trade types (quantity is
+                # signed — dry-run fix C — so use its magnitude here).
+                qty_abs = abs(quantity)
+                if type_code in ('BUY', 'SELL') and qty_abs > 0 and price > 0:
+                    gross = qty_abs * price
                     commission = abs(gross - abs(amount)).quantize(Decimal('0.01'))
                     if commission > 50:   # sanity cap — avg price discrepancy can look large
                         commission = Decimal('0.00')
@@ -745,7 +746,6 @@ def parse_rbc_csv(file_path: str,
                     'type':              type_code,
                     'type_label':        type_label,
                     'quantity':          quantity,
-                    'quantity_csv':      quantity_csv,
                     'price':             price,
                     'commission':        commission,
                     'amount':            amount,

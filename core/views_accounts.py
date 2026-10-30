@@ -56,7 +56,9 @@ def account_detail(request, pk):
             holdings[tx.symbol]['shares'] += tx.quantity
             holdings[tx.symbol]['buy_cost_cad'] += tx.amount_cad
         elif tx.type == 'SELL':
-            holdings[tx.symbol]['shares'] -= tx.quantity
+            # Quantity is signed (dry-run fix C) — a SELL of -10 reduces the
+            # position by 10.
+            holdings[tx.symbol]['shares'] -= abs(tx.quantity)
 
     for symbol, data in holdings.items():
         if data['shares'] > 0:

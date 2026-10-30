@@ -51,10 +51,12 @@ def fmt_qty(q):
 def classify(tx):
     """Return (delta_shares, category) for a transaction."""
     notes = (tx.notes or '').upper()
+    # Quantity is stored signed (dry-run fix C): SELL rows already carry a
+    # negative quantity, so use magnitudes for the delta.
     if tx.type == 'BUY':
-        return tx.quantity, 'BUY'
+        return abs(tx.quantity), 'BUY'
     if tx.type == 'SELL':
-        return -tx.quantity, 'SELL'
+        return -abs(tx.quantity), 'SELL'
     if tx.type == 'INT' and tx.quantity != 0:
         return tx.quantity, 'INT-SHARES'
     if tx.type in ('DIV', 'DIST') and tx.quantity != 0:
@@ -64,10 +66,11 @@ def classify(tx):
     if tx.type == 'REORGANIZATION':
         if 'EXP' in notes:
             # Short calls ('9…') expire worthless: +qty. Long options
-            # (e.g. 8UJDMB6 put) expire: -qty.
+            # (e.g. 8UJDMB6 put) expire: -qty. Quantities are stored signed
+            # (dry-run fix C) — use magnitudes.
             if tx.symbol.startswith('9'):
-                return tx.quantity, 'OPT-EXP'
-            return -tx.quantity, 'LONG-OPT-EXP'
+                return abs(tx.quantity), 'OPT-EXP'
+            return -abs(tx.quantity), 'LONG-OPT-EXP'
         if 'CIL' in notes:
             return Decimal('0'), 'CIL'
         if 'SPLIT' in notes or 'STK DIV' in notes:

@@ -210,6 +210,22 @@ class RbcCsvParserTests(TestCase):
         # Commission = |gross - |amount|| = |1666.20 - 1702.80| = 36.60
         self.assertAlmostEqual(trades[0]['commission'], Decimal('36.60'), places=2)
 
+    def test_sell_commission_unchanged_with_signed_quantity(self):
+        """Commission derivation uses the quantity magnitude (dry-run fix C):
+        a SELL of -10 @ 166.62 with value +1702.80 has commission 36.60."""
+        path = _write_csv([
+            ['Date', 'Activity', 'Symbol', 'Symbol Description',
+             'Quantity', 'Price', 'Settlement Date', 'Account',
+             'Value', 'Currency'],
+            ['October 08, 2025', 'Sell', 'VFV', 'Vanguard S&P 500',
+             '-10', '166.62', 'October 10, 2025', '90000001',
+             '1702.80', 'CAD'],
+        ])
+
+        trades, _, _ = parse_rbc_csv(path)
+        self.assertEqual(trades[0]['quantity'], Decimal('-10'))
+        self.assertAlmostEqual(trades[0]['commission'], Decimal('36.60'), places=2)
+
     def test_parses_exchange_rate(self):
         """Exchange rate should be extracted from header."""
         path = _write_csv([

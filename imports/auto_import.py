@@ -233,9 +233,11 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
 
     Returns:
         An :class:`ImportReport` with per-file row accounting. A row-count
-        mismatch fails the whole file atomically (nothing stored), records a
-        ``FileImportLog`` with status ``error`` carrying the counts, and sets
-        ``report.failed`` so the caller can continue with the next file.
+        mismatch — or any other exception during the import (review fix 2)
+        — fails the whole file atomically (nothing stored), records a
+        ``FileImportLog`` with status ``error`` carrying a scrubbed reason,
+        and sets ``report.failed`` so the caller can continue with the next
+        file.
     """
     filename = os.path.basename(file_path)
     report = ImportReport(filename=filename, broker=broker, dry_run=dry_run)
@@ -501,7 +503,32 @@ def auto_import(file_path: str, broker: str, dry_run: bool = False) -> ImportRep
         report.failed = True
         report.fail_reason = e.message
     except Exception as e:
-        logger.error(f"Import failed: {e}")
+        # Any other exception also fails the file (review fix 2): the
+        # transaction above rolled back, so nothing is stored. The reason is
+        # scrubbed before it is reported or logged (the trade dict can carry
+        # the Account column value), a FileImportLog error row is written,
+        # and the run continues with the next file.
+        try:
+            fail_reason = scrub_text(str(e), name_map)[0]
+        except Exception:
+            fail_reason = 'Import failed (see server log)'
+        logger.error("Import failed: %s", fail_reason)
+        FileImportLog.objects.create(
+            filename=filename,
+            broker=broker,
+            records_imported=0,
+            records_skipped=0,
+            status='error',
+            error_message=fail_reason,
+            content_hash=content_hash,
+        )
+        report.failed = True
+        report.fail_reason = fail_reason
+        # The report shows 0 imported / 0 duplicates and nothing goes to the
+        # CSV_Activity_Imported tracking file.
+        imported_count = 0
+        duplicate_count = 0
+        imported_trades.clear()
 
     report.imported = imported_count
     report.duplicates = duplicate_count

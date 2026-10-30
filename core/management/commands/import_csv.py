@@ -119,12 +119,13 @@ class Command(BaseCommand):
                 for reason, count in sorted(report.rejected.items()):
                     self.stdout.write(f"    rejected ({count}): {reason}")
 
-                # A row-count mismatch fails the whole file atomically —
-                # nothing stored, FileImportLog status error (decision 4).
+                # A row-count mismatch (decision 4) or any other exception
+                # (review fix 2) fails the whole file — nothing stored,
+                # FileImportLog status error, run continues with the next.
                 if report.failed:
                     self.stderr.write(self.style.ERROR(
-                        f"  ROW COUNT MISMATCH — file failed atomically "
-                        f"(nothing stored): {report.fail_reason}"
+                        f"  FILE FAILED — nothing stored for {filename}: "
+                        f"{report.fail_reason}"
                     ))
                     errors += 1
                     if not dry_run:

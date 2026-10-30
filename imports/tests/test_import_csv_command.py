@@ -408,3 +408,91 @@ class ImportCsvLayoutAndReportTests(TestCase):
         out, err = self._run()
         self.assertNotIn('90000001', out)
         self.assertNotIn('90000001', err)
+
+
+# ---------------------------------------------------------------------------
+# Review fix 2: any exception (other than the accounting mismatch) fails the
+# file — scrubbed reason, FileImportLog error row, no tracking-file rows,
+# moved to errors/, run continues with the next file.
+# ---------------------------------------------------------------------------
+
+class ReviewFix2ExceptionFailsFileTests(TestCase):
+    """A mid-import exception is treated like a failed file."""
+
+    def setUp(self) -> None:
+        # auto_import writes its tracking CSVs relative to the CWD — run
+        # from a scratch directory so the real files are never touched.
+        self._old_cwd = os.getcwd()
+        self.temp_dir = tempfile.mkdtemp()
+        os.chdir(self.temp_dir)
+        self.inbox_dir = os.path.join(self.temp_dir, 'inbox')
+        self.processed_dir = os.path.join(self.temp_dir, 'processed')
+        os.makedirs(self.inbox_dir)
+
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC",
+            fingerprint=fingerprint_account_number("90000001"), last_4="0001")
+
+    def tearDown(self) -> None:
+        os.chdir(self._old_cwd)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _write(self, name: str, text: str) -> None:
+        with open(os.path.join(self.inbox_dir, name), 'w',
+                  newline='', encoding='utf-8-sig') as f:
+            f.write(text)
+
+    def test_exception_fails_file_and_run_continues(self) -> None:
+        """Transaction creation raising fails the file (scrubbed reason,
+        error log, no tracking rows, moved to errors/) and the next file is
+        still imported."""
+        self._write('bad.csv', RBC_CSV_HEADER + RBC_ROW_A)
+        self._write('good.csv', RBC_CSV_HEADER + RBC_ROW_B)
+
+        real_create = Transaction.objects.create
+
+        def fake_create(*args, **kwargs):
+            if kwargs.get('symbol') == 'GOOGL':
+                raise RuntimeError('boom for 90000001')
+            return real_create(*args, **kwargs)
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(Transaction.objects, 'create', side_effect=fake_create), \
+             override_settings(
+                 IMPORT_INBOX_DIR=self.inbox_dir,
+                 IMPORT_PROCESSED_DIR=self.processed_dir):
+            call_command('import_csv', stdout=out, stderr=err)
+
+        # The bad file failed with a scrubbed reason — the account number in
+        # the exception became the account name.
+        log = FileImportLog.objects.get(filename='bad.csv')
+        self.assertEqual(log.status, 'error')
+        self.assertIn('boom', log.error_message)
+        self.assertIn('ACCOUNT_A', log.error_message)
+        self.assertNotIn('90000001', log.error_message)
+        self.assertEqual((log.records_imported, log.records_skipped), (0, 0))
+
+        # Nothing stored for the bad file; the run continued and imported
+        # the good one.
+        self.assertFalse(Transaction.objects.filter(symbol='GOOGL').exists())
+        self.assertTrue(Transaction.objects.filter(symbol='AAPL').exists())
+
+        # File moves: bad → errors/, good → processed/.
+        errors_dir = os.path.join(self.processed_dir, 'errors')
+        self.assertEqual(os.listdir(errors_dir), ['bad.csv'])
+        self.assertIn('good.csv', os.listdir(self.processed_dir))
+
+        # No rows of the failed file in the CSV_Activity_Imported tracking
+        # file (the good file's row is there).
+        tracking = os.path.join(
+            self.temp_dir, 'docs', 'reconciliation', 'CSV_Activity_Imported.csv')
+        with open(tracking, newline='', encoding='utf-8') as f:
+            lines = [line for line in f.read().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2)   # header + the good file's row
+        self.assertNotIn('bad.csv', lines[1])
+        self.assertIn('AAPL', lines[1])
+
+        # The command reported the failure and the final counts.
+        self.assertIn('FILE FAILED — nothing stored for bad.csv',
+                      err.getvalue())
+        self.assertIn('Imported 1/2 files (1 errors)', out.getvalue())

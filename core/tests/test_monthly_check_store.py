@@ -8,12 +8,19 @@ from datetime import date
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 
-from core.models import Account
-from core.utils.monthly_check import CurrencyResult, StatementCheck
+from core.models import Account, MonthlyCheckResult, MonthlyException
+from core.utils.monthly_check import (
+    CurrencyResult,
+    StatementCheck,
+    StatementGroup,
+)
 from core.utils.monthly_check_store import (
     exceptions_from_check,
     import_exceptions_from_parked,
+    store_exceptions,
+    store_results,
 )
 
 
@@ -161,3 +168,143 @@ class ImportExceptionsFromParkedTests(TestCase):
         excs, skipped = import_exceptions_from_parked(parked)
         self.assertEqual(excs, [])
         self.assertEqual(len(skipped), 2)
+
+
+class StoreLogicTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC", last_4="0001"
+        )
+        self.d = date(2025, 2, 28)
+
+    def make_group_check(self, verdict="FAIL"):
+        group = StatementGroup(
+            account_pk=self.account.pk,
+            account_name="ACCOUNT_A",
+            statement_date=self.d,
+        )
+        check = StatementCheck(account_name="ACCOUNT_A", statement_date=self.d)
+        failures = (
+            [
+                "CASH: expected 100.00 (start 100.00 + flows 0.00), "
+                "got 75.00, diff -25.00"
+            ]
+            if verdict == "FAIL"
+            else []
+        )
+        check.currencies.append(
+            CurrencyResult(currency="CAD", verdict=verdict, failures=failures)
+        )
+        return group, check
+
+    def cash_exc(self, diff):
+        difference = None if diff is None else Decimal(diff)
+        return {
+            "kind": "CASH",
+            "currency": "CAD",
+            "ref": "",
+            "difference": difference,
+            "detail": (
+                f"CASH: expected 100.00 (start 100.00 + flows 0.00), got "
+                f"75.00, diff {diff}"
+                if diff is not None
+                else "CASH: this statement has no Cash section for this currency"
+            ),
+        }
+
+    def test_store_twice_gives_same_rows(self):
+        group, check = self.make_group_check()
+        store_results([(group, check)])
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+        first_seen = MonthlyException.objects.get().first_seen
+
+        store_results([(group, check)])
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+
+        self.assertEqual(MonthlyCheckResult.objects.count(), 1)
+        self.assertEqual(MonthlyException.objects.count(), 1)
+        row = MonthlyException.objects.get()
+        self.assertEqual(row.status, "open")
+        # first_seen is set only on create; last_seen moves on every run.
+        self.assertEqual(row.first_seen, first_seen)
+        self.assertGreaterEqual(row.last_seen, first_seen)
+
+    def test_disappeared_exception_becomes_resolved(self):
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+
+        created, updated, reopened, resolved = store_exceptions(
+            self.account, self.d, []
+        )
+
+        self.assertEqual((created, updated, reopened, resolved), (0, 0, 0, 1))
+        row = MonthlyException.objects.get()
+        self.assertEqual(row.status, "resolved")
+        self.assertIsNotNone(row.resolved_at)
+
+    def test_accepted_same_difference_stays_accepted(self):
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+        row = MonthlyException.objects.get()
+        row.status = "accepted"
+        row.reason = "known CSV gap"
+        row.accepted_at = timezone.now()
+        row.save()
+
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "accepted")
+        self.assertNotIn("reopened", row.detail)
+
+    def test_accepted_changed_difference_reopens_with_note(self):
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+        row = MonthlyException.objects.get()
+        row.status = "accepted"
+        row.reason = "known CSV gap"
+        row.accepted_at = timezone.now()
+        row.save()
+
+        store_exceptions(self.account, self.d, [self.cash_exc("-30.00")])
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, "open")
+        self.assertIsNone(row.resolved_at)
+        # The stored difference is at 4 dp (decimal_places=4).
+        self.assertIn(
+            "difference changed from -25.0000 to -30.00", row.detail
+        )
+
+    def test_null_difference_never_auto_reopens(self):
+        store_exceptions(self.account, self.d, [self.cash_exc(None)])
+        row = MonthlyException.objects.get()
+        self.assertIsNone(row.difference)
+        row.status = "accepted"
+        row.accepted_at = timezone.now()
+        row.save()
+
+        # Difference stays NULL on the re-run: still accepted.
+        store_exceptions(self.account, self.d, [self.cash_exc(None)])
+        row.refresh_from_db()
+        self.assertEqual(row.status, "accepted")
+
+    def test_resolved_exception_found_again_returns_to_open(self):
+        store_exceptions(self.account, self.d, [self.cash_exc("-25.00")])
+        store_exceptions(self.account, self.d, [])  # -> resolved
+        created, updated, reopened, resolved = store_exceptions(
+            self.account, self.d, [self.cash_exc("-25.00")]
+        )
+        self.assertEqual((created, updated, reopened, resolved), (0, 1, 0, 0))
+        row = MonthlyException.objects.get()
+        self.assertEqual(row.status, "open")
+        self.assertIsNone(row.resolved_at)
+
+    def test_store_results_stores_all_verdicts_and_upserts(self):
+        group, check = self.make_group_check(verdict="PASS")
+        store_results([(group, check)])
+        # Re-run with a different verdict: same row, updated in place.
+        group2, check2 = self.make_group_check(verdict="FAIL")
+        store_results([(group2, check2)])
+
+        self.assertEqual(MonthlyCheckResult.objects.count(), 1)
+        result = MonthlyCheckResult.objects.get()
+        self.assertEqual(result.verdict, "FAIL")
+        self.assertIsNotNone(result.checked_at)

@@ -1,10 +1,8 @@
 """Persistence helpers for ``monthly_check --store`` (phase 4, step 14b).
 
-Pure functions over the check dataclasses (plus reads of Account) that turn
-a ``StatementCheck`` and the parked import list into exception dicts. No DB
-writes in this module yet — upserts live in ``store_results`` /
-``store_exceptions`` (step 3). Everything stored or printed is names, dates,
-currencies, symbols and amounts only — never account digits.
+Turns a ``StatementCheck`` and the parked import list into exception dicts
+and upserts them plus the per-currency verdicts. Everything stored or printed is names, dates, currencies, symbols and
+amounts only — never account digits.
 
 Plan: docs/plans/monthly-check-store.md (Decisions: tdw, Oct 30).
 """
@@ -13,7 +11,9 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from core.models import Account
+from django.utils import timezone
+
+from core.models import Account, MonthlyCheckResult, MonthlyException
 
 # Parked safe names carry a full statement date (monthly statements are
 # month-end dated); anything else is skipped and printed.
@@ -137,3 +137,105 @@ def import_exceptions_from_parked(parked):
             }
         )
     return exceptions, skipped
+
+
+def store_results(results):
+    """Upsert one MonthlyCheckResult per (group, currency verdict).
+
+    ``results`` is a list of (StatementGroup, StatementCheck). Every verdict
+    is stored, FIRST and NO_CSV included (decision 6), so the table is a
+    complete per-month picture. ``checked_at`` is set only on create; re-runs
+    update verdict/notes in place and never create a second row for the same
+    key. Returns the number of rows written.
+    """
+    now = timezone.now()
+    count = 0
+    for group, check in results:
+        for cur in check.currencies:
+            # checked_at is set only on create (get_or_create defaults apply
+            # only when the row is created); a re-run updates verdict/notes
+            # in place and keeps the original checked_at.
+            obj, _created = MonthlyCheckResult.objects.get_or_create(
+                account_id=group.account_pk,
+                statement_date=group.statement_date,
+                currency=cur.currency,
+                defaults={"checked_at": now},
+            )
+            obj.verdict = cur.verdict
+            obj.notes = "\n".join(cur.notes)
+            obj.save()
+            count += 1
+    return count
+
+
+def store_exceptions(account, statement_date, found):
+    """Upsert the exceptions found for one (account, statement_date).
+
+    ``found`` is a list of exception dicts (kind / currency / ref /
+    difference / detail). Rules (Decisions 1 and 5, tdw, Oct 30):
+    - not stored yet -> created open (first_seen = last_seen = now);
+    - open or accepted -> detail, difference and last_seen updated; an
+      accepted row whose non-NULL difference changed goes back to open with
+      a note appended to detail — a NULL difference never auto-reopens;
+    - resolved but found again -> back to open (resolved_at cleared);
+    - stored rows not in ``found`` -> resolved (resolved_at = now).
+
+    Returns (created, updated, reopened, resolved) counts.
+    """
+    now = timezone.now()
+    found_keys = {(e["kind"], e["currency"], e["ref"]) for e in found}
+    created = updated = reopened = resolved_count = 0
+    for exc in found:
+        # first_seen/last_seen are non-NULL: defaults cover the create path
+        # (a re-run never touches first_seen).
+        row, was_created = MonthlyException.objects.get_or_create(
+            kind=exc["kind"],
+            account=account,
+            statement_date=statement_date,
+            currency=exc["currency"],
+            ref=exc["ref"],
+            defaults={
+                "status": MonthlyException.STATUS_OPEN,
+                "first_seen": now,
+                "last_seen": now,
+            },
+        )
+        detail = exc["detail"]
+        if was_created:
+            row.status = MonthlyException.STATUS_OPEN
+            row.first_seen = now
+            created += 1
+        else:
+            updated += 1
+            if row.status == MonthlyException.STATUS_RESOLVED:
+                # Vanished and then reappeared (decision 5).
+                row.status = MonthlyException.STATUS_OPEN
+                row.resolved_at = None
+            elif (
+                row.status == MonthlyException.STATUS_ACCEPTED
+                and row.difference is not None
+                and exc["difference"] is not None
+                and exc["difference"] != row.difference
+            ):
+                row.status = MonthlyException.STATUS_OPEN
+                detail += (
+                    f"\n[reopened {now:%Y-%m-%d}: difference changed from "
+                    f"{row.difference} to {exc['difference']}]"
+                )
+                reopened += 1
+        row.difference = exc["difference"]
+        row.detail = detail
+        row.last_seen = now
+        row.save()
+
+    for row in MonthlyException.objects.filter(
+        account=account, statement_date=statement_date
+    ):
+        if (row.kind, row.currency, row.ref) in found_keys:
+            continue
+        if row.status != MonthlyException.STATUS_RESOLVED:
+            row.status = MonthlyException.STATUS_RESOLVED
+            row.resolved_at = now
+            row.save()
+            resolved_count += 1
+    return created, updated, reopened, resolved_count

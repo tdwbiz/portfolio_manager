@@ -269,12 +269,16 @@ def align_cash_rows(csv_txs, pdf_txs):
     Match rule: equal net amount (±0.005) with ≤ 5 days date slack (CSV row's
     effective date vs the PDF row's date). Returns (unmatched_csv, unmatched_pdf)
     where pdf entries are RbcMonthlyTransaction rows and csv entries are
-    Transaction rows. Diagnostics only — RbcMonthlyTransaction is unreliable
+    Transaction rows. Zero-amount rows are left out of the unmatched lists on
+    both sides — they carry no cash and only obscure the real differences
+    (real-data fix 5). Diagnostics only — RbcMonthlyTransaction is unreliable
     and never used for the check itself.
     """
-    unmatched_pdf = list(pdf_txs)
+    unmatched_pdf = [p for p in pdf_txs if p.credit - p.debit != 0]
     unmatched_csv = []
     for tx in sorted(csv_txs, key=lambda t: (t.date, t.pk)):
+        if tx.amount == 0:
+            continue
         best = None
         for pdf in unmatched_pdf:
             net = pdf.credit - pdf.debit

@@ -161,6 +161,17 @@ def test_cash_fail_shows_exactly_one_missing_row(account):
         currency="CAD",
     )
 
+    # Zero-amount rows must stay out of the unmatched lists on both sides
+    # (real-data fix 5): an interest reinvestment (qty, no cash) and a
+    # net-zero PDF book adjustment.
+    make_tx(account, date(2025, 2, 18), "INT", Decimal("0"), symbol="RBF2010",
+            qty=Decimal("5"), settlement=date(2025, 2, 18))
+    RbcMonthlyTransaction.objects.create(
+        rbc_monthly=feb, date=date(2025, 2, 18), activity_type="ADJUST",
+        description="BOOK COST ADJUSTMENT", debit=Decimal("3.5"),
+        credit=Decimal("3.5"), currency="CAD",
+    )
+
     res = cad(run_checks(), "ACCOUNT_A", date(2025, 2, 28))
     assert res.verdict == "FAIL"
     cash_lines = [f for f in res.failures if f.startswith("CASH")]

@@ -4,13 +4,25 @@ Fake accounts ACCOUNT_A ... ACCOUNT_H per AGENTS.md. Plan:
 docs/plans/monthly-check-store.md (Decisions: tdw, Oct 30).
 """
 
+import os
+import tempfile
 from datetime import date
 from decimal import Decimal
 
+from django.core.management import CommandError, call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from core.models import Account, MonthlyCheckResult, MonthlyException
+from core.models import (
+    Account,
+    BrokerStatement,
+    FileImportLog,
+    MonthlyCheckResult,
+    MonthlyException,
+    RbcMonthly,
+    RbcMonthlyBalance,
+    Transaction,
+)
 from core.utils.monthly_check import (
     CurrencyResult,
     StatementCheck,
@@ -308,3 +320,98 @@ class StoreLogicTests(TestCase):
         result = MonthlyCheckResult.objects.get()
         self.assertEqual(result.verdict, "FAIL")
         self.assertIsNotNone(result.checked_at)
+
+
+class StoreCommandTests(TestCase):
+    """``manage.py monthly_check --store`` end to end (synthetic data)."""
+
+    def setUp(self):
+        self.out_path = os.path.join(tempfile.mkdtemp(), "report.txt")
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC", last_4="0001"
+        )
+        # January (FIRST) and February (CASH FAIL: expected 125, got 100).
+        jan = RbcMonthly.objects.create(
+            account=self.account,
+            file_name="2025-01-31_monthly_ACCOUNT_A_11111111.pdf",
+            statement_date=date(2025, 1, 31),
+            currency="CAD",
+            last_statement_date=None,
+            begin_total_market_value=Decimal("100"),
+            end_total_market_value=Decimal("200"),
+        )
+        RbcMonthlyBalance.objects.create(
+            rbc_monthly=jan, currency="CAD", account_type="Cash",
+            opening_balance=Decimal("100"), closing_balance=Decimal("100"),
+            market_value=Decimal("100"),
+        )
+        feb = RbcMonthly.objects.create(
+            account=self.account,
+            file_name="2025-02-28_monthly_ACCOUNT_A_22222222.pdf",
+            statement_date=date(2025, 2, 28),
+            currency="CAD",
+            last_statement_date=date(2025, 1, 31),
+            begin_total_market_value=Decimal("200"),
+            end_total_market_value=Decimal("250"),
+        )
+        RbcMonthlyBalance.objects.create(
+            rbc_monthly=feb, currency="CAD", account_type="Cash",
+            opening_balance=Decimal("100"), closing_balance=Decimal("100"),
+            market_value=Decimal("100"),
+        )
+        stmt = BrokerStatement.objects.create(
+            source="RBC", file_date=date(2025, 2, 10), raw_filename="t.csv"
+        )
+        Transaction.objects.create(
+            statement=stmt, account=self.account,
+            date=date(2025, 2, 10), settlement_date=date(2025, 2, 12),
+            symbol="", type="DEP", quantity=Decimal("0"),
+            price=Decimal("0"), commission=Decimal("0"),
+            amount=Decimal("25"), currency="CAD",
+        )
+        # A parked errored monthly PDF (never stored) and a conflict.
+        FileImportLog.objects.create(
+            filename="2024-11-30_monthly_ACCOUNT_A_deadbeef.pdf", broker="RBC",
+            status="error", error_message="VL parse failed",
+        )
+        FileImportLog.objects.create(
+            filename="2024-12-31_monthly_ACCOUNT_A_abcdef12.pdf", broker="RBC",
+            status="error",
+            error_message="conflict: second copy of a corrected statement",
+        )
+
+    def test_store_twice_gives_same_rows(self):
+        call_command("monthly_check", "--store")
+        cash = MonthlyException.objects.get(kind="CASH")
+        first_seen = cash.first_seen
+
+        call_command("monthly_check", "--store")
+
+        self.assertEqual(MonthlyCheckResult.objects.count(), 2)  # FIRST + FAIL
+        self.assertEqual(MonthlyException.objects.count(), 2)  # CASH + IMPORT
+        cash.refresh_from_db()
+        self.assertEqual(cash.first_seen, first_seen)
+
+    def test_without_store_nothing_is_written(self):
+        call_command("monthly_check", "--out", self.out_path)
+
+        self.assertEqual(MonthlyCheckResult.objects.count(), 0)
+        self.assertEqual(MonthlyException.objects.count(), 0)
+        # The report file is still written, and report mode without --out
+        # is refused.
+        with open(self.out_path) as f:
+            self.assertIn("monthly_check report", f.read())
+        with self.assertRaises(CommandError):
+            call_command("monthly_check")
+
+    def test_import_exceptions_from_parked_not_conflicts(self):
+        call_command("monthly_check", "--store")
+
+        imp = MonthlyException.objects.get(kind="IMPORT")
+        self.assertEqual(imp.ref, "deadbeef")
+        self.assertEqual(imp.statement_date, date(2024, 11, 30))
+        self.assertIn("VL parse failed", imp.detail)
+        # The conflict (second copy) never becomes an exception.
+        self.assertFalse(
+            MonthlyException.objects.filter(ref="abcdef12").exists()
+        )

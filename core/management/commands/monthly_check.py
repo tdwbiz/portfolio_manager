@@ -1,13 +1,20 @@
-"""Read-only CSV-vs-RBC monthly check report (phase 4, step 14a).
+"""CSV-vs-RBC monthly check report (phase 4, steps 14a/14b).
 
 ``manage.py monthly_check [--account NAME] [--from YYYY-MM] [--to YYYY-MM] --out FILE``
+``manage.py monthly_check --store [...]``
 
 Compares the CSV ``Transaction`` rows with the stored RBC monthly statements
 and reports, per account / statement / currency, a verdict (FIRST / NO_CSV /
-PASS / FAIL), plus an import-log section for errored PDFs. Nothing is written
-to the database; the only file written is ``--out``.
+PASS / FAIL), plus an import-log section for errored PDFs.
 
-Plan: docs/plans/monthly-check-report.md.
+Without ``--store`` the command is read-only: nothing is written to the
+database and the only file written is ``--out`` (required in report mode).
+With ``--store`` the same checks run and their results are persisted as
+``MonthlyCheckResult`` rows and exceptions as ``MonthlyException`` rows
+(upserts; vanished exceptions resolve, accepted ones reopen when their
+difference changes); ``--out`` is optional then.
+
+Plan: docs/plans/monthly-check-store.md (Decisions: tdw, Oct 30).
 """
 
 import calendar
@@ -23,6 +30,12 @@ from core.utils.monthly_check import (
     previous_groups,
     scan_import_logs,
 )
+from core.utils.monthly_check_store import (
+    exceptions_from_check,
+    import_exceptions_from_parked,
+    store_exceptions,
+    store_results,
+)
 
 
 def _parse_month(text, option):
@@ -37,9 +50,10 @@ def _parse_month(text, option):
 
 class Command(BaseCommand):
     help = (
-        "Read-only CSV-vs-RBC report: per account/statement/currency verdict "
+        "CSV-vs-RBC report: per account/statement/currency verdict "
         "(FIRST / NO_CSV / PASS / FAIL) plus an import-log section. "
-        "Writes nothing to the database; only the --out report file."
+        "Read-only by default (only the --out report file is written); "
+        "--store persists results and exceptions."
     )
 
     def add_arguments(self, parser):
@@ -56,11 +70,20 @@ class Command(BaseCommand):
             help="Last statement month to include (YYYY-MM, filter on statement_date).",
         )
         parser.add_argument(
-            "--out", required=True,
-            help="Path for the full report file (required).",
+            "--out", default=None,
+            help="Path for the full report file (required in report mode; "
+                 "optional with --store).",
+        )
+        parser.add_argument(
+            "--store", action="store_true",
+            help="Persist the check results and exceptions "
+                 "(MonthlyCheckResult / MonthlyException).",
         )
 
     def handle(self, *args, **options):
+        if not options["store"] and not options["out"]:
+            raise CommandError("--out is required in report mode (without --store)")
+
         month_start = month_end = None
         if options["date_from"]:
             month_start, _ = _parse_month(options["date_from"], "--from")
@@ -89,8 +112,60 @@ class Command(BaseCommand):
             )
 
         imports = scan_import_logs()
-        self._write_report(options["out"], options, bounds, results, groups, imports)
+
+        if options["store"]:
+            self._store(results, imports)
+        if options["out"]:
+            self._write_report(options["out"], options, bounds, results, groups, imports)
         self._print_summary(accounts, results, groups, imports)
+
+    # ------------------------------------------------------------------
+    # --store
+    # ------------------------------------------------------------------
+
+    def _store(self, results, imports):
+        """Persist verdicts and exceptions (idempotent upserts).
+
+        IMPORT exceptions come from the parked list only — conflicts are
+        never passed in; parked entries whose account name matches no
+        Account are printed as skipped and not stored (decision 4).
+        Check exceptions and import exceptions for the same
+        (account, statement_date) are stored together, so resolve-vanished
+        sees the full set.
+        """
+        written = store_results(results)
+        self.stdout.write(f"Stored {written} check results")
+
+        accounts = list(Account.objects.all())
+        by_pk = {a.pk: a for a in accounts}
+        by_name = {a.name: a for a in accounts}
+        import_excs, skipped = import_exceptions_from_parked(imports["parked"])
+        for entry in skipped:
+            self.stdout.write(
+                f"  skipped (unknown account): {entry['filename']}"
+            )
+
+        per_key = {}
+        for group, check in results:
+            per_key.setdefault(
+                (group.account_pk, group.statement_date), []
+            ).extend(exceptions_from_check(check))
+        for exc in import_excs:  # unknown names were skipped by the helper
+            account = by_name[exc["account_name"]]
+            per_key.setdefault(
+                (account.pk, exc["statement_date"]), []
+            ).append(exc)
+
+        totals = [0, 0, 0, 0]
+        for pk, statement_date in sorted(per_key):
+            created, updated, reopened, resolved = store_exceptions(
+                by_pk[pk], statement_date, per_key[(pk, statement_date)]
+            )
+            totals = [a + b for a, b in zip(totals, (created, updated, reopened, resolved))]
+        self.stdout.write(
+            f"Exceptions: created={totals[0]} updated={totals[1]} "
+            f"reopened={totals[2]} resolved={totals[3]}"
+        )
 
     # ------------------------------------------------------------------
     # Output

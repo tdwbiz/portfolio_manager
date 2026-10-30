@@ -100,6 +100,21 @@ def derive_pdf_symbol(pdf, prev_row=None):
     return matched.pop() if len(matched) == 1 else ""
 
 
+def _signed_qty(tx_type, qty_sign, qty):
+    """Signed quantity for a filled row.
+
+    Real-data fix (Oct 30): BUY rows always get +abs(quantity) and SELL rows
+    -abs(quantity), whatever sign the PDF row has (the dry run produced
+    SELL qty=10 and SELL qty=1430). Every other type keeps the mapping
+    table's convention.
+    """
+    if tx_type == "BUY":
+        return abs(qty)
+    if tx_type == "SELL":
+        return -abs(qty)
+    return qty * Decimal(qty_sign)
+
+
 def _base_transaction(account, pdf, prev_row=None):
     """Common fields of a filled row (statement/tx_hash set by the caller)."""
     return Transaction(
@@ -151,10 +166,9 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
             if qty == 0:
                 # Neither cash nor quantity — stays out of the fill.
                 continue
-            sign = -1 if qty_sign == -1 else +1
             tx = _base_transaction(account, pdf, prev_row)
             tx.type = tx_type
-            tx.quantity = qty * sign
+            tx.quantity = _signed_qty(tx_type, qty_sign, qty)
             tx.amount = Decimal("0")
             tx.amount_cad = Decimal("0")
             out.append(tx)
@@ -164,7 +178,7 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
             # NRT withholding: income row (credit) + TAX row (-debit).
             tx = _base_transaction(account, pdf, prev_row)
             tx.type = tx_type
-            tx.quantity = qty * Decimal(qty_sign)
+            tx.quantity = _signed_qty(tx_type, qty_sign, qty)
             tx.amount = credit
             tx.amount_cad = credit
             out.append(tx)
@@ -179,7 +193,7 @@ def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
 
         tx = _base_transaction(account, pdf, prev_row)
         tx.type = tx_type
-        tx.quantity = qty * Decimal(qty_sign)
+        tx.quantity = _signed_qty(tx_type, qty_sign, qty)
         tx.amount = net
         tx.amount_cad = net
         out.append(tx)

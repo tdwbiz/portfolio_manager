@@ -361,6 +361,37 @@ class FillFromPdfTest(TestCase):
         self.assertEqual(feb_check(self.account).verdict, "FAIL")
 
     # ------------------------------------------------------------------
+    # Real-data fix (Oct 30) 3: BUY rows get +abs(quantity), SELL rows
+    # -abs(quantity), whatever sign the PDF row has
+    # ------------------------------------------------------------------
+
+    def test_buy_and_sell_quantities_are_signed_by_type_not_pdf(self):
+        feb = self.feb(Decimal("350"), acme=Decimal("80"))
+        self.base_period(feb)
+        # Both PDF rows carry negative quantities (as the real run did:
+        # SELL qty=10, SELL qty=1430).
+        pdf_tx(feb, date(2025, 2, 10), "BOUGHT", debit=Decimal("200"),
+               quantity=Decimal("-20"), price=Decimal("10"), symbol="ACME",
+               description="BUY ACME")
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+               quantity=Decimal("-40"), price=Decimal("10"), symbol="ACME",
+               description="SELL ACME")
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("filled 1", text)
+
+        buy = Transaction.objects.get(type="BUY", symbol="ACME")
+        sell = Transaction.objects.get(type="SELL", symbol="ACME")
+        self.assertEqual(buy.quantity, Decimal("20"))
+        self.assertEqual(sell.quantity, Decimal("-40"))
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    # ------------------------------------------------------------------
     # Decision 1: zero-net rows with a quantity are matched by
     # date/symbol/quantity and filled when unmatched
     # ------------------------------------------------------------------

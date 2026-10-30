@@ -20,6 +20,7 @@ from django.db.models import Max, Min, Q, Sum
 from core.models import (
     RbcMonthly,
     RbcMonthlyBalance,
+    RbcMonthlyHolding,
     RbcMonthlyTransaction,
     Transaction,
 )
@@ -51,6 +52,7 @@ class StatementCheck:
     account_name: str
     statement_date: object  # datetime.date
     currencies: list = field(default_factory=list)  # [CurrencyResult]
+    symbol_pairs: list = field(default_factory=list)  # [(csv_sym|None, pdf_sym|None)]
 
     @property
     def failed_kinds(self):
@@ -292,12 +294,80 @@ def check_cash(group, prev_group, currency):
     return lines
 
 
+def _pdf_qty_map(rbc_rows):
+    """Pooled quantity per symbol over the given RbcMonthly rows (all
+    currencies — the DLR journal moves shares between the CAD and USD sides,
+    so pooling is deliberate). Blank symbols are keyed by security name."""
+    qtys = {}
+    holdings = RbcMonthlyHolding.objects.filter(
+        rbc_monthly__in=[row.pk for row in rbc_rows]
+    )
+    for h in holdings:
+        key = (h.symbol or "").strip() or f"(no symbol: {h.security})"
+        qtys[key] = qtys.get(key, Decimal("0")) + h.quantity
+    return qtys
+
+
+def check_holdings(group, prev_group):
+    """HOLDINGS / QUANTITY (per account, currencies pooled).
+
+    start = previous statement's holdings quantities per symbol + Σ signed
+    Transaction.quantity in the period; must equal this statement's holdings
+    per symbol at 0.0001 tolerance (decision 3). Returns (failure_lines,
+    symbol_pairs): pairs line up CSV-only and PDF-only symbols (sorted, by
+    position) so a symbol map can be designed later; unmatched entries carry
+    None on the missing side.
+    """
+    period_start = prev_group.statement_date
+    period_end = group.statement_date
+
+    prev_qtys = _pdf_qty_map(list(prev_group.rows.values()))
+    cur_qtys = _pdf_qty_map(list(group.rows.values()))
+
+    delta = {}
+    for sym, total in Transaction.objects.filter(
+        _period_q(period_start, period_end), account_id=group.account_pk
+    ).values("symbol").annotate(total=Sum("quantity")):
+        key = (sym or "").strip() or "(no symbol)"
+        delta[key] = total or Decimal("0")
+
+    expected = {}
+    for sym in set(prev_qtys) | set(delta):
+        expected[sym] = prev_qtys.get(sym, Decimal("0")) + delta.get(sym, Decimal("0"))
+
+    failures = []
+    for sym in sorted(set(expected) | set(cur_qtys)):
+        exp = expected.get(sym, Decimal("0"))
+        act = cur_qtys.get(sym, Decimal("0"))
+        if abs(exp - act) > QTY_TOL:
+            failures.append(
+                f"QUANTITY: {sym}: expected {exp} (prev "
+                f"{prev_qtys.get(sym, Decimal('0'))} + csv "
+                f"{delta.get(sym, Decimal('0'))}), got {act}"
+            )
+
+    # CSV-only / PDF-only symbols with a non-zero expected/actual quantity —
+    # candidates for a symbol map (option codes etc.), collected per account.
+    csv_only = sorted(
+        sym for sym in set(expected) - set(cur_qtys)
+        if abs(expected[sym]) > QTY_TOL
+    )
+    pdf_only = sorted(
+        sym for sym in set(cur_qtys) - set(expected)
+        if abs(cur_qtys[sym]) > QTY_TOL
+    )
+    pairs = list(zip(csv_only, pdf_only))
+    pairs += [(sym, None) for sym in csv_only[len(pairs):]]
+    pairs += [(None, sym) for sym in pdf_only[len(pairs):]]
+    return failures, pairs
+
+
 def check_statement(group, prev_group, bounds):
     """Build the StatementCheck for one group.
 
-    Step 2 scope: FIRST (no previous statement), NO_CSV (period outside the
-    global CSV coverage) and CHAIN per currency. CASH and QUANTITY are added
-    in later steps.
+    FIRST (no previous statement) and NO_CSV (period outside the global CSV
+    coverage) short-circuit; otherwise CHAIN and CASH run per currency and
+    QUANTITY once per account (pooled, attached to every currency).
     """
     result = StatementCheck(
         account_name=group.account_name, statement_date=group.statement_date
@@ -316,12 +386,18 @@ def check_statement(group, prev_group, bounds):
         or period_start >= last_settle
     )
 
-    for cur in sorted(group.rows):
-        if no_csv:
+    if no_csv:
+        for cur in sorted(group.rows):
             result.currencies.append(CurrencyResult(currency=cur, verdict="NO_CSV"))
-            continue
+        return result
+
+    # QUANTITY is per account (pooled): run once, attach to every currency.
+    quantity_failures, pairs = check_holdings(group, prev_group)
+    result.symbol_pairs = pairs
+    for cur in sorted(group.rows):
         failures = check_chain(group.rows[cur], prev_group)
         failures.extend(check_cash(group, prev_group, cur))
+        failures.extend(quantity_failures)
         result.currencies.append(
             CurrencyResult(
                 currency=cur,

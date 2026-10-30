@@ -221,8 +221,9 @@ symbol, currency, price, notes). An unmapped activity type still stops the perio
 
 ## Real-data fixes (Oct 30)
 
-A dry run on tdw's real data (8 accounts, 2019-01..2021-01) exposed four flaws.
-Each is one commit, in this order:
+A dry run on tdw's real data (8 accounts, 2019-01..2021-01) exposed four
+flaws. A second dry run after fixes 1-4 (23 of the 33 failing periods would
+then pass) exposed three more (5-7). Each is one commit, in this order:
 
 1. **Crash — sorting unsaved rows.** `align_cash_rows` sorts the CSV side by
    `(t.date, t.pk)`; in-memory new rows (the fill's own candidates passed via
@@ -252,6 +253,24 @@ Each is one commit, in this order:
    SUSAN_RRIF VO 281.29 in July 2020 while the CSV has it in June, and
    SUSAN_TFSA QQQ 31.12 minus 4.66 in Nov 2019 while the CSV has 26.46 in
    October).
+5. **Timing pairs only for income rows.** The second dry run paired a
+   400.00 deposit of 2020-12-28 with the next one dated 2021-02-01: deposits,
+   withdrawals and transfers repeat with the same amount, so they are never
+   timing pairs. The check of fix 4 now applies only to income rows — mapped
+   type DIV, DIST or INT — and to the TAX split from them (the non-income
+   companions of a same-date/symbol group that contains an income row). Every
+   other unmatched row is always filled.
+6. **Symbols by quantity, after the name match fails.** A SELL whose
+   abs(quantity) equals the drop of exactly one holding between the previous
+   stored statement and this one (same currency; e.g. BMO 52 to 0) gets that
+   holding's symbol; a BUY whose quantity equals the rise of exactly one
+   holding gets that symbol. Only a unique match counts, and each holding
+   change is used once per period; otherwise the row stays without a symbol
+   (the period fails its after-check and is reported).
+7. **DLR journal rows.** A PDF row whose description contains 'U S DLR'
+   (HORIZONS U S DLR CURRENCY ETF, Norbert's gambit journal) gets the symbol
+   DLR on both the CAD and the USD side — checked in `derive_pdf_symbol`
+   before the holdings name match.
 
 ## Decisions (tdw, Oct 30)
 

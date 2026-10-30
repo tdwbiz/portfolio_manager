@@ -9,6 +9,7 @@ import tempfile
 from datetime import date
 from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.core.management import CommandError, call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -506,3 +507,35 @@ class AcceptReopenCommandTests(TestCase):
             call_command(
                 "monthly_check", "--reopen", "--id", "999", "--reason", "r"
             )
+
+
+class AdminTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="admin", password="pw12345"
+        )
+        self.client.force_login(self.user)
+        self.account = Account.objects.create(
+            name="ACCOUNT_A", broker="RBC", last_4="0001"
+        )
+
+    def test_changelists_render_for_superuser(self):
+        now = timezone.now()
+        MonthlyCheckResult.objects.create(
+            account=self.account, statement_date=date(2025, 2, 28),
+            currency="CAD", verdict="FAIL", checked_at=now,
+        )
+        MonthlyException.objects.create(
+            kind="CASH", account=self.account,
+            statement_date=date(2025, 2, 28), currency="CAD",
+            difference=Decimal("-25"), detail="CASH: ...", status="open",
+            first_seen=now, last_seen=now,
+        )
+
+        results = self.client.get("/admin/core/monthlycheckresult/")
+        exceptions = self.client.get("/admin/core/monthlyexception/")
+        self.assertEqual(results.status_code, 200)
+        self.assertEqual(exceptions.status_code, 200)
+        # Account name shown; the account number is never in the data.
+        self.assertContains(results, "ACCOUNT_A")
+        self.assertContains(exceptions, "ACCOUNT_A")

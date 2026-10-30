@@ -394,6 +394,22 @@ class ImportCsvLayoutAndReportTests(TestCase):
         errors_dir = os.path.join(self.processed_dir, 'errors')
         self.assertIn('bad.csv', os.listdir(errors_dir))
 
+    def test_missing_currency_rejects_row(self) -> None:
+        """A row with an empty Currency cell is rejected with reason
+        'Missing currency' — never defaulted to USD (review fix 4)."""
+        self._write('nocur.csv',
+                    RBC_CSV_HEADER
+                    + '"January 15, 2024","Buy","GOOGL","Alphabet Inc.","5",'
+                      '"2800.00","January 17, 2024","90000001","13990.05","",' 
+                      '"Buy GOOGL"\n')
+
+        out, _ = self._run()
+
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertIn('rejected (1): Missing currency', out)
+        self.assertIn('Rows: 1 data = 0 imported + 0 duplicates'
+                      ' + 0 practice + 1 rejected', out)
+
     def test_dry_run_counts_in_run_duplicates(self) -> None:
         """In --dry-run a tx_hash already seen in an earlier file of the
         same run is a duplicate, not only hashes in the DB (review fix 3)."""

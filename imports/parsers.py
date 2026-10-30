@@ -676,7 +676,14 @@ def parse_rbc_csv(file_path: str,
                 else:
                     commission = Decimal('0.00')
 
-                currency   = _cell('currency') or 'USD'
+                # A missing currency rejects the row (review fix 4) — it is
+                # never silently defaulted to USD.
+                currency = _cell('currency')
+                if not currency:
+                    _reject('Missing currency', date=str(trade_date), type=activity,
+                            symbol=_cell('symbol'), quantity=str(quantity), price=str(price),
+                            amount=str(amount), account_id=_cell('account'), notes=_cell('notes'))
+                    continue
                 symbol     = _cell('symbol')
                 notes      = _cell('notes')
 

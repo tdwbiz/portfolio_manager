@@ -342,6 +342,18 @@ def check_cash(group, prev_group, currency):
     return lines
 
 
+# Known symbol aliases between CSV activity and PDF holdings (real-data
+# fix 3), applied to both sides before comparing.
+SYMBOL_ALIASES = {
+    "FB": "META",
+    "ETHX.U": "ETHXF",
+    "EBIT.U": "BTEUF",
+    "E012211": "ENF",
+    "P031613": "SPHD",
+    "P040422": "CQQQ",
+    "C024526": "CQQQ",
+}
+
 # Option text as it appears in RBC PDF holdings and CSV transaction notes:
 # CALL/PUT, underlying, mm/dd/yy expiry, strike (real-data fix 2). The CSV
 # uses RBC security codes (9BSCCN2, 8UJDMB6) instead of this text.
@@ -417,8 +429,9 @@ def check_holdings(group, prev_group):
     Transaction.quantity in the period; must equal this statement's holdings
     per symbol at 0.0001 tolerance (decision 3). CSV option codes are mapped
     to their normalised option text from the transaction notes and PDF option
-    text is normalised in place, so both sides compare under one key
-    (real-data fix 2). Returns (failure_lines,
+    text is normalised in place, and known symbol aliases (SYMBOL_ALIASES)
+    are applied to both sides, so everything compares under one key
+    (real-data fixes 2-3). Returns (failure_lines,
     symbol_pairs): pairs line up CSV-only and PDF-only symbols (sorted, by
     position) so a symbol map can be designed later; unmatched entries carry
     None on the missing side.
@@ -434,7 +447,10 @@ def check_holdings(group, prev_group):
         s = sym.strip()
         if s in option_map:
             return option_map[s]
-        return normalize_option_text(s) or s
+        normalised = normalize_option_text(s)
+        if normalised is not None:
+            return normalised
+        return SYMBOL_ALIASES.get(s.upper(), s)
 
     prev_qtys = {}
     for sym, qty in _pdf_qty_map(list(prev_group.rows.values())).items():

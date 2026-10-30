@@ -220,6 +220,24 @@ def test_option_code_maps_to_pdf_option_text(account):
 
 
 @pytest.mark.django_db
+def test_symbol_alias_applied_to_both_sides(account):
+    # The CSV says FB, the PDF holdings say META (real-data fix 3).
+    jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    holding(jan, "META", Decimal("100"))
+    feb = make_monthly(account, date(2025, 2, 28), last_stmt=date(2025, 1, 31),
+                       begin=Decimal("200"), end=Decimal("250"))
+    cash(feb, Decimal("500"))
+    holding(feb, "META", Decimal("60"))
+    make_tx(account, date(2025, 2, 10), "SELL", Decimal("400"), symbol="FB",
+            qty=Decimal("-40"), settlement=date(2025, 2, 12))
+
+    res = cad(run_checks(), "ACCOUNT_A", date(2025, 2, 28))
+    assert res.verdict == "PASS"
+    assert res.failures == []
+
+
+@pytest.mark.django_db
 def test_gap_month_with_matching_chain_passes(account):
     jan = make_monthly(account, date(2025, 1, 31), end=Decimal("200"))
     cash(jan, Decimal("100"))

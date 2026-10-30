@@ -6,12 +6,14 @@ never account digits. Accept/reopen change only the exception row.
 Plan: docs/plans/exceptions-page.md (Decisions: tdw, Oct 30).
 """
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Case, Count, IntegerField, Value, When
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
 
 from core.models import Account, MonthlyException
+from core.utils.monthly_check_store import accept_exceptions, reopen_exception
 
 _STATUS_RANK = Case(
     When(status=MonthlyException.STATUS_OPEN, then=Value(0)),
@@ -101,3 +103,55 @@ def exceptions_list(request):
         },
     }
     return render(request, "core/exceptions_list.html", context)
+
+
+@login_required
+def exception_detail(request, pk):
+    """GET/POST /exceptions/<pk>/ — one exception with its stored detail.
+
+    POST (CSRF only) takes ``action`` = accept (only when status open) or
+    reopen (only when status accepted) and a required ``reason``. A blank
+    reason or the wrong status gets an error message and a redirect back
+    with nothing changed; success redirects to the detail page.
+    """
+    exc = get_object_or_404(
+        MonthlyException.objects.select_related("account"), pk=pk
+    )
+
+    if request.method == "POST":
+        action = request.POST.get("action", "").strip()
+        reason = (request.POST.get("reason") or "").strip()
+        if not reason:
+            messages.error(request, "A reason is required.")
+        elif action == "accept" and exc.status != MonthlyException.STATUS_OPEN:
+            messages.error(
+                request,
+                f"Only open exceptions can be accepted (this one is {exc.status}).",
+            )
+        elif action == "reopen" and exc.status != MonthlyException.STATUS_ACCEPTED:
+            messages.error(
+                request,
+                f"Only accepted exceptions can be reopened (this one is {exc.status}).",
+            )
+        elif action not in ("accept", "reopen"):
+            messages.error(request, "Unknown action.")
+        else:
+            if action == "accept":
+                count, _per = accept_exceptions(reason, row_id=pk)
+                ok = count == 1
+            else:
+                ok = reopen_exception(pk, reason) is not None
+            if ok:
+                messages.success(
+                    request,
+                    f"Exception {action}d: {reason}",
+                )
+            else:
+                messages.error(request, "Nothing was changed.")
+        return redirect("exception_detail", pk=pk)
+
+    context = {
+        "exc": exc,
+        "taxable": exc.account.category == "TAXABLE",
+    }
+    return render(request, "core/exception_detail.html", context)

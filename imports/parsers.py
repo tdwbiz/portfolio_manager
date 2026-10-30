@@ -412,6 +412,30 @@ def _parse_ib_activity_statement(rows: list[list[str]],
 # RBC CSV parser
 # ---------------------------------------------------------------------------
 
+# Header names (lower-case) recognised in RBC Activity exports, mapped to the
+# internal field name. Columns are found by header name, never by position.
+# Both real layouts share the nine required columns; the new layout adds
+# "Symbol Description" (ignored, not stored) and "Description" (notes).
+_RBC_COLUMN_NAMES: dict[str, str | None] = {
+    'date':               'date',
+    'activity':           'activity',
+    'symbol':             'symbol',
+    'symbol description': None,       # known but ignored (not stored)
+    'quantity':           'quantity',
+    'price':              'price',
+    'settlement date':    'settlement',
+    'account':            'account',
+    'value':              'value',
+    'currency':           'currency',
+    'description':        'notes',
+    'notes':              'notes',    # legacy alias for the notes column
+}
+_RBC_REQUIRED_COLUMNS = (
+    'date', 'activity', 'symbol', 'quantity', 'price',
+    'settlement', 'account', 'value', 'currency',
+)
+
+
 def is_known_account(account_id: str) -> bool:
     """True if the row's account number matches a stored Account fingerprint.
 
@@ -449,22 +473,10 @@ def parse_rbc_csv(file_path: str,
     trades: list[dict[str, Any]] = []
     usd_to_cad_rate: Decimal = Decimal('1.0')
     found_header: bool = False
-    cleaned: list[str] = []
     filename = os.path.basename(file_path)
 
     # Column mapping (will be set when header is found)
-    col_map = {
-        'date': 0,
-        'activity': 1,
-        'symbol': 2,
-        'quantity': 4,
-        'price': 5,
-        'settlement': 6,
-        'account': 7,
-        'value': 8,
-        'currency': 9,
-        'notes': 10,
-    }
+    col_map: dict[str, int] = {}
 
     try:
         with open(file_path, 'r', encoding='utf-8-sig') as csvfile:
@@ -487,58 +499,47 @@ def parse_rbc_csv(file_path: str,
                     # Detect data header row by first column value
                     if row[0].strip().strip('"') == 'Date':
                         found_header = True
-                        # Build column mapping from header
+                        # Build column mapping from header — exact name match
+                        # (case-insensitive, quotes stripped), never position.
+                        # Unknown extra columns are ignored; a missing
+                        # required column fails the file with a clear error.
                         header = [cell.strip().strip('"').lower() for cell in row]
                         col_map = {}
                         for i, col_name in enumerate(header):
-                            if 'date' in col_name and 'settlement' not in col_name:
-                                col_map['date'] = i
-                            elif 'activity' in col_name:
-                                col_map['activity'] = i
-                            elif 'symbol' in col_name and 'description' not in col_name:
-                                col_map['symbol'] = i
-                            elif 'quantity' in col_name:
-                                col_map['quantity'] = i
-                            elif 'price' in col_name:
-                                col_map['price'] = i
-                            elif 'settlement' in col_name:
-                                col_map['settlement'] = i
-                            elif 'account' in col_name:
-                                col_map['account'] = i
-                            elif 'value' in col_name:
-                                col_map['value'] = i
-                            elif 'currency' in col_name:
-                                col_map['currency'] = i
-                            elif 'notes' in col_name:
-                                col_map['notes'] = i
+                            field = _RBC_COLUMN_NAMES.get(col_name)
+                            if field is not None:
+                                col_map.setdefault(field, i)
+                        missing = [c for c in _RBC_REQUIRED_COLUMNS
+                                   if c not in col_map]
+                        if missing:
+                            raise ValueError(
+                                "Missing required column(s) "
+                                + ', '.join(missing)
+                                + f" in header of {filename}"
+                            )
                         continue
 
                 # Skip pre-header metadata rows (account balances, totals, disclaimers)
                 if not found_header:
                     continue
 
-                # Parse data rows — require at least 9 columns (up to Value)
-                if len(row) < 9:
-                    reason = "Too few columns (" + str(len(row)) + ")"
-                    rejections.append({
-                        'Filename': filename, 'Row Number': row_num,
-                        'Reason Rejected': reason,
-                        'Date': cleaned[0] if cleaned else '', 'Type': '', 'Symbol': '',
-                        'Quantity': '', 'Price': '', 'Amount': '', 'Currency': '',
-                        'Account ID': '', 'Notes': '',
-                    })
-                    continue
-
                 cleaned = [cell.strip().strip('"') for cell in row]
 
-                activity = cleaned[col_map.get('activity', 1)]
+                def _cell(field: str) -> str:
+                    """Value of a mapped column; '' when the row is short."""
+                    idx = col_map.get(field)
+                    if idx is None or idx >= len(cleaned):
+                        return ''
+                    return cleaned[idx]
+
+                activity = _cell('activity')
                 if not activity:
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': 'Missing activity type',
-                        'Date': cleaned[col_map.get('date', 0)], 'Type': '', 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
-                        'Quantity': '', 'Price': '', 'Amount': cleaned[col_map.get('value', 8)] if len(cleaned) > col_map.get('value', 8) else '',
-                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': '',
+                        'Date': _cell('date'), 'Type': '', 'Symbol': _cell('symbol'),
+                        'Quantity': '', 'Price': '', 'Amount': _cell('value'),
+                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
                     })
                     continue
 
@@ -547,23 +548,23 @@ def parse_rbc_csv(file_path: str,
                 try:
                     # Try multiple date formats
                     try:
-                        trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%b %d, %Y').date()
+                        trade_date = datetime.strptime(_cell('date'), '%b %d, %Y').date()
                     except ValueError:
                         try:
-                            trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%B %d, %Y').date()
+                            trade_date = datetime.strptime(_cell('date'), '%B %d, %Y').date()
                         except ValueError:
                             # DD-Mon-YY format (e.g., '26-Jun-24')
-                            trade_date = datetime.strptime(cleaned[col_map.get('date', 0)], '%d-%b-%y').date()
+                            trade_date = datetime.strptime(_cell('date'), '%d-%b-%y').date()
                 except ValueError:
-                    bad_date = cleaned[col_map.get('date', 0)]
+                    bad_date = _cell('date')
                     logger.warning("Row %d: Could not parse date '%s'", row_num, bad_date)
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': 'Invalid date: ' + repr(bad_date),
-                        'Date': bad_date, 'Type': activity, 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
-                        'Quantity': cleaned[col_map.get('quantity', 4)] if len(cleaned) > col_map.get('quantity', 4) else '', 'Price': cleaned[col_map.get('price', 5)] if len(cleaned) > col_map.get('price', 5) else '',
-                        'Amount': cleaned[col_map.get('value', 8)] if len(cleaned) > col_map.get('value', 8) else '',
-                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': '',
+                        'Date': bad_date, 'Type': activity, 'Symbol': _cell('symbol'),
+                        'Quantity': _cell('quantity'), 'Price': _cell('price'),
+                        'Amount': _cell('value'),
+                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': '',
                     })
                     continue
 
@@ -575,13 +576,13 @@ def parse_rbc_csv(file_path: str,
                     return Decimal(v)
 
                 try:
-                    quantity = abs(_to_decimal(cleaned[col_map.get('quantity', 4)]))
-                    price    = _to_decimal(cleaned[col_map.get('price', 5)])
-                    amount   = _to_decimal(cleaned[col_map.get('value', 8)])  # signed — negative = outflow
+                    quantity = abs(_to_decimal(_cell('quantity')))
+                    price    = _to_decimal(_cell('price'))
+                    amount   = _to_decimal(_cell('value'))  # signed — negative = outflow
                 except Exception:
-                    bad_qty = cleaned[col_map.get('quantity', 4)]
-                    bad_price = cleaned[col_map.get('price', 5)]
-                    bad_amount = cleaned[col_map.get('value', 8)]
+                    bad_qty = _cell('quantity')
+                    bad_price = _cell('price')
+                    bad_amount = _cell('value')
                     logger.warning(
                         "Row %d: Could not parse numeric fields "
                         "(qty=%r, price=%r, value=%r), skipping",
@@ -593,9 +594,9 @@ def parse_rbc_csv(file_path: str,
                     rejections.append({
                         'Filename': filename, 'Row Number': row_num,
                         'Reason Rejected': reason,
-                        'Date': str(trade_date), 'Type': activity, 'Symbol': cleaned[col_map.get('symbol', 2)] if len(cleaned) > col_map.get('symbol', 2) else '',
+                        'Date': str(trade_date), 'Type': activity, 'Symbol': _cell('symbol'),
                         'Quantity': bad_qty, 'Price': bad_price, 'Amount': bad_amount,
-                        'Currency': cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else '', 'Account ID': cleaned[col_map.get('account', 7)] if len(cleaned) > col_map.get('account', 7) else '', 'Notes': cleaned[col_map.get('notes', 10)] if len(cleaned) > col_map.get('notes', 10) else '',
+                        'Currency': _cell('currency'), 'Account ID': _cell('account'), 'Notes': _cell('notes'),
                     })
                     continue
 
@@ -608,23 +609,21 @@ def parse_rbc_csv(file_path: str,
                 else:
                     commission = Decimal('0.00')
 
-                currency   = cleaned[col_map.get('currency', 9)] if len(cleaned) > col_map.get('currency', 9) else 'USD'
-                symbol     = cleaned[col_map.get('symbol', 2)]
-                notes      = cleaned[col_map.get('notes', 10)] if len(cleaned) > col_map.get('notes', 10) else ''
+                currency   = _cell('currency') or 'USD'
+                symbol     = _cell('symbol')
+                notes      = _cell('notes')
 
-                # Settlement date (column 6) — optional
+                # Settlement date — optional (parsed with the same formats as Date)
                 settlement_date = None
-                if len(cleaned) > col_map.get('settlement', 6):
-                    raw_sd = cleaned[col_map.get('settlement', 6)].strip()
-                    if raw_sd:
-                        try:
-                            settlement_date = datetime.strptime(raw_sd, '%B %d, %Y').date()
-                        except ValueError:
-                            pass
+                raw_sd = _cell('settlement').strip()
+                if raw_sd:
+                    try:
+                        settlement_date = datetime.strptime(raw_sd, '%B %d, %Y').date()
+                    except ValueError:
+                        pass
 
                 # Capture Account column — skip practice accounts
-                account_idx = col_map.get('account', 7)
-                account_id = cleaned[account_idx].strip().upper() if len(cleaned) > account_idx else ''
+                account_id = _cell('account').strip().upper()
                 if account_id.startswith('PRAC'):
                     logger.debug(f"Row {row_num}: Skipping practice account '{account_id}'")
                     rejections.append({

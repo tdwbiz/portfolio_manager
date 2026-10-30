@@ -16,7 +16,12 @@ Plan: docs/plans/fill-from-pdf.md (Decisions: tdw, Oct 30).
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from core.models import BrokerStatement, RbcMonthlyTransaction, Transaction
+from core.models import (
+    BrokerStatement,
+    RbcMonthlyHolding,
+    RbcMonthlyTransaction,
+    Transaction,
+)
 from core.utils.monthly_check import (
     QTY_TOL,
     SYMBOL_ALIASES,
@@ -59,13 +64,49 @@ MAPPING = {
 DATE_SLACK_DAYS = 5
 
 
-def _base_transaction(account, pdf):
+def derive_pdf_symbol(pdf, prev_row=None):
+    """Symbol for a PDF row that carries none (real-data fix, Oct 30).
+
+    Most PDF rows have no symbol — only the security name in the description
+    (e.g. 'VANGUARD FTSE CDN HIGH DIVID YIELD INDEX ETF TR UNIT'). Match the
+    description against the security names of the ``RbcMonthlyHolding`` rows
+    of the same statement and, when given, of the previous stored statement
+    of that account: normalised (upper case, stripped), the holding name at
+    the start of the description or the reverse. Returns the symbol only
+    when exactly one distinct symbol matches; otherwise '' — the row is left
+    without a symbol and the period then fails its after-check and is
+    reported. Downstream, the check's aliases and option normalisation apply
+    to the stored symbol as usual.
+    """
+    explicit = (pdf.symbol or "").strip()
+    if explicit:
+        return explicit
+    desc = (pdf.description or "").strip().upper()
+    if not desc:
+        return ""
+    rbc_pks = {pdf.rbc_monthly_id}
+    if prev_row is not None:
+        rbc_pks.add(prev_row.pk)
+    matched = set()
+    for security, symbol in RbcMonthlyHolding.objects.filter(
+        rbc_monthly__in=rbc_pks
+    ).values_list("security", "symbol"):
+        name = (security or "").strip().upper()
+        sym = (symbol or "").strip()
+        if not name or not sym:
+            continue
+        if desc.startswith(name) or name.startswith(desc):
+            matched.add(sym)
+    return matched.pop() if len(matched) == 1 else ""
+
+
+def _base_transaction(account, pdf, prev_row=None):
     """Common fields of a filled row (statement/tx_hash set by the caller)."""
     return Transaction(
         account=account,
         date=pdf.date,
         settlement_date=pdf.date,
-        symbol=(pdf.symbol or "").strip(),
+        symbol=derive_pdf_symbol(pdf, prev_row),
         currency=pdf.currency,
         price=pdf.price or Decimal("0"),
         commission=Decimal("0"),
@@ -74,7 +115,7 @@ def _base_transaction(account, pdf):
     )
 
 
-def pdf_rows_to_transactions(pdf_rows, account):
+def pdf_rows_to_transactions(pdf_rows, account, prev_group=None):
     """Map PDF activity rows to unsaved Transaction objects.
 
     Raises :class:`UnmappedActivity` for any activity type outside
@@ -85,6 +126,10 @@ def pdf_rows_to_transactions(pdf_rows, account):
     does. A zero-net row with a quantity keeps the PDF quantity signed by the
     type's convention (SOLD negative, every other type positive) with amount
     0 (decision 1); the NRT split does not apply to it.
+
+    ``prev_group``: the previous statement group of the account — its rows
+    let a symbol-less PDF row fall back to the previous stored statement's
+    holdings (real-data fix, Oct 30).
     """
     out = []
     for pdf in pdf_rows:
@@ -93,6 +138,9 @@ def pdf_rows_to_transactions(pdf_rows, account):
                 f"{pdf.date} {pdf.activity_type}: no CSV type mapping — "
                 f"period stopped, row not filled"
             )
+        prev_row = None
+        if prev_group is not None:
+            prev_row = prev_group.rows.get(pdf.currency)
         tx_type, qty_sign = MAPPING[pdf.activity_type]
         credit = pdf.credit or Decimal("0")
         debit = pdf.debit or Decimal("0")
@@ -104,7 +152,7 @@ def pdf_rows_to_transactions(pdf_rows, account):
                 # Neither cash nor quantity — stays out of the fill.
                 continue
             sign = -1 if qty_sign == -1 else +1
-            tx = _base_transaction(account, pdf)
+            tx = _base_transaction(account, pdf, prev_row)
             tx.type = tx_type
             tx.quantity = qty * sign
             tx.amount = Decimal("0")
@@ -114,14 +162,14 @@ def pdf_rows_to_transactions(pdf_rows, account):
 
         if credit and debit:
             # NRT withholding: income row (credit) + TAX row (-debit).
-            tx = _base_transaction(account, pdf)
+            tx = _base_transaction(account, pdf, prev_row)
             tx.type = tx_type
             tx.quantity = qty * Decimal(qty_sign)
             tx.amount = credit
             tx.amount_cad = credit
             out.append(tx)
 
-            tax = _base_transaction(account, pdf)
+            tax = _base_transaction(account, pdf, prev_row)
             tax.type = "TAX"
             tax.quantity = Decimal("0")
             tax.amount = -debit
@@ -129,7 +177,7 @@ def pdf_rows_to_transactions(pdf_rows, account):
             out.append(tax)
             continue
 
-        tx = _base_transaction(account, pdf)
+        tx = _base_transaction(account, pdf, prev_row)
         tx.type = tx_type
         tx.quantity = qty * Decimal(qty_sign)
         tx.amount = net
@@ -218,7 +266,7 @@ def plan_period(group, prev_group, bounds, account):
         unmatched_pdf.extend(unmatched_zn)
 
     try:
-        new_rows = pdf_rows_to_transactions(unmatched_pdf, account)
+        new_rows = pdf_rows_to_transactions(unmatched_pdf, account, prev_group)
     except UnmappedActivity as exc:
         return PeriodPlan(
             group=group,

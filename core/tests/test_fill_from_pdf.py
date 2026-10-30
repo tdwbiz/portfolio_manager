@@ -21,6 +21,7 @@ from core.models import (
     Transaction,
 )
 from core.utils.account_fingerprint import fingerprint_account_number
+from core.utils.fill_from_pdf import derive_pdf_symbol
 from core.utils.monthly_check import (
     check_statement,
     csv_coverage_bounds,
@@ -393,6 +394,87 @@ class FillFromPdfTest(TestCase):
 
         res = feb_check(self.account)
         self.assertEqual(res.verdict, "PASS")
+
+    # ------------------------------------------------------------------
+    # Real-data fix (Oct 30) 2: symbol-less PDF rows take the symbol from
+    # the holdings of the same / previous stored statement
+    # ------------------------------------------------------------------
+
+    VFV_NAME = "VANGUARD FTSE CDN HIGH DIVID YIELD INDEX ETF TR UNIT"
+
+    def named_holding(self, rbc, security, symbol, qty):
+        return RbcMonthlyHolding.objects.create(
+            rbc_monthly=rbc, currency="CAD", security=security,
+            symbol=symbol, quantity=qty,
+        )
+
+    def test_derive_symbol_from_same_statement_holding(self):
+        feb = self.feb(Decimal("100"))
+        self.named_holding(feb, self.VFV_NAME, "VFV", Decimal("10"))
+        pdf = pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+                     quantity=Decimal("40"),
+                     description=self.VFV_NAME)
+        self.assertEqual(derive_pdf_symbol(pdf), "VFV")
+
+    def test_derive_symbol_falls_back_to_previous_statement(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        feb = self.feb(Decimal("100"))  # no matching holding in February
+        self.named_holding(jan, self.VFV_NAME, "VFV", Decimal("10"))
+        pdf = pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+                     quantity=Decimal("40"),
+                     description=self.VFV_NAME)
+        self.assertEqual(derive_pdf_symbol(pdf), "")
+        self.assertEqual(derive_pdf_symbol(pdf, jan), "VFV")
+
+    def test_derive_symbol_never_guesses_ambiguous_or_explicit(self):
+        feb = self.feb(Decimal("100"))
+        # Two holdings whose names both start with the description: no guess.
+        self.named_holding(feb, "VANGUARD FTSE ALL-WORLD INDEX ETF",
+                           "VWC", Decimal("10"))
+        self.named_holding(feb, "VANGUARD FTSE 50 INDEX ETF",
+                           "VEF", Decimal("10"))
+        pdf = pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+                     quantity=Decimal("40"), description="VANGUARD FTSE")
+        self.assertEqual(derive_pdf_symbol(pdf), "")
+        # An explicit symbol is always kept as-is.
+        pdf.symbol = "ACME"
+        self.assertEqual(derive_pdf_symbol(pdf), "ACME")
+
+    def test_symbolless_sell_gets_symbol_from_holdings(self):
+        jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)
+        RbcMonthlyHolding.objects.filter(rbc_monthly=jan).delete()
+        self.named_holding(jan, self.VFV_NAME, "VFV", Decimal("100"))
+        feb = self.feb(Decimal("550"))
+        self.named_holding(feb, self.VFV_NAME, "VFV", Decimal("60"))
+        self.base_period(feb)
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+               quantity=Decimal("40"), price=Decimal("10"),
+               description=self.VFV_NAME)
+
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "FAIL")
+
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("filled 1", text)
+
+        sell = Transaction.objects.get(type="SELL")
+        self.assertEqual(sell.symbol, "VFV")
+        res = feb_check(self.account)
+        self.assertEqual(res.verdict, "PASS")
+
+    def test_symbolless_row_without_holding_match_fails_after_check(self):
+        # No holding matches the description: the row is filled without a
+        # symbol, the after-check fails, and the period stays unchanged.
+        feb = self.feb(Decimal("550"), acme=Decimal("60"))
+        self.base_period(feb)
+        pdf_tx(feb, date(2025, 2, 12), "SOLD", credit=Decimal("400"),
+               quantity=Decimal("40"), price=Decimal("10"),
+               description="SELL SOME UNKNOWN FUND")
+
+        before = Transaction.objects.count()
+        text = run_cmd("--from", "2025-02", "--to", "2025-02", "--apply")
+        self.assertIn("left unchanged (after-check still fails)", text)
+        self.assertEqual(Transaction.objects.count(), before)
 
     def test_zero_net_units_already_in_csv_are_not_filled(self):
         jan = RbcMonthly.objects.get(account=self.account, statement_date=JAN)

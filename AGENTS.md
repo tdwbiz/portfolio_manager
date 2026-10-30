@@ -192,4 +192,4 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 - **SQL Server `max_length=3` on `Account.currency`:** use `'MIX'`, and `Account.objects.filter(pk=pk).update(currency=...)` instead of `account.save()` to avoid truncation errors where the column was previously wider.
 - **Naive datetime warnings** are suppressed in `settings_test.py` (`auto_now_add=True` with TZ support).
 - **Tests:** always create a `BrokerStatement` before a `Transaction` (required FK).
-- **`compute_tx_hash`** excludes `amount`, so overlapping CSV exports with slightly different amounts produce the same hash.
+- **`compute_tx_hash`** excludes `amount` (for BUY/SELL), so overlapping CSV exports with slightly different amounts produce the same hash. It has no row number; identical rows within one file get a within-file `seq` (1, 2, …, omitted from the hash when 1) so repeated rows import and overlapping exports dedup.

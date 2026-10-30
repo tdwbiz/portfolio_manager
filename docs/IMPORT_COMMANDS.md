@@ -106,7 +106,20 @@ python manage.py import_csv
 
 Options:
 - `--holdings` — import Holdings CSVs into `PositionHistory` instead of Activity CSVs
-- `--dry-run` — parse files without writing to the database
+- `--dry-run` — parse files without writing to the database (no BrokerStatement, no FileImportLog, no file moves); duplicates are checked against the DB read-only
+
+Both real RBC export layouts are supported; columns are matched **by header name, never by position**:
+
+- **Old layout (2017–2019), 9 columns:** `Date, Activity, Symbol, Quantity, Price, Settlement Date, Account, Value, Currency`
+- **New layout, 11 columns:** adds `Symbol Description` after `Symbol` and `Description` at the end (`Symbol Description` is ignored; `Description` is stored as scrubbed notes)
+
+Behaviour:
+
+- **Dates** use one shared parser (`parse_csv_date`): `31-Dec-18`, `31-Dec-2018`, `Dec 31, 2018`, `December 31, 2018`. The **Settlement Date is mandatory** — a missing or unreadable cell rejects the row (`Missing settlement date` / `Invalid settlement date: …`), it never becomes NULL.
+- **Unknown activity types reject the row** (`Unknown activity type: <raw>`); no `TransactionType` rows are auto-created from RBC exports. (The IB path keeps its auto-create behaviour.)
+- **Row accounting:** every data row of every file is accounted for — `data rows = imported + duplicates + practice + rejected`. The sum is printed per file; a mismatch **fails that whole file atomically** (nothing stored, `FileImportLog` status `error` with the counts as the reason) and the run continues with the next file. Rejections are printed grouped by reason.
+- **Dedup / `tx_hash`:** the hash uses only fields present in both layouts — date, settlement date, activity/type, symbol, quantity, price, value, currency, plus account — never Symbol Description or Description. It excludes `amount` for BUY/SELL (overlapping exports with slightly different amounts still match). Identical rows within one file get a within-file sequence (`seq` 1, 2, …) so both are imported with different hashes; the same row in two overlapping exports gets `seq` 1 in each and the second is skipped as a duplicate.
+- **`--dry-run` report:** per account name / type / YYYY-MM it prints the rows that would be imported and the duplicates that would be skipped (checked against the DB), rejections grouped by reason, and **near-duplicates across files** — rows in different files with the same account, date, symbol and value that differ in another field (listed by file + row number + which field differs). Near-duplicates are reported only; they block nothing. Output uses account names, dates and counts — never Account column values.
 
 ## Watcher
 

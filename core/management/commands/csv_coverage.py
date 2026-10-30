@@ -18,6 +18,10 @@ import os
 from django.core.management.base import BaseCommand, CommandError
 
 from imports.parsers import parse_rbc_csv
+from core.utils.account_fingerprint import (
+    build_fingerprint_name_map,
+    fingerprint_account_number,
+)
 
 
 def _fmt(value):
@@ -59,7 +63,11 @@ class Command(BaseCommand):
         # ------------------------------------------------------------------
         # Per-file stats (parse errors reported per file; continue with rest)
         # ------------------------------------------------------------------
+        # fingerprint -> account name, built once (names only, never numbers).
+        name_map = build_fingerprint_name_map()
+
         file_reports = []
+        trades_by_file = {}
         for name in file_names:
             path = os.path.join(csv_dir, name)
             if name.lower().startswith('holdings'):
@@ -79,6 +87,35 @@ class Command(BaseCommand):
                 t['settlement_date'] for t in trades
                 if t.get('settlement_date') is not None
             )
+
+            # Rejections: unknown-account rows vs practice rows (PRAC…). The
+            # rejection reason embeds the raw account number — count only,
+            # never echo it.
+            unknown_rows = sum(
+                1 for rj in rejections
+                if rj['Reason Rejected'].startswith('Unknown account')
+            )
+            practice_rows = sum(
+                1 for rj in rejections
+                if rj['Reason Rejected'].startswith('Practice account')
+            )
+
+            # Per-account breakdown (by name; the raw account id is used only
+            # as a fingerprint lookup key and never printed or written).
+            accounts = {}
+            for t in trades:
+                acct_name = name_map.get(
+                    fingerprint_account_number(t['account_id']), 'unknown'
+                )
+                entry = accounts.setdefault(
+                    acct_name, {'count': 0, 'first_date': None, 'last_date': None}
+                )
+                entry['count'] += 1
+                if entry['first_date'] is None or t['date'] < entry['first_date']:
+                    entry['first_date'] = t['date']
+                if entry['last_date'] is None or t['date'] > entry['last_date']:
+                    entry['last_date'] = t['date']
+
             file_reports.append({
                 'name': name,
                 'row_count': len(trades),
@@ -86,7 +123,11 @@ class Command(BaseCommand):
                 'last_date': dates[-1] if dates else None,
                 'first_settlement': settlements[0] if settlements else None,
                 'last_settlement': settlements[-1] if settlements else None,
+                'unknown_rows': unknown_rows,
+                'practice_rows': practice_rows,
+                'accounts': accounts,
             })
+            trades_by_file[name] = trades
 
         # ------------------------------------------------------------------
         # Short summary (stdout)
@@ -94,10 +135,20 @@ class Command(BaseCommand):
         read = [r for r in file_reports if not r.get('skipped') and not r.get('error')]
         skipped = sum(1 for r in file_reports if r.get('skipped'))
         errors = sum(1 for r in file_reports if r.get('error'))
+        total_unknown = sum(r['unknown_rows'] for r in read)
+        total_practice = sum(r['practice_rows'] for r in read)
+        accounts_seen = sorted({
+            acct for r in read for acct in r['accounts'] if acct != 'unknown'
+        })
 
         self.stdout.write(
             f'Files read: {len(read)} '
             f'(skipped {skipped} holdings, {errors} errors)'
+        )
+        self.stdout.write(f'Accounts seen: {len(accounts_seen)}')
+        self.stdout.write(
+            f'Unknown-account rows: {total_unknown}, '
+            f'practice rows skipped: {total_practice}'
         )
         for r in file_reports:
             if r.get('skipped'):
@@ -111,5 +162,13 @@ class Command(BaseCommand):
                     f"  {r['name']}: {r['row_count']} rows, "
                     f"{_fmt(r['first_date'])} .. {_fmt(r['last_date'])}, "
                     f"settlement {_fmt(r['first_settlement'])} .. "
-                    f"{_fmt(r['last_settlement'])}"
+                    f"{_fmt(r['last_settlement'])}, "
+                    f"unknown-account rows: {r['unknown_rows']}, "
+                    f"practice rows skipped: {r['practice_rows']}"
                 )
+                for acct in sorted(r['accounts']):
+                    a = r['accounts'][acct]
+                    self.stdout.write(
+                        f"    {acct}: {a['count']} rows "
+                        f"({_fmt(a['first_date'])} .. {_fmt(a['last_date'])})"
+                    )

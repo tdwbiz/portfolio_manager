@@ -280,7 +280,10 @@ class Command(BaseCommand):
             monthly_lines.append((acct['name'], lines))
 
         # ------------------------------------------------------------------
-        # Short summary (stdout)
+        # Report + output. Full report to --out when given; the short summary
+        # always goes to stdout. Privacy: only account names, file names,
+        # dates and counts — never any value from the CSV Account column
+        # (raw ids appear above only as fingerprint lookup keys).
         # ------------------------------------------------------------------
         read = [r for r in file_reports if not r.get('skipped') and not r.get('error')]
         skipped = sum(1 for r in file_reports if r.get('skipped'))
@@ -291,6 +294,60 @@ class Command(BaseCommand):
             acct for r in read for acct in r['accounts'] if acct != 'unknown'
         })
 
+        report_lines = [
+            'CSV coverage report',
+            f'Dir: {csv_dir}',
+            '',
+            'Files:',
+        ]
+        for r in file_reports:
+            if r.get('skipped'):
+                report_lines.append(
+                    f"  {r['name']}: skipped (Holdings format, not an Activity CSV)"
+                )
+            elif r.get('error'):
+                report_lines.append(f"  {r['name']}: ERROR {r['error']}")
+            else:
+                report_lines.append(
+                    f"  {r['name']}: {r['row_count']} rows, "
+                    f"{_fmt(r['first_date'])} .. {_fmt(r['last_date'])}, "
+                    f"settlement {_fmt(r['first_settlement'])} .. "
+                    f"{_fmt(r['last_settlement'])}, "
+                    f"unknown-account rows: {r['unknown_rows']}, "
+                    f"practice rows skipped: {r['practice_rows']}"
+                )
+                for acct in sorted(r['accounts']):
+                    a = r['accounts'][acct]
+                    report_lines.append(
+                        f"    {acct}: {a['count']} rows "
+                        f"({_fmt(a['first_date'])} .. {_fmt(a['last_date'])})"
+                    )
+
+        gaps_by_name = dict(gap_lines)
+        monthly_by_name = dict(monthly_lines)
+        for acct_name, pairs in overlap_lines:
+            report_lines.append('')
+            report_lines.append(f'Account: {acct_name}')
+            if pairs:
+                report_lines.append('  overlaps:')
+                report_lines.extend(pairs)
+            else:
+                report_lines.append('  overlaps: none')
+            gaps = gaps_by_name.get(acct_name, [])
+            if gaps:
+                report_lines.append('  gaps > 31 days:')
+                report_lines.extend(gaps)
+            mlines = monthly_by_name.get(acct_name, [])
+            if mlines:
+                report_lines.append('  monthly (from 2017-11):')
+                report_lines.extend(mlines)
+
+        if out_path:
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(report_lines) + '\n')
+            self.stdout.write(f'Report written to {out_path}')
+
+        # Short summary (always stdout).
         self.stdout.write(
             f'Files read: {len(read)} '
             f'(skipped {skipped} holdings, {errors} errors)'
@@ -302,44 +359,3 @@ class Command(BaseCommand):
         )
         self.stdout.write(f'Gaps found: {total_gaps}')
         self.stdout.write(f'Flagged months: {total_flagged}')
-
-        gaps_by_name = dict(gap_lines)
-        monthly_by_name = dict(monthly_lines)
-        for acct_name, pairs in overlap_lines:
-            self.stdout.write(f'Account: {acct_name}')
-            if pairs:
-                self.stdout.write('  overlaps:')
-                self.stdout.write('\n'.join(pairs))
-            else:
-                self.stdout.write('  overlaps: none')
-            gaps = gaps_by_name.get(acct_name, [])
-            if gaps:
-                self.stdout.write('  gaps > 31 days:')
-                self.stdout.write('\n'.join(gaps))
-            mlines = monthly_by_name.get(acct_name, [])
-            if mlines:
-                self.stdout.write('  monthly (from 2017-11):')
-                self.stdout.write('\n'.join(mlines))
-
-        for r in file_reports:
-            if r.get('skipped'):
-                self.stdout.write(
-                    f"  {r['name']}: skipped (Holdings format, not an Activity CSV)"
-                )
-            elif r.get('error'):
-                self.stdout.write(f"  {r['name']}: ERROR {r['error']}")
-            else:
-                self.stdout.write(
-                    f"  {r['name']}: {r['row_count']} rows, "
-                    f"{_fmt(r['first_date'])} .. {_fmt(r['last_date'])}, "
-                    f"settlement {_fmt(r['first_settlement'])} .. "
-                    f"{_fmt(r['last_settlement'])}, "
-                    f"unknown-account rows: {r['unknown_rows']}, "
-                    f"practice rows skipped: {r['practice_rows']}"
-                )
-                for acct in sorted(r['accounts']):
-                    a = r['accounts'][acct]
-                    self.stdout.write(
-                        f"    {acct}: {a['count']} rows "
-                        f"({_fmt(a['first_date'])} .. {_fmt(a['last_date'])})"
-                    )

@@ -174,6 +174,16 @@ def test_status_counts_over_filtered_queryset(authenticated_client):
     assert response.context["status_counts"] == {
         "open": 2, "accepted": 0, "resolved": 0
     }
+    # Counts follow every filter except status: with status=open selected the
+    # accepted/resolved badges still show their real numbers.
+    response = authenticated_client.get(LIST_URL, {"status": "open"})
+    assert response.context["status_counts"] == {
+        "open": 2, "accepted": 1, "resolved": 1
+    }
+    # ...and the list itself is still filtered by status.
+    assert [e.status for e in response.context["exceptions"]] == [
+        "open", "open"
+    ]
 
 
 @pytest.mark.django_db

@@ -32,7 +32,7 @@ _TAXABLE = Case(
 
 
 def _apply_list_filters(qs, request):
-    """Apply the optional GET filters; invalid values are ignored."""
+    """Apply the optional GET filters except status; invalid values ignored."""
     account_param = request.GET.get("account", "").strip()
     if account_param:
         try:
@@ -46,10 +46,6 @@ def _apply_list_filters(qs, request):
     kind = request.GET.get("kind", "").strip().upper()
     if kind in dict(MonthlyException.KIND_CHOICES):
         qs = qs.filter(kind=kind)
-
-    status = request.GET.get("status", "").strip().lower()
-    if status in dict(MonthlyException.STATUS_CHOICES):
-        qs = qs.filter(status=status)
 
     year_param = request.GET.get("year", "").strip()
     if year_param:
@@ -78,16 +74,23 @@ def exceptions_list(request):
 
     Ordering: status rank open -> accepted -> resolved, then taxable
     first (category == "TAXABLE"), then account name, statement_date,
-    kind. Status counts are computed over the filtered queryset.
+    kind. Status counts follow every filter except status.
     """
-    filtered = _apply_list_filters(
+    base = _apply_list_filters(
         MonthlyException.objects.all().select_related("account"), request
     )
-    # Counts come from the clean (unannotated, unsorted) queryset: the list
-    # annotations and ordering would otherwise leak into the GROUP BY.
+    # Counts follow every filter except status, so with status=open selected
+    # the accepted/resolved badges still show their real numbers. They come
+    # from the clean (unannotated, unsorted) queryset: the list annotations
+    # and ordering would otherwise leak into the GROUP BY.
     status_counts = {s: 0 for s, _ in MonthlyException.STATUS_CHOICES}
-    for row in filtered.values("status").annotate(n=Count("pk")):
+    for row in base.values("status").annotate(n=Count("pk")):
         status_counts[row["status"]] = row["n"]
+
+    filtered = base
+    status = request.GET.get("status", "").strip().lower()
+    if status in dict(MonthlyException.STATUS_CHOICES):
+        filtered = filtered.filter(status=status)
 
     qs = filtered.annotate(status_rank=_STATUS_RANK, taxable=_TAXABLE).order_by(
         "status_rank", "-taxable", "account__name", "statement_date", "kind"

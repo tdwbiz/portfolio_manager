@@ -439,6 +439,25 @@ def test_coverage_resolved_exception_ignored_for_accepted(
 
 
 @pytest.mark.django_db
+def test_coverage_import_date_without_result_is_gap_with_marker(
+    authenticated_client,
+):
+    a = make_account("ACCOUNT_A", "90000001")
+    # A result date and an IMPORT-only date (no result for it).
+    make_result(a, date(2026, 1, 31), "CAD", "PASS")
+    make_exc(a, date(2026, 2, 28), kind="IMPORT", ref="ab12cd34")
+
+    response = authenticated_client.get(COVERAGE_URL)
+    assert response.context["dates"] == [date(2026, 1, 31), date(2026, 2, 28)]
+    rows = {row["account"].name: row for row in response.context["rows"]}
+    cell = next(
+        c for c in rows["ACCOUNT_A"]["cells"] if c["date"] == date(2026, 2, 28)
+    )
+    assert cell["state"] == "GAP"
+    assert cell["letters"] == "\u00b7 i"
+
+
+@pytest.mark.django_db
 def test_coverage_empty_when_no_results(authenticated_client):
     make_account("ACCOUNT_A", "90000001")
     response = authenticated_client.get(COVERAGE_URL)

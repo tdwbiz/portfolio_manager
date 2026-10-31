@@ -222,7 +222,16 @@ def exceptions_coverage(request):
     for e in exceptions:
         excs_by_pair.setdefault((e.account_id, e.statement_date), []).append(e)
 
-    dates = sorted({r.statement_date for r in results})
+    # Columns come from the results plus every IMPORT exception date, so a
+    # parked file's "i" marker always shows (as a gap cell with the marker).
+    dates = sorted(
+        {r.statement_date for r in results}
+        | {
+            e.statement_date
+            for e in exceptions
+            if e.kind == MonthlyException.KIND_IMPORT
+        }
+    )
 
     rows = []
     for acct in Account.objects.order_by("name"):

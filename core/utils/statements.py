@@ -796,17 +796,19 @@ def generate_forward_statements(
     have_anchor = False
 
     def emit(row):
+        """Add the row to the (date-filtered) output; True when emitted."""
         nonlocal history_priced_rows, stale_rows
         if from_date is not None and row.statement_date < from_date:
-            return
+            return False
         if to_date is not None and row.statement_date > to_date:
-            return
+            return False
         rows.append(row)
         counts[row.source] += 1
         if any(p.price_source == "HISTORY" for p in row.positions):
             history_priced_rows += 1
         if row.has_stale_prices:
             stale_rows += 1
+        return True
 
     def section_value(currencies, pos_map):
         """Total position value of one currency section at the state prices."""
@@ -964,9 +966,10 @@ def generate_forward_statements(
                     positions=positions,
                     **flows,
                 )
-                emit(row)
-                # Built-in check: PASS rows must equal the PDF to the cent.
-                if verdicts[c].verdict == "PASS":
+                emitted = emit(row)
+                # Built-in check: PASS rows must equal the PDF to the cent
+                # (reported for the rows that are actually output).
+                if emitted and verdicts[c].verdict == "PASS":
                     pass_rows += 1
                     diff = row.ending_market_value - group.rows[c].end_total_market_value
                     if abs(diff) > Decimal("0.005"):

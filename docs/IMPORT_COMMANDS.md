@@ -139,6 +139,16 @@ python manage.py watch_inbox --interval 300
 | `generate_annual_reports` | Generate `CoreAnnualReport` from monthly statements |
 | `reconcile` | Compare CSV vs RBC data |
 
+## Taxable Accounts Report (read-only)
+
+### `taxable_events`
+
+```bash
+python manage.py taxable_events [--account NAME] [--from YYYY-MM] [--to YYYY-MM] --out FILE
+```
+
+Read-only report gathering the facts for the known gaps in the taxable RBC accounts: non-plain transactions (with reorg subtypes and option-symbol catches), RBF interest rows plus the January 2024–2026 PDF reference rows, per-currency/type counts with USD exchange-rate presence, DLR round-trip rows, symbols held in more than one account in the same month, the TS_HUISGELD 2017-12 and first TS_CAR_LIVING holdings (missing book costs flagged), unexplained PDF book-cost changes, and stored monthly-check verdicts. Default accounts: every TAXABLE account with at least one transaction; `--out` is required and is the only file written — nothing is written to the database. Background: `docs/plans/taxable-events.md`.
+
 ## Data Quality
 
 | Command | Purpose |

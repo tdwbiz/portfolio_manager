@@ -366,14 +366,76 @@ def section_5_cross_account_symbols(accounts, month_start, month_end):
     return lines
 
 
+def _statement_ref_line(stmt):
+    """One-line reference for a statement — safe file kind only, never digits.
+
+    The raw file name is reduced through classify_safe_name to its kind
+    (monthly / annual / unknown); nothing else of it is printed.
+    """
+    kind = classify_safe_name(stmt.file_name) or "unknown"
+    return (
+        f"  {stmt.account.name} {stmt.statement_date} [{stmt.currency}] "
+        f"(file kind: {kind})"
+    )
+
+
+def _holding_lines(stmt):
+    """Holding dump lines for one RbcMonthly row.
+
+    Symbol, quantity, currency and book_cost per holding; rows with a
+    missing book cost (book_cost == 0 — decision 3) are flagged.
+    """
+    lines = []
+    for h in stmt.holdings.order_by("symbol", "security"):
+        flag = " (book cost missing)" if h.book_cost == 0 else ""
+        lines.append(
+            f"    {h.symbol or '(no symbol)'} qty={h.quantity} {h.currency} "
+            f"book_cost={h.book_cost}{flag}"
+        )
+    return lines
+
+
 def section_6_target_statement(account_name=SECTION6_ACCOUNT, month=SECTION6_MONTH):
-    """Section 6: holdings of the fixed-target statement (missing book cost flagged)."""
-    return []
+    """Section 6: holdings of the fixed-target statement.
+
+    Default target TS_HUISGELD 2017-12 (module constants, decision 2). A
+    one-line 'not stored' note is printed when no such statement exists.
+    """
+    year, mon = (int(part) for part in month.split("-"))
+    stmts = (
+        RbcMonthly.objects.filter(
+            account__name=account_name,
+            statement_date__year=year,
+            statement_date__month=mon,
+        )
+        .order_by("currency", "pk")
+    )
+    if not stmts.exists():
+        return [f"  {account_name} {month}: no stored statement"]
+    lines = []
+    for stmt in stmts:
+        lines.append(_statement_ref_line(stmt))
+        lines.extend(_holding_lines(stmt))
+    return lines
 
 
 def section_7_first_statement(account_name=SECTION7_ACCOUNT):
-    """Section 7: holdings of the first stored statement of the target account."""
-    return []
+    """Section 7: holdings of the first stored statement of the target account.
+
+    Default target TS_CAR_LIVING (module constant, decision 2). A one-line
+    'not stored' note is printed when the account has no stored statement.
+    """
+    stmt = (
+        RbcMonthly.objects.filter(account__name=account_name)
+        .order_by("statement_date", "currency", "pk")
+        .select_related("account")
+        .first()
+    )
+    if stmt is None:
+        return [f"  {account_name}: no stored statement"]
+    lines = [_statement_ref_line(stmt)]
+    lines.extend(_holding_lines(stmt))
+    return lines
 
 
 def section_8_book_cost_changes(accounts, month_start, month_end):

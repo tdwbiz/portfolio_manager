@@ -501,6 +501,29 @@ def _pdf_qty_map(rbc_rows):
     return qtys
 
 
+def make_symbol_key(account_pk):
+    """Build the symbol normaliser for one account (real-data fixes 2-3).
+
+    Returns ``norm(sym)`` mapping raw symbol text to its comparison key:
+    CSV option codes map to their normalised option text (from the
+    transaction notes), PDF option text is normalised in place, and known
+    symbol aliases (SYMBOL_ALIASES) are applied. Used by ``check_holdings``
+    and the forward statement generator so both compare under one key.
+    """
+    option_map = _option_code_map(account_pk)
+
+    def norm(sym):
+        s = sym.strip()
+        if s in option_map:
+            return option_map[s]
+        normalised = normalize_option_text(s)
+        if normalised is not None:
+            return normalised
+        return SYMBOL_ALIASES.get(s.upper(), s)
+
+    return norm
+
+
 def check_holdings(group, prev_group, txs=None):
     """HOLDINGS / QUANTITY (per account, currencies pooled).
 
@@ -522,18 +545,7 @@ def check_holdings(group, prev_group, txs=None):
     period_start = prev_group.statement_date
     period_end = group.statement_date
 
-    option_map = _option_code_map(group.account_pk)
-
-    def norm(sym):
-        # CSV option codes map to their normalised option text (from the
-        # transaction notes); PDF option text is normalised in place.
-        s = sym.strip()
-        if s in option_map:
-            return option_map[s]
-        normalised = normalize_option_text(s)
-        if normalised is not None:
-            return normalised
-        return SYMBOL_ALIASES.get(s.upper(), s)
+    norm = make_symbol_key(group.account_pk)
 
     prev_qtys = {}
     for sym, qty in _pdf_qty_map(list(prev_group.rows.values())).items():

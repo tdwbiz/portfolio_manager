@@ -62,6 +62,11 @@ def html(response):
     return response.content.decode()
 
 
+def messages_in(response):
+    # The POST redirects to the detail page, which renders the messages.
+    return [str(m) for m in response.context["messages"]]
+
+
 @pytest.mark.django_db
 def test_login_required_on_all_three_urls():
     client = Client()
@@ -233,6 +238,27 @@ def test_accept_with_reason_sets_status_reason_accepted_at(authenticated_client)
     assert exc.status == "accepted"
     assert exc.reason == "known diff"
     assert exc.accepted_at is not None
+
+
+@pytest.mark.django_db
+def test_success_messages_read_accepted_and_reopened(authenticated_client):
+    a = make_account("ACCOUNT_A", "90000001")
+    exc = make_exc(a, date(2026, 1, 31))
+
+    response = authenticated_client.post(
+        f"/exceptions/{exc.pk}/",
+        {"action": "accept", "reason": "known diff"},
+        follow=True,
+    )
+    assert messages_in(response) == ["Exception accepted: known diff"]
+
+    exc.refresh_from_db()
+    response = authenticated_client.post(
+        f"/exceptions/{exc.pk}/",
+        {"action": "reopen", "reason": "diff changed"},
+        follow=True,
+    )
+    assert messages_in(response) == ["Exception reopened: diff changed"]
 
 
 @pytest.mark.django_db

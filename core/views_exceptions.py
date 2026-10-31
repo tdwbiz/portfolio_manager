@@ -150,10 +150,12 @@ def exception_detail(request, pk):
             else:
                 ok = reopen_exception(pk, reason) is not None
             if ok:
-                messages.success(
-                    request,
-                    f"Exception {action}d: {reason}",
-                )
+                if action == "accept":
+                    messages.success(request, f"Exception accepted: {reason}")
+                else:
+                    messages.success(
+                        request, f"Exception reopened: {reason}"
+                    )
             else:
                 messages.error(request, "Nothing was changed.")
         return redirect("exception_detail", pk=pk)

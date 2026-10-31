@@ -302,6 +302,33 @@ def test_fail_month_differs_from_pdf_by_exactly_its_exception(account):
 
 
 @pytest.mark.django_db
+def test_gap_fill_starts_after_the_anchor_month(account):
+    # Statements dated Friday 2026-01-30 and 2026-03-31: the anchor's own
+    # month already has a row, so gap fill starts in the calendar month
+    # after the anchor month — no GAP row for 2026-01-31. The same rule
+    # holds after the last PDF (no April row). No two rows share
+    # (account, statement_month, currency).
+    jan = make_monthly(account, date(2026, 1, 30), begin=Decimal("100"),
+                       end=Decimal("200"))
+    cash(jan, Decimal("200"))
+    mar = make_monthly(account, date(2026, 3, 31), last_stmt=date(2026, 1, 30),
+                       begin=Decimal("200"), end=Decimal("250"))
+    cash(mar, Decimal("250"))
+    make_tx(account, date(2026, 3, 15), "DEP", Decimal("50"),
+            settlement=date(2026, 3, 17))
+
+    rows, report = generate_forward_statements(account)
+
+    assert [(r.statement_date, r.source) for r in rows] == [
+        (date(2026, 1, 30), "PDF"),
+        (date(2026, 2, 28), "GAP"),
+        (date(2026, 3, 31), "REPLAY"),
+    ]
+    keys = [(r.statement_month, r.currency) for r in rows]
+    assert len(keys) == len(set(keys))
+
+
+@pytest.mark.django_db
 def test_fail_month_does_not_carry_into_next_period(account):
     # February FAILs its live cash check (an extra CSV dividend the PDF does
     # not show). The chain re-anchors on the February PDF after every stored

@@ -465,7 +465,15 @@ def generate_forward_statements(
         )
         anchor_date = group.statement_date
         while True:
-            month_end = _month_end(anchor_date + timedelta(days=1))
+            if _month_end(anchor_date) == anchor_date:
+                month_end = _month_end(anchor_date + timedelta(days=1))
+            else:
+                # The anchor's own month already has a row at its statement
+                # date; gap fill starts in the calendar month after the
+                # anchor month — never a GAP row for the anchor's remaining
+                # days (e.g. a Friday 2026-01-30 statement gets no row for
+                # 2026-01-31).
+                month_end = _month_end(_month_end(anchor_date) + timedelta(days=1))
             if next_pdf_date is not None:
                 if month_end >= next_pdf_date:
                     break

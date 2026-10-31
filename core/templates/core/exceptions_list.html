@@ -49,13 +49,13 @@
                 <input type="number" name="year" id="id_year" class="form-control" value="{{ filters.year }}" min="2000" max="2100" />
             </div>
             <div class="col-auto">
-                <label for="id_statement_date" class="form-label">Statement date</label>
-                <input type="date" name="statement_date" id="id_statement_date" class="form-control" value="{{ filters.statement_date }}" />
+                <label for="id_month" class="form-label">Statement month</label>
+                <input type="month" name="month" id="id_month" class="form-control" value="{{ filters.month }}" />
             </div>
             <div class="col-auto">
                 <button type="submit" class="btn btn-primary"><i class="bi bi-funnel"></i> Filter</button>
             </div>
-            {% if filters.account or filters.kind or filters.status or filters.year or filters.statement_date %}
+            {% if filters.account or filters.kind or filters.status or filters.year or filters.month %}
             <div class="col-auto">
                 <a href="{% url 'exceptions_list' %}" class="btn btn-outline-secondary"><i class="bi bi-x-circle"></i> Clear</a>
             </div>

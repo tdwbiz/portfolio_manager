@@ -130,14 +130,17 @@ def test_list_filters(authenticated_client):
     assert pks(authenticated_client.get(LIST_URL, {"year": "2026"})) == {
         e_a_cash.pk, e_a_chain.pk, e_b_open.pk
     }
-    assert pks(
-        authenticated_client.get(LIST_URL, {"statement_date": "2025-12-31"})
-    ) == {e_b_accepted.pk}
+    # Month filter: statement date's year and month.
+    assert pks(authenticated_client.get(LIST_URL, {"month": "2025-12"})) == {
+        e_b_accepted.pk
+    }
+    assert pks(authenticated_client.get(LIST_URL, {"month": "2026-01"})) == {
+        e_a_cash.pk, e_a_chain.pk
+    }
     # Invalid values are ignored (no filtering).
     assert len(pks(authenticated_client.get(LIST_URL, {"account": "999"}))) == 4
-    assert len(
-        pks(authenticated_client.get(LIST_URL, {"statement_date": "not-a-date"}))
-    ) == 4
+    for bad_month in ("not-a-month", "2026-13", "2026-1", "202601"):
+        assert len(pks(authenticated_client.get(LIST_URL, {"month": bad_month}))) == 4
 
 
 @pytest.mark.django_db
@@ -372,11 +375,9 @@ def test_coverage_grid_cell_states(authenticated_client):
     assert cell("ACCOUNT_A", date(2026, 4, 30))["state"] == "FAIL"
     assert cell("ACCOUNT_B", date(2026, 4, 30))["state"] == "PASS"
 
-    # Cells link to the filtered list.
+    # Cells link to the filtered list (account + month).
     body = html(response)
-    assert (
-        f"{LIST_URL}?account={a.pk}&statement_date=2026-01-31" in body
-    )
+    assert f"{LIST_URL}?account={a.pk}&month=2026-01" in body
 
 
 @pytest.mark.django_db

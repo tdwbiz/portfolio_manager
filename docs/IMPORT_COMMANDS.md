@@ -156,7 +156,7 @@ The exceptions stored by `monthly_check --store` (`MonthlyException`) are browsa
 
 | URL | What it shows |
 |---|---|
-| `/exceptions/` | All exceptions, filterable by account, kind, status, year and statement date. Ordered open → accepted → resolved, taxable accounts (`category = TAXABLE`) first. |
+| `/exceptions/` | All exceptions, filterable by account, exception type (GET param `kind`), status, year and statement month (`month=YYYY-MM`; invalid values are ignored). Ordered open → accepted → resolved, taxable accounts (`category = TAXABLE`) first. |
 | `/exceptions/<id>/` | One exception with its stored detail verbatim. **Accept** (only when open) and **Reopen** (only when accepted) forms; both require a reason. Accepting/reopening changes only the exception row — never transactions, statements or results. |
 | `/exceptions/coverage/` | Coverage grid: accounts × statement dates, one combined cell per stored statement. Letters: `P` PASS, `F` FAIL, `A` ACCEPTED (verdict FAIL with all check exceptions accepted), `1` FIRST, `–` NO_CSV, `·` no stored result (gap), `i` IMPORT exception on that date. |
 

@@ -9,8 +9,9 @@ Plan: docs/plans/exceptions-page.md (Decisions: tdw, Oct 30).
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Case, Count, IntegerField, Value, When
+import re
+
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.dateparse import parse_date
 
 from core.models import Account, MonthlyCheckResult, MonthlyException
 from core.utils.monthly_check_store import accept_exceptions, reopen_exception
@@ -59,10 +60,14 @@ def _apply_list_filters(qs, request):
         else:
             qs = qs.filter(statement_date__year=year)
 
-    date_param = request.GET.get("statement_date", "").strip()
-    parsed = parse_date(date_param) if date_param else None
-    if parsed is not None:
-        qs = qs.filter(statement_date=parsed)
+    month_param = request.GET.get("month", "").strip()
+    match = re.fullmatch(r"(\d{4})-(\d{2})", month_param) if month_param else None
+    if match:
+        year, month = int(match.group(1)), int(match.group(2))
+        if 1 <= month <= 12:
+            qs = qs.filter(
+                statement_date__year=year, statement_date__month=month
+            )
 
     return qs
 
@@ -99,7 +104,7 @@ def exceptions_list(request):
             "kind": request.GET.get("kind", "").strip().upper(),
             "status": request.GET.get("status", "").strip().lower(),
             "year": request.GET.get("year", "").strip(),
-            "statement_date": request.GET.get("statement_date", "").strip(),
+            "month": request.GET.get("month", "").strip(),
         },
     }
     return render(request, "core/exceptions_list.html", context)

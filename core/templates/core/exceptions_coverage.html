@@ -47,7 +47,7 @@
                         {% for cell in row.cells %}
                         <td class="{{ cell.css_class }}">
                             <a
-                                href="{% url 'exceptions_list' %}?account={{ row.account.pk }}&statement_date={{ cell.date|date:'Y-m-d' }}"
+                                href="{% url 'exceptions_list' %}?account={{ row.account.pk }}&month={{ cell.date|date:'Y-m' }}"
                                 title="{{ cell.title }}"
                             >{{ cell.letters }}</a>
                         </td>

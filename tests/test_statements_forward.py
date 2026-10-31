@@ -302,6 +302,41 @@ def test_fail_month_differs_from_pdf_by_exactly_its_exception(account):
 
 
 @pytest.mark.django_db
+def test_position_symbol_allows_long_fallback_names(account):
+    # The "(no symbol: <security name>)" fallback can exceed 50 chars; the
+    # model and migration 0047 allow 200.
+    field = CoreMonthlyStatementPosition._meta.get_field("symbol")
+    assert field.max_length == 200
+
+    stmt = CoreMonthlyStatement.objects.create(
+        account=account, statement_month=date(2025, 1, 1),
+        statement_date=date(2025, 1, 31), currency="CAD", source="PDF",
+    )
+    long_symbol = "(no symbol: " + "A" * 80 + ")"
+    pos = CoreMonthlyStatementPosition.objects.create(
+        statement=stmt, symbol=long_symbol, quantity=Decimal("1"),
+        price=Decimal("1.0000"), value=Decimal("1.00"),
+    )
+    assert pos.symbol == long_symbol
+
+
+@pytest.mark.django_db
+def test_apply_writes_positions(account):
+    # --apply creates the row's positions (bulk_create, batch_size=200).
+    jan = make_monthly(account, date(2025, 1, 31), begin=Decimal("1100"),
+                       end=Decimal("1100"))
+    cash(jan, Decimal("100"))
+    holding(jan, "ACME", Decimal("100"), Decimal("10.0000"), Decimal("1000"))
+
+    call_command("generate_statements", "--account", "ACCOUNT_A", "--apply")
+
+    pos = CoreMonthlyStatementPosition.objects.filter(
+        statement__account=account).get()
+    assert (pos.symbol, pos.quantity, pos.price, pos.price_source) == (
+        "ACME", Decimal("100"), Decimal("10.0000"), "PDF")
+
+
+@pytest.mark.django_db
 def test_migration_0047_backfill_statement_date(account):
     # Migration 0047 is not applied on mercury yet: its backfill reads the
     # (pk, statement_month) keys first and bulk_updates in batches of 200

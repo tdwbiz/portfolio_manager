@@ -1006,7 +1006,8 @@ class CoreMonthlyStatementPosition(models.Model):
         on_delete=models.CASCADE,
         related_name="positions",
     )
-    symbol = models.CharField(max_length=50)
+    # 200: the "(no symbol: <security name>)" fallback can exceed 50.
+    symbol = models.CharField(max_length=200)
     quantity = models.DecimalField(
         max_digits=12, decimal_places=4, default=Decimal("0.0000")
     )

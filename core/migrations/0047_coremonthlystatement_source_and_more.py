@@ -109,7 +109,8 @@ class Migration(migrations.Migration):
             name='CoreMonthlyStatementPosition',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('symbol', models.CharField(max_length=50)),
+                # 200: the "(no symbol: <security name>)" fallback can exceed 50.
+                ('symbol', models.CharField(max_length=200)),
                 ('quantity', models.DecimalField(decimal_places=4, default=Decimal('0.0000'), max_digits=12)),
                 ('price', models.DecimalField(decimal_places=4, default=Decimal('0.0000'), max_digits=12)),
                 ('price_source', models.CharField(

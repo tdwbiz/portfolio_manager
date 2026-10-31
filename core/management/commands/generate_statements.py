@@ -175,14 +175,21 @@ class Command(BaseCommand):
                         ending_cash_balance=row.ending_cash_balance,
                         has_stale_prices=row.has_stale_prices,
                     )
-                    for p in row.positions:
-                        CoreMonthlyStatementPosition.objects.create(
+                    position_rows = [
+                        CoreMonthlyStatementPosition(
                             statement=stmt,
                             symbol=p.symbol,
                             quantity=p.quantity,
                             price=p.price,
                             price_source=p.price_source,
                             value=p.value,
+                        )
+                        for p in row.positions
+                    ]
+                    if position_rows:
+                        # SQL Server allows 2,100 parameters per statement.
+                        CoreMonthlyStatementPosition.objects.bulk_create(
+                            position_rows, batch_size=200
                         )
                     written += 1
         return written

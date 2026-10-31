@@ -19,8 +19,13 @@ import re
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
-from core.models import Account, RbcMonthly, Transaction
-from core.utils.monthly_check import effective_tx_date, make_symbol_key
+from core.models import Account, RbcMonthly, RbcMonthlyHolding, Transaction
+from core.utils.monthly_check import (
+    effective_tx_date,
+    make_symbol_key,
+    normalize_option_text,
+)
+from core.utils.taxable_events import section_8_book_cost_changes
 
 # Book cost is compared to the cent; PDF quantities are stored at 4 dp.
 AMOUNT_TOL = Decimal("0.005")
@@ -257,3 +262,169 @@ def replay_account(account):
         apply(txs[index])
         index += 1
     return result
+
+
+# ----------------------------------------------------------------------
+# Comparison with the stored PDF book costs, summary and candidates.
+# ----------------------------------------------------------------------
+
+
+def _money(value):
+    """Display a computed Decimal at cent precision."""
+    return format(Decimal(value).quantize(Decimal("0.01")), "f")
+
+
+def _qty(value):
+    """Display a computed Decimal at the PDF's 4-dp quantity precision."""
+    return format(Decimal(value).quantize(Decimal("0.0001")), "f")
+
+
+def _pdf_holding_key(holding, norm):
+    """Comparison key for a PDF holding (blank symbol -> normalised option
+    text or security name, as in monthly_check)."""
+    sym = (holding.symbol or "").strip()
+    if not sym:
+        sym = normalize_option_text(holding.security) or f"(no symbol: {holding.security})"
+    return norm(sym)
+
+
+@dataclass
+class SecuritySummary:
+    """Per (account, security, currency) comparison summary."""
+
+    match_count: int = 0
+    diff_count: int = 0
+    first_diff: object = None  # datetime.date | None
+    max_abs_cost_diff: Decimal = field(default_factory=lambda: Decimal("0"))
+
+
+def compare_account(account, replay, month_start=None, month_end=None):
+    """Compare the replay snapshots with the stored PDF book costs.
+
+    Statements are grouped per statement_date (a date may carry CAD and USD
+    RbcMonthly rows; holdings keep their own currency). ``month_start`` /
+    ``month_end`` bound which statement dates are compared (decision 5) —
+    the replay itself always starts from the seed. Returns (lines,
+    summaries): one line per (statement date, PDF holding) plus one-sided
+    entries; summaries maps (symbol key, currency) -> SecuritySummary.
+    """
+    norm = make_symbol_key(account.pk)
+    pdf_by_date = {}
+    holdings = (
+        RbcMonthlyHolding.objects.filter(rbc_monthly__account=account)
+        .select_related("rbc_monthly")
+        .order_by("rbc_monthly__statement_date", "symbol", "security")
+    )
+    for h in holdings:
+        day = h.rbc_monthly.statement_date
+        if month_start is not None and day < month_start:
+            continue
+        if month_end is not None and day > month_end:
+            continue
+        pdf_by_date.setdefault(day, []).append(h)
+
+    lines = []
+    summaries = {}
+    last_diff = {}  # (key, currency) -> (statement_date, cost_diff)
+    last_match = {}  # (key, currency) -> statement_date
+    for day in sorted(pdf_by_date):
+        snapshot = replay.snapshots.get(day, {})
+        seen_pdf = set()
+        for h in pdf_by_date[day]:
+            if h.book_cost == 0:
+                continue  # means "not printed on the PDF"
+            key = _pdf_holding_key(h, norm)
+            currency = h.currency
+            seen_pdf.add((key, currency))
+            state = snapshot.get((key, currency))
+            if (
+                state is not None
+                and state.not_checked_from is not None
+                and state.not_checked_from <= day
+            ):
+                lines.append(
+                    f"  {day} [{currency}] {key}: NOT CHECKED "
+                    f"(reorganization on or before {state.not_checked_from})"
+                )
+                continue
+            pdf_qty = h.quantity
+            pdf_cost = h.book_cost
+            if state is None:
+                lines.append(
+                    f"  {day} [{currency}] {key}: PDF-ONLY "
+                    f"qty={_qty(pdf_qty)} book_cost={_money(pdf_cost)}"
+                )
+                continue
+            cost_diff = state.cost - pdf_cost
+            qty_diff = state.quantity - pdf_qty
+            summary = summaries.setdefault((key, currency), SecuritySummary())
+            if abs(cost_diff) <= AMOUNT_TOL and abs(qty_diff) <= QTY_TOL:
+                # Decision 4: MATCH requires both cost and quantity.
+                lines.append(
+                    f"  {day} [{currency}] {key}: MATCH "
+                    f"qty={_qty(state.quantity)} cost={_money(state.cost)}"
+                )
+                summary.match_count += 1
+                last_match[(key, currency)] = day
+            else:
+                sides = []
+                if abs(cost_diff) > AMOUNT_TOL:
+                    sides.append(
+                        f"cost replay {_money(state.cost)} vs PDF "
+                        f"{_money(pdf_cost)} (diff {_money(cost_diff)})"
+                    )
+                if abs(qty_diff) > QTY_TOL:
+                    sides.append(
+                        f"qty replay {_qty(state.quantity)} vs PDF "
+                        f"{_qty(pdf_qty)} (diff {_qty(qty_diff)})"
+                    )
+                line = f"  {day} [{currency}] {key}: DIFF — " + "; ".join(sides)
+                prev = last_diff.get((key, currency))
+                if prev is not None:
+                    line += f"; change since {prev[0]}: {_money(cost_diff - prev[1])}"
+                lines.append(line)
+                summary.diff_count += 1
+                if summary.first_diff is None:
+                    summary.first_diff = day
+                if abs(cost_diff) > summary.max_abs_cost_diff:
+                    summary.max_abs_cost_diff = abs(cost_diff)
+                since = last_match.get((key, currency))
+                for eff, tx in replay.tx_history.get((key, currency), []):
+                    if since is not None and eff <= since:
+                        continue
+                    lines.append(
+                        f"      since last MATCH: {tx.date} {tx.type} "
+                        f"{key} [{currency}] qty={_qty(tx.quantity)} "
+                        f"amount={_money(tx.amount)}"
+                    )
+            last_diff[(key, currency)] = (day, cost_diff)
+        # Replay-only securities with a non-zero quantity at this date.
+        for (key, currency), state in sorted(snapshot.items()):
+            if (key, currency) in seen_pdf or state.quantity == 0:
+                continue
+            lines.append(
+                f"  {day} [{currency}] {key}: REPLAY-ONLY "
+                f"qty={_qty(state.quantity)} cost={_money(state.cost)}"
+            )
+    return lines, summaries
+
+
+def summary_lines(account_name, summaries):
+    """Summary section lines: counts, first DIFF, largest |difference|."""
+    lines = []
+    for (key, currency), s in sorted(summaries.items()):
+        lines.append(
+            f"  {account_name} {key} [{currency}]: MATCH={s.match_count} "
+            f"DIFF={s.diff_count} first DIFF {s.first_diff or '(none)'} "
+            f"max |diff| {_money(s.max_abs_cost_diff)}"
+        )
+    return lines
+
+
+def candidates_lines(accounts, month_start=None, month_end=None):
+    """Candidates section: unexplained PDF book-cost changes.
+
+    Reuses ``section_8_book_cost_changes`` from taxable_events directly
+    (imported, not copied).
+    """
+    return section_8_book_cost_changes(accounts, month_start, month_end)

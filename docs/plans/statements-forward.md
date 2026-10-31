@@ -182,3 +182,32 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
    no historical close falls back to the last trade price with the row marked stale
    (`price_source=LAST_PDF`, `has_stale_prices`); `--apply` with `--from/--to` only replaces
    rows inside the window. `statement_date` stays nullable.
+
+## Decisions (Claude review fixes, Nov 1)
+
+9. **Re-anchor on the PDF after every stored statement** — in the REPLAY branch,
+   after the rows are emitted and checked, the chain state resets to this
+   statement's PDF: closing cash per currency (`RbcMonthlyBalance`) and the
+   holdings pool (`RbcMonthlyHolding`), exactly as FIRST / NO_CSV does. Each
+   period starts from the previous stored PDF statement, so a FAIL month's
+   replayed drift never carries into the next period (the docstring already
+   promised this).
+10. **Gap fill starts in the calendar month after the anchor month** — a
+    statement dated mid-month (e.g. Friday 2026-01-30) never gets a GAP row
+    for the rest of its own month; the first gap-fill candidate is the end of
+    the next calendar month, and the same rule holds after the last PDF.
+    No two rows share (account, statement_month, currency).
+11. **Migration 0047 backfill** — not applied on mercury yet, so edited in
+    place: `backfill_statement_date` reads the (pk, statement_month) keys
+    first and bulk_updates in batches of 200 (SQL Server allows 2,100
+    parameters per statement).
+12. **Position symbol width / apply batching** —
+    `CoreMonthlyStatementPosition.symbol` is max_length 200 in the model and
+    in 0047 (the "(no symbol: <security name>)" fallback can exceed 50);
+    `--apply` creates the positions with `bulk_create(batch_size=200)`.
+13. **HistoricalPrice is not used for pricing** — it records no currency, so
+    a close cannot be matched to the row's section currency (symbol mapping
+    is step 16): positions without a PDF holding price from the last known
+    PDF price (`price_source=LAST_PDF`), and GAP rows carry positions as
+    LAST_PDF, never PDF. The report keeps `history_priced_rows` (always 0
+    until step 16) for output compatibility.

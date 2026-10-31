@@ -149,6 +149,45 @@ python manage.py taxable_events [--account NAME] [--from YYYY-MM] [--to YYYY-MM]
 
 Read-only report gathering the facts for the known gaps in the taxable RBC accounts: non-plain transactions (with reorg subtypes and option-symbol catches), RBF interest rows plus the January 2024–2026 PDF reference rows, per-currency/type counts with USD exchange-rate presence, DLR round-trip rows, symbols held in more than one account in the same month, the TS_HUISGELD 2017-12 and first TS_CAR_LIVING holdings (missing book costs flagged), unexplained PDF book-cost changes, and stored monthly-check verdicts. Default accounts: every TAXABLE account with at least one transaction; `--out` is required and is the only file written — nothing is written to the database. Background: `docs/plans/taxable-events.md`.
 
+## Owners and Opening Positions (step 15c)
+
+### `set_account_owners`
+
+Set the ownership shares for one account (`Owner` / `AccountOwner`). Dry run by default; `--apply` writes.
+
+```bash
+manage.py set_account_owners --account NAME --share Tom:60 --share Susan:40 [--apply]
+```
+
+- `--share NAME:PERCENT` is repeatable; names are first names only and missing `Owner` rows are created on demand.
+- Refusals (nothing written): unknown account name; malformed `--share`; the same owner given twice; shares not adding up to exactly 100 (the total is printed).
+- With `--apply`, the account's whole `AccountOwner` set is replaced. Output shows the account name and owner names/percentages only — never account digits.
+
+### `load_opening_positions`
+
+Load opening positions per (account, symbol, currency) for later ACB calculation (`OpeningPosition`). Both modes are dry runs unless `--apply`.
+
+Snapshot mode — copy book cost from an RBC monthly statement:
+
+```bash
+manage.py load_opening_positions --account NAME --statement YYYY-MM-DD [--apply] [--replace]
+```
+
+- Writes one row per `RbcMonthlyHolding` of the account's statement sections on that date (`source=RBC_BOOK_COST`, note names the date, statement linked).
+- Refusals (nothing written): unknown account; no RBC statement on that date; existing opening positions without `--replace`; any holding with an empty symbol or zero book cost (each offender printed); any transaction settling on or before the statement date (count and dates printed — this guard also applies with `--replace`).
+
+Override mode — change one existing row by hand:
+
+```bash
+manage.py load_opening_positions --account NAME --set SYMBOL --currency CODE \
+    --book-cost AMOUNT [--note TEXT] [--apply]
+```
+
+- Updates book cost and note (if given), sets `source=MANUAL`; the row's statement link is kept.
+- Refusals: `--set`/`--currency`/`--book-cost` must be given together; `--statement` and `--replace` are not allowed with `--set`; no existing row for that (account, symbol, currency) — this command never creates rows.
+
+Neither command computes ACB or capital gains; nothing reads these tables yet. Plan: `docs/plans/opening-positions.md`.
+
 ## Data Quality
 
 | Command | Purpose |

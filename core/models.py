@@ -1555,3 +1555,80 @@ class MonthlyException(models.Model):
             f"{self.kind} [{self.currency or '-'}] {self.ref or '-'} "
             f"[{self.status}]"
         )
+
+
+class Owner(models.Model):
+    """A person who owns part of one or more accounts (first name only)."""
+
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        db_table = "core_owner"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class AccountOwner(models.Model):
+    """Ownership share of one account by one owner."""
+
+    account = models.ForeignKey(
+        "Account", on_delete=models.CASCADE, related_name="owners"
+    )
+    owner = models.ForeignKey(
+        Owner, on_delete=models.CASCADE, related_name="account_shares"
+    )
+    share_percent = models.DecimalField(max_digits=5, decimal_places=2)
+
+    class Meta:
+        db_table = "core_account_owner"
+        unique_together = [("account", "owner")]
+        ordering = ["account", "owner"]
+
+    def __str__(self):
+        return f"{self.account.name} — {self.owner.name}: {self.share_percent}%"
+
+
+class OpeningPosition(models.Model):
+    """Opening position per (account, symbol, currency) for ACB calculation.
+
+    Either copied from an RBC monthly statement's book cost (`RBC_BOOK_COST`)
+    or entered/overridden by hand (`MANUAL`). The `statement` link is kept on
+    override; it is nullable for later non-RBC (IB) rows.
+    """
+
+    SOURCE_CHOICES = [
+        ("RBC_BOOK_COST", "RBC book cost"),
+        ("MANUAL", "Manual"),
+    ]
+
+    account = models.ForeignKey(
+        "Account", on_delete=models.CASCADE, related_name="opening_positions"
+    )
+    statement = models.ForeignKey(
+        "RbcMonthly",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="opening_positions",
+    )
+    symbol = models.CharField(max_length=50)
+    security_name = models.CharField(max_length=200, blank=True, default="")
+    currency = models.CharField(max_length=3)
+    quantity = models.DecimalField(max_digits=12, decimal_places=4)
+    book_cost = models.DecimalField(
+        max_digits=15, decimal_places=2, help_text="In the currency section's currency"
+    )
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "core_opening_position"
+        unique_together = [("account", "symbol", "currency")]
+        ordering = ["account", "symbol", "currency"]
+
+    def __str__(self):
+        return f"{self.account.name} {self.symbol} [{self.currency}] {self.source}"

@@ -242,18 +242,128 @@ def section_2_rbf_interest(accounts, month_start, month_end):
 
 
 def section_3_currencies(accounts, month_start, month_end):
-    """Section 3: transaction counts per (currency, type); USD FX presence."""
-    return []
+    """Section 3: per account, transaction count per (currency, type).
+
+    For USD rows, whether an exchange rate is carried — counted separately:
+    the exchange_rate_cad field != 1, and a rate-looking token in the notes
+    ('@<rate>' or 'FX').
+    """
+    lines = []
+    for account in accounts:
+        txs = Transaction.objects.filter(account=account).order_by("date", "pk")
+        counts = {}
+        field_fx = 0
+        notes_fx = 0
+        for tx in txs:
+            if not _in_range(effective_tx_date(tx), month_start, month_end):
+                continue
+            key = (tx.currency, tx.type)
+            counts[key] = counts.get(key, 0) + 1
+            if tx.currency == "USD":
+                if tx.exchange_rate_cad != 1:
+                    field_fx += 1
+                if FX_NOTES_RE.search(tx.notes or ""):
+                    notes_fx += 1
+        for (currency, ttype), count in sorted(counts.items()):
+            lines.append(f"  {account.name} {currency} {ttype}: {count}")
+        lines.append(
+            f"  {account.name} USD rows with exchange_rate_cad != 1: {field_fx}"
+        )
+        lines.append(
+            f"  {account.name} USD rows with rate-looking notes token "
+            f"(@x.xx or FX): {notes_fx}"
+        )
+    return lines
 
 
 def section_4_dlr(accounts, month_start, month_end):
-    """Section 4: DLR rows from CSV transactions and PDF activity rows."""
-    return []
+    """Section 4: DLR currency round-trip rows.
+
+    CSV: every Transaction with symbol DLR (notes printed); PDF: every
+    RbcMonthlyTransaction with symbol DLR or DLR in the description
+    (description printed). Dates and amounts only.
+    """
+    lines = []
+    for account in accounts:
+        txs = (
+            Transaction.objects.filter(account=account, symbol="DLR")
+            .order_by("date", "pk")
+        )
+        for tx in txs:
+            if not _in_range(effective_tx_date(tx), month_start, month_end):
+                continue
+            line = (
+                f"  {account.name} CSV {tx.date} {tx.type} qty={tx.quantity} "
+                f"amount_cad={tx.amount_cad}"
+            )
+            if tx.notes:
+                line += f" — notes: {tx.notes}"
+            lines.append(line)
+        rows = (
+            RbcMonthlyTransaction.objects.filter(rbc_monthly__account=account)
+            .filter(Q(symbol="DLR") | Q(description__icontains="DLR"))
+            .order_by("date", "pk")
+        )
+        for row in rows:
+            if not _in_range(row.date, month_start, month_end):
+                continue
+            line = (
+                f"  {account.name} PDF {row.date} {row.activity_type} "
+                f"debit={row.debit} credit={row.credit}"
+            )
+            if row.description:
+                line += f" — desc: {row.description}"
+            lines.append(line)
+    return lines
 
 
 def section_5_cross_account_symbols(accounts, month_start, month_end):
-    """Section 5: symbols held in >= 2 accounts in the same statement month."""
-    return []
+    """Section 5: symbols held in >= 2 accounts in the same statement month.
+
+    RbcMonthlyHolding rows grouped by statement year-month and normalised
+    symbol — each account's own make_symbol_key (option codes map to their
+    normalised option text, aliases applied), so cross-account comparison
+    happens under one key per account. Quantity and currency per account
+    are printed.
+    """
+    per_month = {}
+    for account in accounts:
+        norm = make_symbol_key(account.pk)
+        holdings = (
+            RbcMonthlyHolding.objects.filter(rbc_monthly__account=account)
+            .select_related("rbc_monthly")
+        )
+        for h in holdings:
+            statement_date = h.rbc_monthly.statement_date
+            if not _in_range(statement_date, month_start, month_end):
+                continue
+            sym = (h.symbol or "").strip()
+            if not sym:
+                sym = normalize_option_text(h.security) or f"(no symbol: {h.security})"
+            key = norm(sym)
+            per_account = (
+                per_month.setdefault(
+                    (statement_date.year, statement_date.month), {}
+                )
+                .setdefault(key, {})
+            )
+            entry = per_account.setdefault(
+                account.name, {"qty": Decimal("0"), "currencies": set()}
+            )
+            entry["qty"] += h.quantity
+            entry["currencies"].add(h.currency)
+    lines = []
+    for year, month in sorted(per_month):
+        for key in sorted(per_month[(year, month)]):
+            per_account = per_month[(year, month)][key]
+            if len(per_account) < 2:
+                continue
+            parts = [
+                f"{name} qty={entry['qty']} {'/'.join(sorted(entry['currencies']))}"
+                for name, entry in sorted(per_account.items())
+            ]
+            lines.append(f"  {year}-{month:02d} {key}: " + "; ".join(parts))
+    return lines
 
 
 def section_6_target_statement(account_name=SECTION6_ACCOUNT, month=SECTION6_MONTH):

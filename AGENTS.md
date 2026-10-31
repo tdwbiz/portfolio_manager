@@ -144,10 +144,8 @@ Full reference: `docs/IMPORT_COMMANDS.md`.
 | Symbol resolution, fixed prices (RBF2010 CAD 10, RBF2014 USD 10) | `resolve_yahoo_symbol()`, `FixedPriceConfig`, `get_fixed_price()` |
 | Current price (yfinance workaround) | `_get_current_price()` in `core/utils/prices.py` |
 | Gap analysis | `core/utils/gap_analysis.py`, `/accounts/gap-analysis/` |
-| Monthly statements | `generate_monthly_statements`, `/accounts/generate-monthly-statements/` |
+| Monthly statements (one forward generator) | `generate_statements [--account NAME] [--from YYYY-MM] [--to YYYY-MM] [--apply] [--out FILE]` in `core/utils/statements.py` (`generate_forward_statements`, dry run by default); read-only display page `/accounts/generate-monthly-statements/` |
 | Annual reports | `generate_annual_reports`, `/accounts/generate-annual-reports/` |
-| Reverse statements | `reverse_generate_monthly_statements()` in `core/utils/statements.py`, `/accounts/reverse-statements/` |
-| Batch statements (anchored on RBC) | `batch_generate_statements [--account ID] [--dry-run]` (all accounts by default); views take `?regenerate=1` / `?batch=1` |
 | Reconciliation (CSV vs RBC, $1 threshold) | `reconcile`, `/accounts/reconcile/` |
 | Account edit with currency sub-accounts | `/accounts/<pk>/edit/` (pk = `Account.pk`; accounts are identified by pk/name, never by number) |
 | Reconciliation scripts (parked — see docs/architecture.md §11) | `scripts/verify_pdf_integrity.py`, `scripts/ledger_high_change.py`, `scripts/quantity_reconciliation*.py`, `scripts/dump_chains.py` (usage in `docs/project-history.md`) |

@@ -21,7 +21,7 @@ Money{% endblock %} {% block content %}
         href="{% url 'generate_monthly_statements' %}"
         class="btn btn-outline-success btn-sm"
     >
-        <i class="bi bi-calendar-check"></i> Generate Monthly Statements
+        <i class="bi bi-calendar-check"></i> Monthly Statements
     </a>
     <a
         href="{% url 'generate_annual_reports' %}"
@@ -31,9 +31,6 @@ Money{% endblock %} {% block content %}
     </a>
     <a href="{% url 'reconcile' %}" class="btn btn-outline-warning btn-sm">
         <i class="bi bi-balance"></i> Reconciliation
-    </a>
-    <a href="{% url 'reverse_statements' %}" class="btn btn-outline-dark btn-sm">
-        <i class="bi bi-arrow-return-left"></i> Reverse Statements
     </a>
 </div>
 

@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Account,
     AccountCurrency,
+    AccountOwner,
     BrandingConfig,
     BrokerStatement,
     CoreAnnualReport,
@@ -12,6 +13,8 @@ from .models import (
     FixedPriceConfig,
     MonthlyCheckResult,
     MonthlyException,
+    OpeningPosition,
+    Owner,
     RbcAnnual,
     RbcMonthly,
     RbcMonthlyBalance,
@@ -303,3 +306,51 @@ class CoreReconciliationAdmin(admin.ModelAdmin):
     search_fields = ["account__name"]
     date_hierarchy = "period_start"
     readonly_fields = ["reconciled_at", "reconciled_by"]
+
+
+@admin.register(Owner)
+class OwnerAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    # Read-only list; owners are first names only.
+    list_display = ["name"]
+    search_fields = ["name"]
+    readonly_fields = ["name"]
+
+
+@admin.register(AccountOwner)
+class AccountOwnerAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    # Read-only list; the account is shown by name only — never digits.
+    list_display = ["account", "owner", "share_percent"]
+    list_filter = ["account"]
+    search_fields = ["account__name", "owner__name"]
+    readonly_fields = ["account", "owner", "share_percent"]
+
+
+@admin.register(OpeningPosition)
+class OpeningPositionAdmin(ReadOnlyMixin, admin.ModelAdmin):
+    # Read-only list; the account is shown by name only — never digits.
+    list_display = [
+        "account",
+        "symbol",
+        "security_name",
+        "currency",
+        "quantity",
+        "book_cost",
+        "source",
+        "statement",
+        "updated_at",
+    ]
+    list_filter = ["source", "currency", "account"]
+    search_fields = ["account__name", "symbol", "security_name"]
+    readonly_fields = [
+        "account",
+        "statement",
+        "symbol",
+        "security_name",
+        "currency",
+        "quantity",
+        "book_cost",
+        "source",
+        "note",
+        "created_at",
+        "updated_at",
+    ]

@@ -892,10 +892,22 @@ class CoreMonthlyStatement(models.Model):
         related_name="core_monthly_statements",
     )
     statement_month = models.DateField(help_text="First day of the month")
+    statement_date = models.DateField(
+        help_text="RBC statement date; calendar month end for gap and replay rows"
+    )
     currency = models.CharField(
         max_length=3,
         choices=CURRENCY_CHOICES,
         default="CAD",
+    )
+    SOURCE_CHOICES = [("REPLAY", "REPLAY"), ("PDF", "PDF"), ("GAP", "GAP")]
+    source = models.CharField(
+        max_length=6,
+        choices=SOURCE_CHOICES,
+        default="REPLAY",
+        help_text="How the row was generated: REPLAY (previous PDF statement + CSV "
+                  "transactions), PDF (taken from the RBC statement as-is), "
+                  "GAP (no PDF statement, no transactions)",
     )
 
     # Portfolio value metrics
@@ -922,6 +934,24 @@ class CoreMonthlyStatement(models.Model):
     total_commission = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal("0.00")
     )
+    total_deposits = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_withdrawals = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_transfers = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_income = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00"),
+        help_text="DIV + DIST + INT for the period (native currency)")
+    total_fees = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+    total_tax = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
 
     # Derived
     net_flow = models.DecimalField(
@@ -931,6 +961,11 @@ class CoreMonthlyStatement(models.Model):
     ending_cash_balance = models.DecimalField(
         max_digits=15, decimal_places=2, default=Decimal("0.00"),
         help_text="Cash balance at end of statement month (per-currency)")
+    has_stale_prices = models.BooleanField(
+        default=False,
+        help_text="True when at least one position is priced from the last known "
+                  "PDF price (no PDF holding and no historical close available)",
+    )
 
     # Tracking
     generated_at = models.DateTimeField(auto_now_add=True)
@@ -945,6 +980,54 @@ class CoreMonthlyStatement(models.Model):
 
     def __str__(self):
         return f"{self.account} — {self.statement_month.strftime('%Y-%m')} [{self.currency}]"
+
+
+class CoreMonthlyStatementPosition(models.Model):
+    """One holding in a CoreMonthlyStatement row's holdings section.
+
+    Quantities are netted per account (across currencies — the DLR journal
+    nets to zero and drops out) before being placed in a currency section.
+    A detail model instead of JSONField (SQL Server safety, queryable).
+    Plan: docs/plans/statements-forward.md.
+    """
+
+    PRICE_SOURCE_CHOICES = [
+        ("PDF", "PDF"),
+        ("HISTORY", "HISTORY"),
+        ("LAST_PDF", "LAST_PDF"),
+    ]
+
+    statement = models.ForeignKey(
+        CoreMonthlyStatement,
+        on_delete=models.CASCADE,
+        related_name="positions",
+    )
+    symbol = models.CharField(max_length=50)
+    quantity = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0.0000")
+    )
+    price = models.DecimalField(
+        max_digits=12, decimal_places=4, default=Decimal("0.0000")
+    )
+    price_source = models.CharField(
+        max_length=8,
+        choices=PRICE_SOURCE_CHOICES,
+        default="PDF",
+        help_text="PDF (holding on this statement), HISTORY (latest close at or "
+                  "before the statement date), LAST_PDF (last known PDF price, "
+                  "row marked stale)",
+    )
+    value = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal("0.00")
+    )
+
+    class Meta:
+        db_table = "core_monthly_statement_position"
+        unique_together = [("statement", "symbol")]
+        ordering = ["symbol"]
+
+    def __str__(self):
+        return f"{self.statement} — {self.symbol}: {self.quantity}"
 
 
 class CoreAnnualReport(models.Model):

@@ -1,0 +1,94 @@
+{% extends "core/base.html" %}
+{% block title %}Exception #{{ exc.pk }} - {{ branding.company_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="bi bi-exclamation-circle"></i> Exception #{{ exc.pk }}</h1>
+    <p class="text-muted">
+        <a href="{% url 'exceptions_list' %}">&larr; All exceptions</a>
+    </p>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <table class="table table-borderless mb-0">
+            <tr>
+                <th style="width: 200px;">Account</th>
+                <td>
+                    {{ exc.account.name }}
+                    {% if taxable %}<span class="badge bg-info text-dark ms-1">taxable</span>{% endif %}
+                </td>
+            </tr>
+            <tr><th>Statement date</th><td>{{ exc.statement_date }}</td></tr>
+            <tr><th>Exception Type</th><td>{{ exc.kind }}</td></tr>
+            <tr><th>Currency</th><td>{{ exc.currency|default:"—" }}</td></tr>
+            <tr><th>Ref</th><td><code>{{ exc.ref|default:"—" }}</code></td></tr>
+            <tr><th>Difference</th><td>{{ exc.difference|default_if_none:"—" }}</td></tr>
+            <tr>
+                <th>Status</th>
+                <td>
+                    {% if exc.status == "open" %}
+                    <span class="badge bg-danger">open</span>
+                    {% elif exc.status == "accepted" %}
+                    <span class="badge bg-warning text-dark">accepted</span>
+                    {% else %}
+                    <span class="badge bg-secondary">resolved</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr><th>Reason</th><td>{{ exc.reason|default:"—" }}</td></tr>
+            <tr><th>Accepted at</th><td>{{ exc.accepted_at|default_if_none:"—" }}</td></tr>
+            <tr><th>First seen</th><td>{{ exc.first_seen }}</td></tr>
+            <tr><th>Last seen</th><td>{{ exc.last_seen }}</td></tr>
+            <tr><th>Resolved at</th><td>{{ exc.resolved_at|default_if_none:"—" }}</td></tr>
+        </table>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">Stored detail (verbatim)</div>
+    <div class="card-body">
+        {% if exc.detail %}
+        <pre class="mb-0" style="white-space: pre-wrap;">{{ exc.detail }}</pre>
+        {% else %}
+        <p class="text-muted mb-0">(no detail stored)</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if exc.status == "open" %}
+<div class="card">
+    <div class="card-header">Accept this exception</div>
+    <div class="card-body">
+        <form method="post" class="row g-3 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="accept" />
+            <div class="col-md-8">
+                <label for="id_reason" class="form-label">Reason (required)</label>
+                <textarea name="reason" id="id_reason" class="form-control" rows="2" required></textarea>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Accept</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% elif exc.status == "accepted" %}
+<div class="card">
+    <div class="card-header">Reopen this exception</div>
+    <div class="card-body">
+        <form method="post" class="row g-3 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reopen" />
+            <div class="col-md-8">
+                <label for="id_reason" class="form-label">Reason (required)</label>
+                <textarea name="reason" id="id_reason" class="form-control" rows="2" required></textarea>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-counterclockwise"></i> Reopen</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

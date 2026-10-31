@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-header">
     <h1><i class="bi bi-calendar-check"></i> Monthly Statements</h1>
-    <p class="text-muted">View and manage monthly statement summaries</p>
+    <p class="text-muted">Read-only display — rows are written by the generate_statements command</p>
 </div>
 
 {% if message %}
@@ -29,24 +29,6 @@
         </form>
     </div>
 </div>
-
-<!-- Action buttons — separate from the selector -->
-{% if selected_account %}
-<div class="d-flex gap-2 mb-3">
-    <form method="get" class="d-inline">
-        <input type="hidden" name="account" value="{{ selected_account }}">
-        <button type="submit" class="btn btn-success">
-            <i class="bi bi-lightning"></i> Batch from RBC
-        </button>
-    </form>
-    <form method="get" class="d-inline">
-        <input type="hidden" name="account" value="{{ selected_account }}">
-        <button type="submit" name="regenerate" value="1" class="btn btn-primary">
-            <i class="bi bi-gear"></i> Regenerate
-        </button>
-    </form>
-</div>
-{% endif %}
 
 {% if statements %}
 <div class="card">
@@ -98,7 +80,6 @@
 <div class="mt-3">
     <small class="text-muted">
         <i class="bi bi-info-circle"></i> Select an account above to view its statements.
-        Use the buttons below to generate or regenerate.
     </small>
 </div>
 {% endblock %}

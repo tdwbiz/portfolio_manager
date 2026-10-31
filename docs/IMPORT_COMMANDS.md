@@ -135,9 +135,8 @@ python manage.py watch_inbox --interval 300
 
 | Command | Purpose |
 |---|---|
-| `generate_monthly_statements` | Generate `CoreMonthlyStatement` from transactions |
+| `generate_statements` | One forward generator for `CoreMonthlyStatement` rows (anchored on the stored RBC PDF statements + CSV transactions). Dry run by default; `--apply` writes after the built-in PASS-vs-PDF check, replacing the selected accounts' rows in one transaction |
 | `generate_annual_reports` | Generate `CoreAnnualReport` from monthly statements |
-| `batch_generate_statements` | Anchor from RBC data, fill gaps, generate all |
 | `reconcile` | Compare CSV vs RBC data |
 
 ## Data Quality

@@ -20,7 +20,7 @@ Default accounts: every `category='TAXABLE'` account that has at least one
 `RbcMonthly` statement (today: TS_HUISGELD and TS_CAR_LIVING). `--account`
 restricts to one exact name (same error style as `taxable_events` when it
 matches nothing). `--from`/`--to` bound which statement dates are compared and
-the candidates period (open question 5); the replay itself always starts from
+the candidates period (decision 5); the replay itself always starts from
 the seed, never re-anchors on the PDF.
 
 ## Replay rules (per account, per (symbol_key, currency))
@@ -36,23 +36,30 @@ rate).
 
 Seed: the account's `OpeningPosition` rows at their statement date
 (`op.statement.statement_date`) if it has any, else zero everywhere with no
-start bound.
+start bound. An `OpeningPosition` with `statement=None` (MANUAL) is seeded at
+the account's first stored statement date and a note is printed in the report
+(decision 3).
 
 Per transaction row:
 
 - **quantity > 0** — add the quantity; if `amount < 0` add `-amount` to the
-  cost; elif `amount == 0` and the notes match reinvest-at-price
-  (`REINV(AT)?@ C?$X`, the RBF savings funds at 10.00) add `quantity × X`;
+  cost (a negative amount always wins over any note price, decision 1);
+  elif `amount == 0` and the notes match reinvest-at-price — case-insensitive
+  regex `REINV(?:EST)?\s*@\s*C?\$?\s*(\d+\.\d+)`, accepting both spellings
+  (decision 1; the RBF savings funds at 10.00) — add `quantity × X`;
   else add 0 **and flag** the row.
 - **quantity < 0** — remove `average_cost × units_sold` from the cost
   (snap cost to 0 when quantity reaches 0).
 - **RETURN_OF_CAPITAL type, or notes starting `RTC -` and containing
-  `ADJUSTMENT TO BOOK COST $X`** — reduce cost by X.
+  `ADJUSTMENT TO BOOK COST $X`** — reduce cost by X; if the notes carry no
+  `$X`, use `abs(tx.amount)` when non-zero, otherwise add 0 and flag the row
+  (decision 2).
 - **notes starting `ADJ -` and containing
   `NOTIONAL DISTRIBUTION ADJUSTMENT TO BOOK VALUE $X`** — raise cost by X,
   whatever the stored type. Parsed amounts may start with a dot (`$.59`).
 - **TRANSFER with quantity != 0** — out (qty < 0): remove average cost;
-  in (qty > 0): add 0 cost; flag the row (the receiving side loses basis).
+  in (qty > 0): add 0 cost; flag **both** rows of the pair (decision 6 —
+  the pair is the interesting event; the receiving side loses basis).
 - **any REORGANIZATION row** — flag it and mark that security *not checked*
   from then on (still replayed, but comparisons after that date report
   NOT CHECKED instead of MATCH/DIFF).
@@ -65,8 +72,9 @@ Statements are grouped per `statement_date` (a date may have CAD and USD
 via `make_symbol_key`, blank symbol → normalised option text or security name
 as in monthly_check; **skip `book_cost == 0`** — means "not printed"):
 
-- MATCH when the book cost is equal to the cent (±0.005) — and the quantity
-  equal at 4 dp (open question 4); else DIFF with the difference and the
+- MATCH requires both the book cost equal to the cent (±0.005) and the
+  quantity within ±0.0001 (decision 4); else DIFF naming which side differs,
+  with the difference and the
   **change of the difference since this security's previous statement** (so
   where it arose shows once).
 - Securities on one side only (replay-only with qty != 0, PDF-only) are
@@ -155,21 +163,22 @@ conversion of book cost, correcting any CSV rows the check flags.
 - `make_symbol_key` / `effective_tx_date` cannot be reused as-is — stop and
   ask instead of copying them.
 
-## Open questions
+## Decisions (tdw, Oct 31)
 
-1. **Exact reinvest notes text.** Real CSV notes read `REI - … REINV@C$X.XX`;
-   the task says "REINVEST @ $X". *Recommended:* one case-insensitive regex
-   `REINV(?:EST)?\s*@\s*C?\$?\s*(\d+\.\d+)` accepting both spellings.
-2. **RETURN_OF_CAPITAL row whose notes carry no `$X`.** *Recommended:* use
+1. **Exact reinvest notes text.** As recommended: one case-insensitive regex
+   `REINV(?:EST)?\s*@\s*C?\$?\s*(\d+\.\d+)` accepting both spellings — but the
+   reinvest price from the notes is used only when the amount is 0; a negative
+   amount always wins.
+2. **RETURN_OF_CAPITAL row whose notes carry no `$X`.** As recommended: use
    `abs(tx.amount)` when non-zero, otherwise add 0 and flag the row.
-3. **OpeningPosition with `statement=None` (MANUAL).** *Recommended:* seed it
+3. **OpeningPosition with `statement=None` (MANUAL).** As recommended: seed it
    at the account's first stored statement date and print a note in the
    report.
-4. **Quantity differs but book cost matches.** The task defines MATCH by the
-   book cost. *Recommended:* MATCH requires both cost (±0.005) and quantity
-   (±0.0001) to agree; a DIFF line names which side differs.
-5. **Meaning of `--from`/`--to`.** *Recommended:* they bound which statement
+4. **Quantity differs but book cost matches.** As recommended: MATCH requires
+   both cost (±0.005) and quantity (±0.0001) to agree; a DIFF line names
+   which side differs.
+5. **Meaning of `--from`/`--to`.** As recommended: they bound which statement
    dates are compared and the candidates period (like `taxable_events`); the
    replay always starts from the seed so no re-anchoring can creep in.
-6. **Flag TRANSFER-out too?** The task only says the in-row "is flagged".
-   *Recommended:* flag both directions — the pair is the interesting event.
+6. **Flag TRANSFER-out too?** As recommended: flag both directions — the pair
+   is the interesting event.

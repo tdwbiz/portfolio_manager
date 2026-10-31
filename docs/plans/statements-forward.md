@@ -20,7 +20,10 @@ their commands and views) with ONE forward generator:
 - FIRST and NO_CSV statements (per `check_statement` verdicts): take the PDF figures as they
   are (begin/end totals, Cash closing balance), marked `source=PDF`.
 - Gap months (no PDF statement and no transactions, per the gap rule) get a row at the
-  calendar month end, chained from the previous row, `source=GAP`.
+  calendar month end, chained from the previous row, `source=GAP`. The same rule applies
+  after the last PDF statement: every calendar month up to the last CSV effective date gets
+  a row — GAP when it has no transactions, REPLAY when it does (decision 3) — and no rows
+  are generated once both holdings and cash are zero.
 - No rows after the later of the last PDF statement date and the last CSV effective date.
 - Quantities come from the replay (prev PDF holdings + Σ signed tx qty, normalised keys).
 - Prices: PDF holdings of the same statement where one exists, else `core_historicalprice`
@@ -30,9 +33,10 @@ their commands and views) with ONE forward generator:
   symbol goes to the section where the PDF holds it, else the currency of its transactions.
 - Flows per row from the period transactions: deposits, withdrawals, transfers, income
   (DIV, DIST, INT), fees and tax.
-- Built-in check: for every statement whose monthly check verdict is PASS, the generated
-  `ending_market_value` must equal the PDF `end_total_market_value` to the cent; every
-  mismatch is reported (account name, date, currency, difference) and `--apply` refuses.
+- Built-in check: for every statement currency whose live `check_statement` verdict is
+  PASS, the generated `ending_market_value` must equal the PDF `end_total_market_value` to
+  the cent; every mismatch is reported (account name, date, currency, difference) and
+  `--apply` refuses.
 - New command `generate_statements [--account NAME] [--from YYYY-MM] [--to YYYY-MM]
   [--apply] [--out FILE]`: dry run by default; per-account counts by source (replay/PDF/gap),
   PASS rows equal to the PDF, rows priced from history, stale rows. `--apply` replaces the
@@ -70,9 +74,10 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
 - `core/models.py` (+1 migration):
   - `CoreMonthlyStatement`: add `source` (REPLAY / PDF / GAP), `total_deposits`,
     `total_withdrawals`, `total_transfers`, `total_income`, `total_fees`, `total_tax`
-    (Decimal, default 0), `has_stale_prices` (bool, default False). `statement_month`
-    keeps its name but now holds the **statement date** (PDF statement date, or calendar
-    month end for gap/post-PDF rows) — help_text update only, no schema change.
+    (Decimal, default 0), `has_stale_prices` (bool, default False) and `statement_date`
+    (DateField — the RBC statement date, or calendar month end for gap and replay rows).
+    `statement_month` keeps its current meaning (first of month); readers stay untouched
+    (decision 4).
   - New model `CoreMonthlyStatementPosition` (FK statement, symbol, quantity, price,
     price_source PDF/HISTORY/LAST_PDF, value): the per-row holdings section. A detail
     model instead of JSONField (SQL Server safety, queryable).
@@ -90,15 +95,17 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
 - Docs: `AGENTS.md` ("Where things are" rows for reverse/batch statements, key commands),
   `docs/IMPORT_COMMANDS.md`.
 
-## Decisions (recommended answers baked in)
+## Decisions (final — tdw, Oct 30; recorded at the end of this plan)
 
-- **Verdicts for the built-in check**: use stored `MonthlyCheckResult` verdicts when present
-  (they reflect accepted exceptions from 14b); fall back to a live `check_statement(...)`
-  call per group when nothing is stored.
+- **Verdicts for the built-in check**: always run `check_statement(...)` live per group;
+  never use stored `MonthlyCheckResult` verdicts (they can be stale after transaction
+  changes).
 - **Money basis**: per-currency rows use native `tx.amount` (what `check_cash` sums), not
   `amount_cad` — required for the PASS rows to equal the PDF to the cent.
-- **After the last PDF statement**: generate one calendar-month row (month end, source
-  REPLAY, prices from history) per month that has transactions, up to the last CSV date.
+- **After the last PDF statement**: one calendar-month row per month up to the last CSV
+  effective date — including months without transactions, same rule as gap months (GAP
+  when no transactions, REPLAY when there are some) — until both holdings and cash are
+  zero; no rows once both are zero.
 - **Gap rows** carry the previous row's positions at their last known prices, marked stale.
 - **Net-zero symbols after per-account netting** (DLR journal) are dropped from positions.
 
@@ -142,27 +149,25 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
 - A PASS row's generated closing value cannot equal `end_total_market_value` to the cent
   because the PDF total includes/excludes cash differently than `check_cash` assumes — stop,
   show the numbers, ask tdw.
-- `MonthlyCheckResult` verdicts are absent in production and the live fallback is too slow
-  for a full run — stop and ask before caching anything.
+- The live `check_statement` runs are too slow for a full-run built-in check — stop and
+  ask before caching anything.
 - `test_reconciliation.py` turns out to depend on generation functions (not just direct row
   creation) — stop; the parked reconcile's tests must not be silently dropped.
 - Any mismatch between this plan and reality during implementation: stop, do not edit the
   plan mid-branch (`docs/plans/README.md`).
 
-## Open questions
+## Decisions (tdw, Oct 30)
 
-1. **Verdict source for the built-in check** — stored `MonthlyCheckResult` or live
-   `check_statement`? *Recommended: stored when present, live fallback per group.*
-2. **Money basis** — `tx.amount` (native) or `tx.amount_cad` in per-currency rows?
-   *Recommended: native `tx.amount`; it is what the check sums and what the PDF totals are.*
-3. **Rows after the last PDF statement** — generate monthly replay rows for CSV-only
-   months? *Recommended: yes, calendar-month rows for months with transactions, up to the
-   last CSV date.*
-4. **statement_month semantics** change from first-of-month to statement date. Rename the
-   column? *Recommended: keep the name (readers and templates stay untouched), update
-   help_text; `--apply` replaces old rows anyway.*
-5. **Annual reports** — regenerate them inside `generate_statements --apply`?
-   *Recommended: no, out of scope here; `generate_annual_reports` keeps working off the rows.*
-6. **The generate-monthly-statements page** — keep or delete? *Recommended: keep as a
-   read-only display (it is a reader of the fields), remove regenerate/batch buttons and
-   delete the reverse-statements page.*
+1. **Verdict source for the built-in check** — always run `check_statement` live; no
+   stored results (they can be stale after transaction changes).
+2. **Money basis** — accept: native `tx.amount`.
+3. **Rows after the last PDF statement** — yes, but a row for every calendar month up to
+   the last CSV date, not only months with transactions (same rule as gap months); no rows
+   once holdings and cash are both zero.
+4. **statement_month semantics** — keep `statement_month` as first of month with its
+   current meaning; add a new column `statement_date` (RBC statement date, or month end
+   for gap and replay rows); readers stay untouched.
+5. **Annual reports** — accept: no, out of scope here; `generate_annual_reports` keeps
+   working off the rows.
+6. **The generate-monthly-statements page** — accept: keep as a read-only display; remove
+   the regenerate/batch buttons and delete the reverse-statements page.

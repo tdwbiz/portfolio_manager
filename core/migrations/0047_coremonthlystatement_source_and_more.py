@@ -1,11 +1,11 @@
 # Hand-written (plan: docs/plans/statements-forward.md, step 3).
 #
-# statement_date is non-nullable but existing rows predate it: add it with a
-# placeholder default, backfill the calendar month end of statement_month for
-# every existing row, then drop the default.
+# statement_date is nullable while the old generators (removed in step 7)
+# can still write rows without it; the forward generator always sets it.
+# Existing rows are backfilled with the calendar month end of
+# statement_month.
 
 import calendar
-from datetime import date
 from decimal import Decimal
 
 import django.db.models.deletion
@@ -56,8 +56,9 @@ class Migration(migrations.Migration):
             model_name='coremonthlystatement',
             name='statement_date',
             field=models.DateField(
-                default=date(1900, 1, 31),
+                blank=True,
                 help_text='RBC statement date; calendar month end for gap and replay rows',
+                null=True,
             ),
         ),
         migrations.AddField(
@@ -102,13 +103,6 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.RunPython(backfill_statement_date, revert_statement_date),
-        migrations.AlterField(
-            model_name='coremonthlystatement',
-            name='statement_date',
-            field=models.DateField(
-                help_text='RBC statement date; calendar month end for gap and replay rows'
-            ),
-        ),
         migrations.CreateModel(
             name='CoreMonthlyStatementPosition',
             fields=[

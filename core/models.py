@@ -892,8 +892,12 @@ class CoreMonthlyStatement(models.Model):
         related_name="core_monthly_statements",
     )
     statement_month = models.DateField(help_text="First day of the month")
+    # Nullable while the old generators (removed in step 7 of the plan) can
+    # still write rows without it; the forward generator always sets it and
+    # migration 0047 backfills existing rows with the month end.
     statement_date = models.DateField(
-        help_text="RBC statement date; calendar month end for gap and replay rows"
+        null=True, blank=True,
+        help_text="RBC statement date; calendar month end for gap and replay rows",
     )
     currency = models.CharField(
         max_length=3,

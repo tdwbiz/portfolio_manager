@@ -302,6 +302,47 @@ def test_fail_month_differs_from_pdf_by_exactly_its_exception(account):
 
 
 @pytest.mark.django_db
+def test_fail_month_does_not_carry_into_next_period(account):
+    # February FAILs its live cash check (an extra CSV dividend the PDF does
+    # not show). The chain re-anchors on the February PDF after every stored
+    # statement, so March starts from the PDF's closing cash (250), not the
+    # replayed 275 — its row equals its PDF to the cent and no mismatch is
+    # reported.
+    jan = make_monthly(account, date(2025, 1, 31), begin=Decimal("100"),
+                       end=Decimal("200"))
+    cash(jan, Decimal("200"))
+    feb = make_monthly(account, date(2025, 2, 28), last_stmt=date(2025, 1, 31),
+                       begin=Decimal("200"), end=Decimal("250"))
+    cash(feb, Decimal("250"))
+    mar = make_monthly(account, date(2025, 3, 31), last_stmt=date(2025, 2, 28),
+                       begin=Decimal("250"), end=Decimal("300"))
+    cash(mar, Decimal("300"))
+    make_tx(account, date(2025, 2, 10), "DEP", Decimal("50"),
+            settlement=date(2025, 2, 12))
+    # The unmatched exception that FAILs February.
+    make_tx(account, date(2025, 2, 17), "DIV", Decimal("25"), symbol="ACME",
+            settlement=date(2025, 2, 17))
+    make_tx(account, date(2025, 3, 10), "DEP", Decimal("50"),
+            settlement=date(2025, 3, 12))
+
+    rows, report = generate_forward_statements(account)
+
+    feb_row = row_by_date(rows, date(2025, 2, 28))
+    # February is replayed (cash 275) and FAILs the live check.
+    assert feb_row.ending_market_value == Decimal("275")
+
+    mar_row = row_by_date(rows, date(2025, 3, 31))
+    # March starts from the February PDF closing cash (250), not 275.
+    assert mar_row.beginning_market_value == Decimal("250")
+    assert mar_row.ending_market_value == mar.end_total_market_value
+
+    # The live verdict is PASS and the row equals the PDF to the cent:
+    # no mismatch reported.
+    assert report["pass_rows"] == 1 and report["pass_match"] == 1
+    assert report["mismatches"] == []
+
+
+@pytest.mark.django_db
 def test_re_run_changes_nothing(account):
     # Applying twice (delete-and-replace) yields byte-identical rows and
     # positions: same values in the same order.

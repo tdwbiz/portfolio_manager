@@ -145,6 +145,26 @@ def _fwd_pdf_pool(group, norm):
     return out
 
 
+def _fwd_pdf_positions(pdf_pool):
+    """The PDF holdings pool as chain state (FIRST / NO_CSV and re-anchor).
+
+    key -> {quantity, price, price_source 'PDF', section, value}; net-zero
+    symbols (the DLR journal) are dropped.
+    """
+    out = {}
+    for key, entry in pdf_pool.items():
+        if entry["quantity"] == 0:
+            continue  # netted to zero (DLR journal) — dropped
+        out[key] = {
+            "quantity": entry["quantity"],
+            "price": entry["price"],
+            "price_source": "PDF",
+            "section": _fwd_section(key, entry, set(), None),
+            "value": entry["market_value"],
+        }
+    return out
+
+
 def _fwd_section(key, pdf_entry, tx_currencies, prev_entry):
     """Currency section for a symbol: where the PDF holds it, else the currency
     of its transactions, else the previous section (decision in the plan)."""
@@ -290,17 +310,7 @@ def generate_forward_statements(
         if all(v.verdict in ("FIRST", "NO_CSV") for v in verdicts.values()):
             # FIRST / NO_CSV: take the PDF figures as they are.
             pdf_pool = _fwd_pdf_pool(group, norm)
-            new_pos = {}
-            for key, entry in pdf_pool.items():
-                if entry["quantity"] == 0:
-                    continue  # netted to zero (DLR journal) — dropped
-                new_pos[key] = {
-                    "quantity": entry["quantity"],
-                    "price": entry["price"],
-                    "price_source": "PDF",
-                    "section": _fwd_section(key, entry, set(), None),
-                    "value": entry["market_value"],
-                }
+            new_pos = _fwd_pdf_positions(pdf_pool)
             for c in sorted(group.rows):
                 r = group.rows[c]
                 cash_end = _cash_closing(r, c) or Decimal("0.00")
@@ -434,12 +444,15 @@ def generate_forward_statements(
                     else:
                         pass_match += 1
 
+            # Re-anchor the chain on this statement's PDF (the docstring's
+            # promise): each period starts from the previous stored PDF
+            # statement, so a FAIL month's replayed drift never carries into
+            # the next period.
             state_cash = {
-                c: state_cash.get(c, Decimal("0.00"))
-                + sum((tx.amount for tx in txs_all if tx.currency == c), Decimal("0.00"))
+                c: (_cash_closing(group.rows[c], c) or Decimal("0.00"))
                 for c in group.rows
             }
-            state_pos = new_pos
+            state_pos = _fwd_pdf_positions(pdf_pool)
             have_anchor = True
 
         # Fill months after this row: gap rows in-span (no PDF, no

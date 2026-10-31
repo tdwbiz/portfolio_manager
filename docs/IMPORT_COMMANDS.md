@@ -149,6 +149,14 @@ python manage.py taxable_events [--account NAME] [--from YYYY-MM] [--to YYYY-MM]
 
 Read-only report gathering the facts for the known gaps in the taxable RBC accounts: non-plain transactions (with reorg subtypes and option-symbol catches), RBF interest rows plus the January 2024–2026 PDF reference rows, per-currency/type counts with USD exchange-rate presence, DLR round-trip rows, symbols held in more than one account in the same month, the TS_HUISGELD 2017-12 and first TS_CAR_LIVING holdings (missing book costs flagged), unexplained PDF book-cost changes, and stored monthly-check verdicts. Default accounts: every TAXABLE account with at least one transaction; `--out` is required and is the only file written — nothing is written to the database. Background: `docs/plans/taxable-events.md`.
 
+### `book_cost_check`
+
+```bash
+python manage.py book_cost_check [--account NAME] [--from YYYY-MM] [--to YYYY-MM] --out FILE
+```
+
+Read-only book-cost check (step 15d): replays each taxable account's transactions RBC-style from its `OpeningPosition` seed — quantity and book cost per security, native currency, no FX, no pooling across accounts — and compares with the book costs printed on the stored RBC monthly PDFs (MATCH / DIFF with the change of the difference since the previous statement, NOT CHECKED after a REORGANIZATION, one-sided securities, flagged rows), plus a summary and the unexplained PDF book-cost candidates. `--from`/`--to` bound which statement dates are compared; the replay always starts from the seed. Default accounts: every TAXABLE account with at least one stored RBC monthly statement; `--out` is required and is the only file written — nothing is written to the database. Background: `docs/plans/book-cost-check.md`.
+
 ## Owners and Opening Positions (step 15c)
 
 ### `set_account_owners`

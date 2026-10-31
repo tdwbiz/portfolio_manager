@@ -417,6 +417,28 @@ def test_coverage_grid_cell_states(authenticated_client):
 
 
 @pytest.mark.django_db
+def test_coverage_resolved_exception_ignored_for_accepted(
+    authenticated_client,
+):
+    a = make_account("ACCOUNT_A", "90000001")
+    # Verdict FAIL with one accepted and one resolved check exception on the
+    # same statement: the resolved one is ignored, so the cell is ACCEPTED.
+    make_result(a, date(2026, 1, 31), "CAD", "FAIL")
+    make_exc(a, date(2026, 1, 31), currency="CAD", status="accepted")
+    make_exc(
+        a, date(2026, 1, 31), kind="CHAIN", status="resolved"
+    )
+
+    response = authenticated_client.get(COVERAGE_URL)
+    rows = {row["account"].name: row for row in response.context["rows"]}
+    cell = next(
+        c for c in rows["ACCOUNT_A"]["cells"] if c["date"] == date(2026, 1, 31)
+    )
+    assert cell["state"] == "ACCEPTED"
+    assert cell["letters"] == "A"
+
+
+@pytest.mark.django_db
 def test_coverage_empty_when_no_results(authenticated_client):
     make_account("ACCOUNT_A", "90000001")
     response = authenticated_client.get(COVERAGE_URL)

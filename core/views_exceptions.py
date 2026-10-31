@@ -238,12 +238,19 @@ def exceptions_coverage(request):
                 state = "GAP"
             else:
                 combined = _combined_verdict([r.verdict for r in pair_results])
-                open_check = any(
-                    e.status == MonthlyException.STATUS_OPEN for e in check_excs
-                )
-                all_accepted = bool(check_excs) and all(
-                    e.status == MonthlyException.STATUS_ACCEPTED
+                # Resolved exceptions are ignored when deciding ACCEPTED.
+                active_check = [
+                    e
                     for e in check_excs
+                    if e.status != MonthlyException.STATUS_RESOLVED
+                ]
+                open_check = any(
+                    e.status == MonthlyException.STATUS_OPEN
+                    for e in active_check
+                )
+                all_accepted = bool(active_check) and all(
+                    e.status == MonthlyException.STATUS_ACCEPTED
+                    for e in active_check
                 )
                 if open_check:
                     state = "FAIL"

@@ -30,8 +30,10 @@ Report sections (numbered as in the task):
 2. **RBF interest rows** — every `Transaction` with `symbol` starting `RBF` in range: date,
    settlement date, quantity, price, amount, notes. Then, per account, the
    `RbcMonthlyTransaction` reference rows of the **January** statements of 2024, 2025 and
-   2026 (rows whose `symbol` starts `RBF` or whose `activity_type` is `INTEREST_RECEIVED`),
-   with date, symbol, quantity, price, debit, credit, description.
+   2026 (rows whose `symbol` starts `RBF`, or whose `activity_type` is
+   `INTEREST_RECEIVED`, or whose `description` contains `INVESTMENT SAVINGS` — PDF rows
+   often carry only the security name, no symbol), with date, symbol, quantity, price,
+   debit, credit, description.
 3. **Currencies** — per account: transaction count per (currency, type); and for USD rows,
    whether an exchange rate is carried: `exchange_rate_cad != 1` (field) or a rate-looking
    token in `notes` (regex `@\s*\d+\.\d+` or `FX`), counted separately.
@@ -152,6 +154,9 @@ Final gate (once, at the end of step 7):
    (`symbol` starts `RBF` or `activity_type = INTEREST_RECEIVED`) rather than the whole
    January statement, keeping the report focused on RBF interest; years fixed at 2024–2026
    as module constants.
+   → **Answered (tdw, Oct 31):** as recommended, but also include rows whose `description`
+   contains `INVESTMENT SAVINGS` (PDF rows often carry only the security name, no symbol).
+   Section 2 above updated accordingly.
 2. **Hard-coded section 6/7 targets.** Sections 6 and 7 name specific accounts/months.
    Recommendation: module-level constants in `core/utils/taxable_events.py`
    (`SECTION6_ACCOUNT="TS_HUISGELD"`, `SECTION6_MONTH="2017-12"`,
@@ -163,3 +168,18 @@ Final gate (once, at the end of step 7):
    does not occur in these statements); note the convention in the report header.
 4. **`--out` required or optional.** `monthly_check` requires `--out` in report mode.
    Recommendation: require it here too — the report is long and stdout-only use is not a goal.
+
+## Decisions (tdw, Oct 31)
+
+Answers to the open questions above:
+
+1. **Section 2 reference rows:** as recommended, but also include rows whose `description`
+   contains `INVESTMENT SAVINGS` — PDF rows often carry only the security name, no symbol.
+   (Section 2 of this plan has been updated to match.)
+2. **Hard-coded section 6/7 targets:** as recommended — module-level constants
+   (`SECTION6_ACCOUNT="TS_HUISGELD"`, `SECTION6_MONTH="2017-12"`,
+   `SECTION7_ACCOUNT="TS_CAR_LIVING"` → first stored statement), one-line "not stored"
+   note when the target is absent, no extra CLI flags.
+3. **Missing book cost:** as recommended — flag `book_cost == 0` as missing; note the
+   convention in the report header.
+4. **`--out`:** as recommended — required.

@@ -79,3 +79,15 @@ tdw accepts the recommended answers to both open questions:
 
 1. **Taxable marker.** Treat only `category == "TAXABLE"` as taxable (`OTHER` stays non-taxable). tdw will confirm in production that `TS_HUISGELD` and `TS_CAR_LIVING` have `category='TAXABLE'`; until then the page degrades gracefully (they just lose the badge), and the IB accounts get it later by setting their category.
 2. **Docs location.** The short "Exceptions page" section goes into `docs/IMPORT_COMMANDS.md` with the three URLs and the accept/reopen rules, pointing at the plans for background.
+
+## Fixes after review (tdw, Oct 30)
+
+tdw reviewed the three pages on real data; browser tests pass (68). Seven fixes, one commit each, `tests/test_exceptions_page.py` updated or extended per item, nothing else changed, no migrations:
+
+1. **Rename "Kind" to "Exception Type"** in the list's column header, the filter label, the dropdown's first option (`— All exception types —`) and the detail page's row label. The GET parameter stays `kind`.
+2. **Replace the statement_date filter with a month filter:** GET parameter `month=YYYY-MM`, an `<input type="month">` labelled "Statement month", filtering on the statement date's year and month; an invalid value is ignored. The coverage grid's cell links use `account` and `month` instead of `statement_date`. Update the `docs/IMPORT_COMMANDS.md` section.
+3. **Status counts follow every filter except status:** with `status=open` selected, the accepted and resolved counts still show their real numbers. Test it.
+4. **Success messages** read `Exception accepted: <reason>` and `Exception reopened: <reason>` (the reopen message currently says "reopend").
+5. **Coverage grid: resolved exceptions are ignored when deciding ACCEPTED** — a cell whose verdict is FAIL and whose non-resolved CASH/CHAIN/QUANTITY exceptions are all accepted shows ACCEPTED. Test with one accepted and one resolved exception on the same statement.
+6. **Coverage grid columns:** add the statement dates of IMPORT exceptions to the dates from `MonthlyCheckResult`, so a parked file's `i` marker always shows (a gap cell with the marker). Test with an IMPORT date that no result has.
+7. **Coverage grid order:** newest first — years descending left to right, dates descending within each year; rows only for accounts that have at least one `MonthlyCheckResult` or `MonthlyException`, taxable first, then name. Tests.

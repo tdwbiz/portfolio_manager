@@ -481,6 +481,67 @@ def test_historical_price_never_used_without_currency(account):
 
 
 @pytest.mark.django_db
+def test_no_row_after_last_pdf_when_csv_ends_before_month_end(account):
+    # Last PDF 2026-07-31 and last CSV trade dated 2026-07-31 (a SELL that
+    # settles 2026-08-03): the CSV does not cover August in full (export end
+    # by Transaction.date before the month end), so no August row — the sell
+    # stays unplaced until a later PDF or CSV covers August (decision 14).
+    jun = make_monthly(account, date(2026, 6, 30), begin=Decimal("100"),
+                       end=Decimal("200"))
+    cash(jun, Decimal("200"))
+    jul = make_monthly(account, date(2026, 7, 31), last_stmt=date(2026, 6, 30),
+                       begin=Decimal("200"), end=Decimal("250"))
+    cash(jul, Decimal("150"))
+    holding(jul, "ACME", Decimal("10"), Decimal("10.0000"), Decimal("100"))
+    make_tx(account, date(2026, 7, 31), "SELL", Decimal("50"), symbol="ACME",
+            qty=Decimal("-5"), settlement=date(2026, 8, 3))
+
+    rows, report = generate_forward_statements(account)
+
+    assert [r.statement_date for r in rows] == [
+        date(2026, 6, 30), date(2026, 7, 31)]
+    # The sell (effective 2026-08-03) is not placed in the July row either.
+    jul_row = row_by_date(rows, date(2026, 7, 31))
+    assert jul_row.total_sells == Decimal("0")
+
+
+@pytest.mark.django_db
+def test_row_after_last_pdf_when_csv_covers_whole_month(account):
+    # Same as above plus a CSV trade dated 2026-08-31: the CSV now covers
+    # August in full, so an August REPLAY row is emitted and it includes the
+    # sell that settled 2026-08-03 (decision 14). No September row — the
+    # export ends 2026-08-31.
+    jun = make_monthly(account, date(2026, 6, 30), begin=Decimal("100"),
+                       end=Decimal("200"))
+    cash(jun, Decimal("200"))
+    jul = make_monthly(account, date(2026, 7, 31), last_stmt=date(2026, 6, 30),
+                       begin=Decimal("200"), end=Decimal("250"))
+    cash(jul, Decimal("150"))
+    holding(jul, "ACME", Decimal("10"), Decimal("10.0000"), Decimal("100"))
+    make_tx(account, date(2026, 7, 31), "SELL", Decimal("50"), symbol="ACME",
+            qty=Decimal("-5"), settlement=date(2026, 8, 3))
+    make_tx(account, date(2026, 8, 31), "DEP", Decimal("50"))
+
+    rows, report = generate_forward_statements(account)
+
+    assert [r.statement_date for r in rows] == [
+        date(2026, 6, 30), date(2026, 7, 31), date(2026, 8, 31)]
+    aug = row_by_date(rows, date(2026, 8, 31))
+    assert aug.source == "REPLAY"
+    # The August row includes the sell (effective 2026-08-03) and the
+    # deposit dated 2026-08-31: cash 150 + 50 + 50 = 250, ACME 5 @ 10 = 50.
+    assert aug.total_sells == Decimal("50")
+    assert aug.total_deposits == Decimal("50")
+    assert aug.total_transactions == 2
+    assert aug.net_flow == Decimal("100")
+    assert (aug.beginning_market_value, aug.ending_market_value) == (
+        Decimal("250"), Decimal("300"))
+    (aug_pos,) = aug.positions
+    assert (aug_pos.symbol, aug_pos.quantity, aug_pos.price_source) == (
+        "ACME", Decimal("5"), "LAST_PDF")
+
+
+@pytest.mark.django_db
 def test_re_run_changes_nothing(account):
     # Applying twice (delete-and-replace) yields byte-identical rows and
     # positions: same values in the same order.

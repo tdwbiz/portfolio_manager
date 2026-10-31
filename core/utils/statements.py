@@ -15,13 +15,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Max, Sum
 
 from core.models import (
     Account,
     CoreAnnualReport,
     CoreMonthlyStatement,
     RbcMonthlyHolding,
+    Transaction,
 )
 from core.utils.monthly_check import (
     _cash_closing,
@@ -35,11 +36,6 @@ from core.utils.monthly_check import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _month_start(d: date) -> date:
-    """Return the first day of the month for a given date."""
-    return d.replace(day=1)
 
 
 def _month_end(d: date) -> date:
@@ -235,10 +231,13 @@ def generate_forward_statements(
     closing balance) and replays the period's transactions exactly like
     ``monthly_check``. FIRST / NO_CSV statements take the PDF figures as-is
     (source=PDF); months with no PDF statement and no transactions get GAP
-    rows at the calendar month end; after the last PDF statement every
-    calendar month up to the last CSV effective date gets a row (GAP or
-    REPLAY) until both holdings and cash are zero. Positions are netted per
-    account (the DLR journal nets to zero and drops out).
+    rows at the calendar month end; after the last PDF statement a row is
+    emitted for a calendar month only when the CSV covers that whole month —
+    the last CSV trade date (``Transaction.date``, the export end, not the
+    settlement-based effective date) on or after the month end — GAP when it
+    has no transactions, REPLAY when it does (decision 14), until both
+    holdings and cash are zero. Positions are netted per account (the DLR
+    journal nets to zero and drops out).
 
     Returns ``(rows, report)``: rows is a list of ForwardStatementRow (filtered
     to ``from_date``..``to_date`` on statement_date when given — the chain is
@@ -249,6 +248,13 @@ def generate_forward_statements(
     prev_of = previous_groups(groups)
     bounds = csv_coverage_bounds()
     last_csv_date = bounds[1]
+    # End of the CSV export by trade date (Transaction.date), not the
+    # settlement-based effective date: a row after the last PDF statement is
+    # only emitted for calendar months the CSV covers in full — the export
+    # end on or after the month end (decision 14). Trades dated before the
+    # export end that settle later stay unplaced until a later PDF or CSV
+    # covers their settlement month.
+    last_csv_export_end = Transaction.objects.aggregate(last=Max("date"))["last"]
     norm = make_symbol_key(account.pk)
 
     rows: list[ForwardStatementRow] = []
@@ -470,8 +476,12 @@ def generate_forward_statements(
             if next_pdf_date is not None:
                 if month_end >= next_pdf_date:
                     break
-            elif _month_start(month_end) > last_csv_date:
-                break  # past the month containing the last CSV date
+            elif last_csv_export_end is None or last_csv_export_end < month_end:
+                # The CSV does not cover this whole calendar month (the
+                # export end by trade date is before the month end): no row —
+                # trades settling in it stay unplaced until a later PDF or
+                # CSV covers the month (decision 14).
+                break
             if state_is_zero():
                 break  # no rows once holdings and cash are both zero
             txs_m = period_transactions(account.pk, None, anchor_date, month_end)

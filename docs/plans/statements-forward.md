@@ -211,3 +211,16 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
     PDF price (`price_source=LAST_PDF`), and GAP rows carry positions as
     LAST_PDF, never PDF. The report keeps `history_priced_rows` (always 0
     until step 16) for output compatibility.
+
+## Decisions (tdw, dry run on mercury, Oct 31)
+
+14. **Rows after the last PDF statement need whole-month CSV coverage** —
+    after an account's last stored PDF statement, a row (GAP or REPLAY) is
+    emitted for a calendar month only when the CSV covers that whole month,
+    i.e. the last CSV transaction date by `Transaction.date` (the export end,
+    not the settlement-based effective date) is on or after that month end.
+    With today's data the CSV ends 2026-07-31 and the last PDFs are dated
+    2026-07-31, so no account may get a row after July 2026; trades dated up
+    to 2026-07-31 that settle in August stay unplaced until a later PDF or
+    CSV covers August. This refines decision 3's "up to the last CSV date"
+    (which read the settlement-based effective date).

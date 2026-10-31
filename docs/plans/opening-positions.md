@@ -32,7 +32,8 @@ Lay the data foundation for opening ACB (architecture §8, clean-up step 15):
   `share_percent` Decimal(5,2). `unique_together = [("account", "owner")]`.
 - `OpeningPosition` (`core_opening_position`):
   - `account` FK → `Account`;
-  - `statement` FK → `RbcMonthly`, **null/blank** (null for `MANUAL` rows entered with `--set`);
+  - `statement` FK → `RbcMonthly`, **null/blank** (nullable for later IB rows; `--set`
+  keeps the existing row's statement link — see Decisions, Q1);
   - `symbol` CharField(50); `security_name` CharField(200, blank);
   - `currency` CharField(3);
   - `quantity` Decimal(12,4); `book_cost` Decimal(15,2) — in the currency section's currency;
@@ -77,7 +78,8 @@ Two modes, both dry run unless `--apply`.
   are not allowed with `--set`.
 - Refuses if no `OpeningPosition` exists for that (account, symbol, currency) — this
   command only overrides existing rows.
-- Updates `book_cost`, `note` (if given) and sets `source=MANUAL`; `updated_at` refreshes.
+- Updates `book_cost`, `note` (if given) and sets `source=MANUAL`; the existing row's
+  `statement` link is kept unchanged; `updated_at` refreshes.
 
 ## Out of scope
 
@@ -156,3 +158,15 @@ Use the fake accounts `90000001`–`90000008` (`Account` rows with fingerprints,
 4. **Duplicate symbols across currency sections** (e.g. a CAD and a USD row for the
    same ticker): the unique key includes currency, so both are stored.
    **Recommended: keep it**, and print both rows in the summary so a human can spot it.
+
+## Decisions (tdw, Oct 31)
+
+1. `OpeningPosition.statement` **is nullable** (`null=True, blank=True`) — needed for
+   later IB rows. But `--set` **keeps the existing row's statement link** and only
+   changes book cost, source and note.
+2. `--set` **refuses if the row does not exist** (as recommended); creating positions
+   from scratch is a later step's job.
+3. `--replace` does **not** skip the "transactions on or before the statement date"
+   refusal (as recommended) — the guard applies in both modes.
+4. Duplicate symbols across currency sections are **both stored** (unique key includes
+   currency, as recommended), and both rows are printed in the summary.

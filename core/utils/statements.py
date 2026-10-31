@@ -574,8 +574,12 @@ def generate_forward_statements(
                 }
                 state_pos = new_pos_m
                 anchor_date = month_end
-            # else: an in-span month with transactions — no row; its
-            # transactions belong to the next PDF statement's period.
+            else:
+                # An in-span month with transactions — no row; its
+                # transactions belong to the next PDF statement's period.
+                # Advance the anchor or the loop would re-test this month
+                # forever (found by the step 8 tests).
+                anchor_date = month_end
 
     report = {
         "account_name": account.name,

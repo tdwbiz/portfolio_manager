@@ -281,6 +281,27 @@ def test_accept_reopen_refused_on_wrong_status(authenticated_client):
 
 
 @pytest.mark.django_db
+def test_kind_renamed_to_exception_type(authenticated_client):
+    a = make_account("ACCOUNT_A", "90000001")
+    exc = make_exc(a, date(2026, 1, 31))
+
+    list_body = html(authenticated_client.get(LIST_URL))
+    # Column header, filter label and the dropdown's first option.
+    assert "<th>Exception Type</th>" in list_body
+    assert (
+        '<label for="id_kind" class="form-label">Exception Type</label>'
+        in list_body
+    )
+    assert "\u2014 All exception types \u2014" in list_body
+    assert "All kinds" not in list_body
+    # The GET parameter stays kind.
+    assert 'name="kind"' in list_body
+
+    detail_body = html(authenticated_client.get(f"/exceptions/{exc.pk}/"))
+    assert "<tr><th>Exception Type</th>" in detail_body
+
+
+@pytest.mark.django_db
 def test_detail_unknown_id_is_404(authenticated_client):
     response = authenticated_client.get("/exceptions/99999/")
     assert response.status_code == 404

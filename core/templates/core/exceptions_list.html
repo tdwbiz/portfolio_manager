@@ -27,9 +27,9 @@
                 </select>
             </div>
             <div class="col-auto">
-                <label for="id_kind" class="form-label">Kind</label>
+                <label for="id_kind" class="form-label">Exception Type</label>
                 <select name="kind" id="id_kind" class="form-select">
-                    <option value="">— All kinds —</option>
+                    <option value="">— All exception types —</option>
                     {% for value, label in kind_choices %}
                     <option value="{{ value }}" {% if filters.kind == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -80,7 +80,7 @@
                     <tr>
                         <th>Account</th>
                         <th>Statement date</th>
-                        <th>Kind</th>
+                        <th>Exception Type</th>
                         <th>Currency</th>
                         <th>Ref</th>
                         <th class="text-end">Difference</th>

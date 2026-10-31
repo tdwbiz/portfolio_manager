@@ -171,3 +171,14 @@ All existing columns stay and keep being filled (`total_dividends` = DIV+DIST,
    working off the rows.
 6. **The generate-monthly-statements page** — accept: keep as a read-only display; remove
    the regenerate/batch buttons and delete the reverse-statements page.
+
+## Decisions (tdw, step 7 stop)
+
+7. **`AnnualReportGenerationTests.test_generate_annual_from_monthly`** — adapt it: build its
+   `CoreMonthlyStatement` rows directly in its setup instead of calling
+   `generate_monthly_statements`; keep the test and its assertions.
+8. **The four calls at the step 7 stop are accepted as they are**: per-currency money is
+   native `tx.amount`; WITHTAX counts in `total_tax`; a new symbol with no PDF holding and
+   no historical close falls back to the last trade price with the row marked stale
+   (`price_source=LAST_PDF`, `has_stale_prices`); `--apply` with `--from/--to` only replaces
+   rows inside the window. `statement_date` stays nullable.

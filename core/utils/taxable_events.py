@@ -438,11 +438,105 @@ def section_7_first_statement(account_name=SECTION7_ACCOUNT):
     return lines
 
 
+# Section 8 tolerance: PDF quantities are stored at 4 dp (monthly_check
+# decision 3), so 'quantity did not change' allows that granularity.
+QTY_TOL = Decimal("0.0001")
+
+
+def _book_cost_map(stmt, norm):
+    """{normalised symbol: (quantity, book_cost)} pooled over one statement."""
+    out = {}
+    for h in stmt.holdings.all():
+        sym = (h.symbol or "").strip()
+        if not sym:
+            sym = normalize_option_text(h.security) or f"(no symbol: {h.security})"
+        key = norm(sym)
+        qty, cost = out.get(key, (Decimal("0"), Decimal("0")))
+        out[key] = (qty + h.quantity, cost + h.book_cost)
+    return out
+
+
 def section_8_book_cost_changes(accounts, month_start, month_end):
-    """Section 8: PDF book-cost changes with no quantity change and no transaction."""
-    return []
+    """Section 8: unexplained PDF book-cost changes.
+
+    Between consecutive stored RbcMonthly statements per account+currency
+    (ordered by statement_date): a symbol whose book_cost changed but whose
+    quantity did not is reported when no transaction of that symbol falls in
+    (prev_date, cur_date]. Period membership uses period_transactions and
+    symbol matching make_symbol_key from monthly_check — not copied here.
+    Reported per account, symbol and year of the later statement.
+    """
+    lines = []
+    for account in accounts:
+        norm = make_symbol_key(account.pk)
+        stmts = (
+            RbcMonthly.objects.filter(account=account)
+            .order_by("statement_date", "currency", "pk")
+        )
+        by_currency = {}
+        for stmt in stmts:
+            if not _in_range(stmt.statement_date, month_start, month_end):
+                continue
+            by_currency.setdefault(stmt.currency, []).append(stmt)
+        for currency in sorted(by_currency):
+            rows = by_currency[currency]
+            for prev_stmt, cur_stmt in zip(rows, rows[1:]):
+                prev_map = _book_cost_map(prev_stmt, norm)
+                cur_map = _book_cost_map(cur_stmt, norm)
+                txs = period_transactions(
+                    account.pk,
+                    currency,
+                    prev_stmt.statement_date,
+                    cur_stmt.statement_date,
+                )
+                tx_keys = set()
+                for tx in txs:
+                    raw = (tx.symbol or "").strip() or "(no symbol)"
+                    tx_keys.add(norm(raw))
+                for key in sorted(set(prev_map) & set(cur_map)):
+                    prev_qty, prev_cost = prev_map[key]
+                    cur_qty, cur_cost = cur_map[key]
+                    if abs(cur_qty - prev_qty) > QTY_TOL:
+                        continue
+                    if cur_cost == prev_cost:
+                        continue
+                    if key in tx_keys:
+                        continue
+                    lines.append(
+                        f"  {account.name} {cur_stmt.statement_date.year} "
+                        f"[{currency}] {key}: book cost {prev_cost} -> {cur_cost} "
+                        f"(qty {cur_qty}) between {prev_stmt.statement_date} "
+                        f"and {cur_stmt.statement_date}, no transaction in period"
+                    )
+    return lines
 
 
 def section_9_stored_verdicts(account_name=SECTION9_ACCOUNT, months=SECTION9_MONTHS):
-    """Section 9: stored MonthlyCheckResult rows for the fixed target months."""
-    return []
+    """Section 9: stored monthly-check verdicts for the fixed target months.
+
+    Default target TS_CAR_LIVING, statement_date in 2021-06 or 2024-05
+    (module constants). Statement date, currency, verdict and notes per row;
+    a one-line note when none is stored.
+    """
+    lines = []
+    for month in months:
+        year, mon = (int(part) for part in month.split("-"))
+        rows = (
+            MonthlyCheckResult.objects.filter(
+                account__name=account_name,
+                statement_date__year=year,
+                statement_date__month=mon,
+            )
+            .order_by("currency", "pk")
+        )
+        for row in rows:
+            line = (
+                f"  {account_name} {row.statement_date} [{row.currency}] "
+                f"{row.verdict}"
+            )
+            if row.notes:
+                line += f" — {row.notes}"
+            lines.append(line)
+    if not lines:
+        return [f"  {account_name}: no stored verdicts for {', '.join(months)}"]
+    return lines

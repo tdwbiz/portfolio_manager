@@ -13,20 +13,22 @@ from django.db import migrations, models
 
 
 def backfill_statement_date(apps, schema_editor):
+    # Read the keys first (no full-row iteration while updating), then
+    # bulk_update in batches of 200 — SQL Server allows 2,100 parameters per
+    # statement.
     Statement = apps.get_model("core", "CoreMonthlyStatement")
-    rows = []
-    for row in Statement.objects.iterator():
-        last_day = calendar.monthrange(
-            row.statement_month.year, row.statement_month.month
-        )[1]
-        rows.append(
-            Statement(
-                pk=row.pk,
-                statement_date=row.statement_month.replace(day=last_day),
-            )
+    updates = []
+    for pk, statement_month in Statement.objects.values_list(
+        "pk", "statement_month"
+    ):
+        last_day = calendar.monthrange(statement_month.year, statement_month.month)[1]
+        row = Statement(pk=pk)
+        row.statement_date = statement_month.replace(day=last_day)
+        updates.append(row)
+    for i in range(0, len(updates), 200):
+        Statement.objects.bulk_update(
+            updates[i : i + 200], ["statement_date"], batch_size=200
         )
-    if rows:
-        Statement.objects.bulk_update(rows, ["statement_date"])
 
 
 def revert_statement_date(apps, schema_editor):

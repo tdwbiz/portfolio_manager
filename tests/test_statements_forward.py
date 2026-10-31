@@ -302,6 +302,41 @@ def test_fail_month_differs_from_pdf_by_exactly_its_exception(account):
 
 
 @pytest.mark.django_db
+def test_migration_0047_backfill_statement_date(account):
+    # Migration 0047 is not applied on mercury yet: its backfill reads the
+    # (pk, statement_month) keys first and bulk_updates in batches of 200
+    # (SQL Server allows 2,100 parameters per statement). More than 200 rows
+    # forces a second batch.
+    import calendar
+    import importlib
+
+    mod = importlib.import_module(
+        "core.migrations.0047_coremonthlystatement_source_and_more"
+    )
+    months = [date(2000 + i // 12, i % 12 + 1, 1) for i in range(250)]
+    CoreMonthlyStatement.objects.bulk_create(
+        CoreMonthlyStatement(
+            account=account, statement_month=m, currency="CAD",
+            statement_date=None,
+        )
+        for m in months
+    )
+
+    class FakeApps:
+        def get_model(self, app_label, model_name):
+            return CoreMonthlyStatement
+
+    mod.backfill_statement_date(FakeApps(), None)
+
+    assert CoreMonthlyStatement.objects.filter(
+        statement_date__isnull=True).count() == 0
+    for m in months:
+        row = CoreMonthlyStatement.objects.get(account=account, statement_month=m)
+        last_day = calendar.monthrange(m.year, m.month)[1]
+        assert row.statement_date == m.replace(day=last_day)
+
+
+@pytest.mark.django_db
 def test_gap_fill_starts_after_the_anchor_month(account):
     # Statements dated Friday 2026-01-30 and 2026-03-31: the anchor's own
     # month already has a row, so gap fill starts in the calendar month

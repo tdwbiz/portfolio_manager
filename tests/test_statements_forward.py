@@ -440,6 +440,47 @@ def test_fail_month_does_not_carry_into_next_period(account):
 
 
 @pytest.mark.django_db
+def test_historical_price_never_used_without_currency(account):
+    # HistoricalPrice records no currency, so it is never used: a position
+    # with no PDF holding prices from the last known PDF price (LAST_PDF),
+    # and GAP rows carry positions as LAST_PDF, never PDF.
+    from core.models import HistoricalPrice
+
+    jan = make_monthly(account, date(2025, 1, 31), begin=Decimal("200"),
+                       end=Decimal("200"))
+    cash(jan, Decimal("100"))
+    holding(jan, "ACME", Decimal("10"), Decimal("10.0000"), Decimal("100"))
+    mar = make_monthly(account, date(2025, 3, 31), last_stmt=date(2025, 1, 31),
+                       begin=Decimal("200"), end=Decimal("50"))
+    cash(mar, Decimal("50"))
+    # Sell half of ACME in March (no February or March PDF holding): the
+    # March REPLAY row must price the remainder from the last PDF price,
+    # not the historical close.
+    make_tx(account, date(2025, 3, 5), "SELL", Decimal("50"), symbol="ACME",
+            qty=Decimal("-5"), settlement=date(2025, 3, 7))
+    HistoricalPrice.objects.create(
+        symbol="ACME", date=date(2025, 3, 28), close=Decimal("99.000000"))
+
+    rows, report = generate_forward_statements(account)
+
+    gap = row_by_date(rows, date(2025, 2, 28))
+    assert gap.source == "GAP"
+    (gap_pos,) = gap.positions
+    assert (gap_pos.symbol, gap_pos.quantity) == ("ACME", Decimal("10"))
+    assert gap_pos.price_source == "LAST_PDF"
+    assert gap.has_stale_prices
+
+    replay = row_by_date(rows, date(2025, 3, 31))
+    (replay_pos,) = replay.positions
+    assert (replay_pos.quantity, replay_pos.price) == (
+        Decimal("5"), Decimal("10.0000"))
+    assert replay_pos.price_source == "LAST_PDF"
+
+    # HistoricalPrice is never consulted: no row is priced from history.
+    assert report["history_priced_rows"] == 0
+
+
+@pytest.mark.django_db
 def test_re_run_changes_nothing(account):
     # Applying twice (delete-and-replace) yields byte-identical rows and
     # positions: same values in the same order.

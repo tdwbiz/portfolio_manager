@@ -21,7 +21,6 @@ from core.models import (
     Account,
     CoreAnnualReport,
     CoreMonthlyStatement,
-    HistoricalPrice,
     RbcMonthlyHolding,
 )
 from core.utils.monthly_check import (
@@ -218,17 +217,11 @@ class ForwardStatementRow:
     positions: list = field(default_factory=list)  # [ForwardPosition]
 
 
-def _fwd_history_close(symbol, on_date, cache):
-    """Latest HistoricalPrice close at or before on_date for symbol, else None."""
-    key = (symbol, on_date)
-    if key not in cache:
-        row = (
-            HistoricalPrice.objects.filter(symbol=symbol, date__lte=on_date)
-            .order_by("-date")
-            .first()
-        )
-        cache[key] = None if row is None else row.close
-    return cache[key]
+# HistoricalPrice is deliberately NOT used for pricing: it records no
+# currency, so a close cannot be matched to the row's section currency
+# (symbol mapping is step 16 of the clean-up). Positions without a PDF
+# holding price from the last known PDF price (LAST_PDF); GAP rows carry
+# positions as LAST_PDF, never PDF.
 
 
 def generate_forward_statements(
@@ -257,13 +250,14 @@ def generate_forward_statements(
     bounds = csv_coverage_bounds()
     last_csv_date = bounds[1]
     norm = make_symbol_key(account.pk)
-    hist_cache: dict = {}
 
     rows: list[ForwardStatementRow] = []
     counts = {"REPLAY": 0, "PDF": 0, "GAP": 0}
     mismatches: list[tuple[date, str, Decimal]] = []
     pass_rows = 0
     pass_match = 0
+    # Always 0 until HistoricalPrice carries a currency (symbol mapping is
+    # step 16); kept in the report for output compatibility.
     history_priced_rows = 0
     stale_rows = 0
 
@@ -274,15 +268,13 @@ def generate_forward_statements(
 
     def emit(row):
         """Add the row to the (date-filtered) output; True when emitted."""
-        nonlocal history_priced_rows, stale_rows
+        nonlocal stale_rows
         if from_date is not None and row.statement_date < from_date:
             return False
         if to_date is not None and row.statement_date > to_date:
             return False
         rows.append(row)
         counts[row.source] += 1
-        if any(p.price_source == "HISTORY" for p in row.positions):
-            history_priced_rows += 1
         if row.has_stale_prices:
             stale_rows += 1
         return True
@@ -377,14 +369,15 @@ def generate_forward_statements(
                         pdf_entry["market_value"],
                     )
                 else:
-                    close = _fwd_history_close(key, period_end, hist_cache)
-                    if close is not None:
-                        price, psrc = close, "HISTORY"
-                    elif prev_entry is not None:
+                    # No holding on this statement: the last known PDF price
+                    # (LAST_PDF). HistoricalPrice is never used — it records
+                    # no currency, so a close cannot be matched to the row's
+                    # section currency (symbol mapping is step 16).
+                    if prev_entry is not None:
                         price, psrc = prev_entry["price"], "LAST_PDF"
                     else:
-                        # New symbol never seen in a PDF and no historical
-                        # close: fall back to the last trade price, stale.
+                        # New symbol never seen in a PDF: fall back to the
+                        # last trade price, stale.
                         priced = [
                             tx for tx in txs_all
                             if norm((tx.symbol or "").strip() or "(no symbol)") == key
@@ -491,7 +484,10 @@ def generate_forward_statements(
                             symbol=key,
                             quantity=e["quantity"],
                             price=e["price"],
-                            price_source=e["price_source"],
+                            # Carried prices are stale by definition: a GAP
+                            # row is priced from the last known PDF price,
+                            # never PDF.
+                            price_source="LAST_PDF",
                             value=e["value"],
                         )
                         for key, e in sorted(state_pos.items())
@@ -527,10 +523,10 @@ def generate_forward_statements(
                     if qty == 0:
                         continue
                     prev_entry = state_pos.get(key)
-                    close = _fwd_history_close(key, month_end, hist_cache)
-                    if close is not None:
-                        price, psrc = close, "HISTORY"
-                    elif prev_entry is not None:
+                    # Last known PDF price (LAST_PDF); HistoricalPrice is
+                    # never used — it records no currency (symbol mapping is
+                    # step 16).
+                    if prev_entry is not None:
                         price, psrc = prev_entry["price"], "LAST_PDF"
                     else:
                         priced = [

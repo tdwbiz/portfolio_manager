@@ -448,13 +448,48 @@ def test_coverage_import_date_without_result_is_gap_with_marker(
     make_exc(a, date(2026, 2, 28), kind="IMPORT", ref="ab12cd34")
 
     response = authenticated_client.get(COVERAGE_URL)
-    assert response.context["dates"] == [date(2026, 1, 31), date(2026, 2, 28)]
+    # Newest first (fix 7).
+    assert response.context["dates"] == [date(2026, 2, 28), date(2026, 1, 31)]
     rows = {row["account"].name: row for row in response.context["rows"]}
     cell = next(
         c for c in rows["ACCOUNT_A"]["cells"] if c["date"] == date(2026, 2, 28)
     )
     assert cell["state"] == "GAP"
     assert cell["letters"] == "\u00b7 i"
+
+
+@pytest.mark.django_db
+def test_coverage_order_newest_first_and_only_accounts_with_data(
+    authenticated_client,
+):
+    tax = make_account("ACCOUNT_T", "90000007", category="TAXABLE")
+    plain = make_account("ACCOUNT_P", "90000008")
+    empty = make_account("ACCOUNT_E", "90000003")
+
+    make_result(tax, date(2025, 12, 31), "CAD", "PASS")
+    make_result(tax, date(2026, 1, 31), "CAD", "PASS")
+    make_result(tax, date(2026, 2, 28), "CAD", "PASS")
+    # An exception-only account (no result) still gets a row.
+    make_exc(plain, date(2026, 2, 28))
+
+    response = authenticated_client.get(COVERAGE_URL)
+    # Dates newest first: descending within each year, years in the same
+    # order left to right.
+    assert response.context["dates"] == [
+        date(2026, 2, 28),
+        date(2026, 1, 31),
+        date(2025, 12, 31),
+    ]
+    # Year headers descending left to right.
+    assert [year for year, _ in response.context["year_groups"]] == [
+        2026,
+        2025,
+    ]
+
+    # Rows only for accounts with a result or an exception; taxable first,
+    # then name (ACCOUNT_E has neither and is absent).
+    names = [r["account"].name for r in response.context["rows"]]
+    assert names == ["ACCOUNT_T", "ACCOUNT_P"]
 
 
 @pytest.mark.django_db

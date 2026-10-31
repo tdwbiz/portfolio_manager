@@ -209,8 +209,11 @@ def exceptions_coverage(request):
 
     Exactly two data queries: all MonthlyCheckResult rows and all
     MonthlyException rows (each select_related("account")); the grid is
-    built in Python. Rows are all accounts, taxable first then by name;
-    columns are every statement_date present in MonthlyCheckResult.
+    built in Python. Rows are the accounts that have at least one
+    MonthlyCheckResult or MonthlyException, taxable first then by name;
+    columns are the statement dates from MonthlyCheckResult plus IMPORT
+    exception dates, newest first (years descending left to right, dates
+    descending within each year).
     """
     results = list(MonthlyCheckResult.objects.select_related("account"))
     exceptions = list(MonthlyException.objects.select_related("account"))
@@ -230,11 +233,17 @@ def exceptions_coverage(request):
             e.statement_date
             for e in exceptions
             if e.kind == MonthlyException.KIND_IMPORT
-        }
+        },
+        reverse=True,
     )
 
+    active_account_ids = {r.account_id for r in results} | {
+        e.account_id for e in exceptions
+    }
     rows = []
-    for acct in Account.objects.order_by("name"):
+    for acct in (
+        Account.objects.filter(pk__in=active_account_ids).order_by("name")
+    ):
         taxable = acct.category == "TAXABLE"
         cells = []
         for d in dates:
